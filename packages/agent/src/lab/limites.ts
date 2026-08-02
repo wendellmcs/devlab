@@ -1,4 +1,5 @@
 import type Docker from 'dockerode'
+import { config } from '../config.ts'
 import type { ConfigLab } from '../conteudo/schema.ts'
 
 /**
@@ -22,13 +23,32 @@ export const CAPACIDADES_BASE = [
 
 const MB = 1024 * 1024
 
+/**
+ * Cota de disco: opcional, e a razão é honesta.
+ *
+ * RAM, CPU e PIDs têm teto; a camada gravável do container NÃO tem. Um
+ * `dd if=/dev/zero of=arquivo` — comando que a própria trilha ensina — grava
+ * direto no disco do host em /var/lib/docker até enchê-lo. É a única exaustão
+ * de recurso que sobra ao aluno.
+ *
+ * Não dá para ligar por padrão: `StorageOpt.size` no overlay2 exige XFS com a
+ * opção de montagem `pquota`, e no ext4 — o caso comum, inclusive no WSL2 — o
+ * daemon RECUSA o container com "--storage-opt is supported only for overlay
+ * over xfs with 'pquota' mount option". Ligar sem checar trocaria um risco raro
+ * por um lab que não sobe em máquina nenhuma.
+ *
+ * Quem tem o sistema de arquivos certo liga com DEVLAB_LIMITE_DISCO=10g.
+ */
 export function montarHostConfig(lab: ConfigLab): Docker.HostConfig {
   const memoria = lab.limites.memoria_mb * MB
   const extras = lab.capacidades
     .map((c) => c.toUpperCase().replace(/^CAP_/, ''))
     .filter((c) => !(CAPACIDADES_BASE as readonly string[]).includes(c))
 
+  const disco = config.limiteDisco
+
   return {
+    ...(disco === undefined ? {} : { StorageOpt: { size: disco } }),
     Memory: memoria,
     // Igual a Memory: o lab não escapa para swap e o limite é o limite.
     MemorySwap: memoria,

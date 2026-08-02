@@ -85,14 +85,19 @@ export class Roteador {
       return
     }
 
+    // Anti-DNS-rebinding, em TODO método. Sem isto no GET, uma página hostil
+    // cujo domínio resolva para 127.0.0.1 vira same-origin no browser (CORS
+    // sai de cena) e lê `/api/doctor`, `/api/progresso` e a árvore de arquivos
+    // do container. GET não muda estado, mas vaza — e vazar também conta.
+    if (!hostPermitido(req.headers.host)) {
+      responder(res, 403, { erro: 'host não permitido', codigo: 'host_recusado' })
+      return
+    }
+
     // Guarda de CSRF para tudo que muda estado. O browser sempre manda
     // `Origin` em POST/DELETE, inclusive same-origin; um formulário hostil
     // chega com a origem do site dele e é recusado aqui. Cliente que não é
     // browser (curl, script) não manda `Origin` — e não é vetor de CSRF.
-    if (metodo !== 'GET' && !hostPermitido(req.headers.host)) {
-      responder(res, 403, { erro: 'host não permitido', codigo: 'host_recusado' })
-      return
-    }
     if (
       metodo !== 'GET' &&
       req.headers.origin !== undefined &&

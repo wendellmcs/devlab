@@ -62,8 +62,15 @@ if [ -d "$DESTINO/.git" ]; then
   if ! git -C "$DESTINO" fetch --depth 1 origin "$REF" 2>/dev/null; then
     abortar "não consegui atualizar a partir de $REPO (ref '$REF'). Verifique a conexão."
   fi
-  git -C "$DESTINO" checkout -q --detach "FETCH_HEAD"
+  # Aterrissar num BRANCH local, não em HEAD destacado. Com HEAD destacado o
+  # `git pull --ff-only` de `devlab atualizar` morre com "You are not currently
+  # on a branch" — então rodar o instalador duas vezes quebrava o comando de
+  # atualização. `checkout -B` cria ou mexe o branch para o commit buscado.
+  git -C "$DESTINO" checkout -q -B "$REF" FETCH_HEAD
   git -C "$DESTINO" reset -q --hard FETCH_HEAD
+  # Sem upstream configurado o `git pull --ff-only` também não sabe de onde
+  # puxar. Um clone --depth 1 fresco já vem com isto; o caminho de update não.
+  git -C "$DESTINO" branch --set-upstream-to "origin/$REF" "$REF" >/dev/null 2>&1 || true
 elif [ -e "$DESTINO" ]; then
   abortar "$DESTINO já existe e não é um clone do DevLab. Use DEVLAB_DIR=<outro caminho>."
 else

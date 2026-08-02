@@ -11,6 +11,8 @@ import { descreverLimites, montarHostConfig } from './limites.ts'
 import type { LabInfo, Recursos, ResultadoExec } from './tipos.ts'
 
 const ROTULO_GERENCIADO = 'devlab.gerenciado'
+/** Porta do agente dono do container: é o que separa uma instância da outra. */
+const ROTULO_PORTA = 'devlab.porta'
 const DIR_TRABALHO_INTERNO = '/tmp/devlab'
 
 /**
@@ -120,9 +122,16 @@ export class GerenciadorDeLabs {
       info.estado = 'pronto'
       log.info(`lab ${labId} pronto`, { licao: licao.id, imagem: licao.lab.imagem })
     } catch (e) {
+      // O lab nunca chegou a existir para quem chamou: `criar()` lança, então o
+      // cliente recebe 500 e NUNCA fica sabendo o labId — não tem como mandar
+      // DELETE depois. Deixar o container de pé e a entrada no mapa queimava
+      // uma vaga do teto de labs simultâneos por lição quebrada, até o TTL de
+      // 45 min. Some com os dois aqui: quem falhou não ocupa lugar.
       info.estado = 'erro'
       info.erro = e instanceof Error ? e.message : String(e)
       log.erro(`falha ao preparar o lab ${labId}`, e)
+      this.#labs.delete(labId)
+      await this.#removerContainer(container)
       throw e
     }
 
@@ -205,14 +214,25 @@ export class GerenciadorDeLabs {
     await Promise.allSettled([...this.#labs.keys()].map((id) => this.destruir(id)))
   }
 
-  /** Containers de execuções anteriores que sobreviveram a um encerramento abrupto. */
+  /**
+   * Containers de execuções anteriores que sobreviveram a um encerramento
+   * abrupto.
+   *
+   * O filtro inclui a PORTA do agente. Sem isso a varredura é global e um
+   * segundo agente subindo — `npm run fumaca` (7799) enquanto `npm run dev`
+   * (7788) está de pé, ou um `devlab iniciar` aberto por engano duas vezes —
+   * destruía o lab que o aluno estava usando no meio da lição. Cada instância
+   * só recolhe o lixo que ela mesma poderia ter deixado.
+   */
   async limparOrfaos(): Promise<number> {
     const emUso = new Set([...this.#labs.values()].map((l) => l.container.id))
     let removidos = 0
     try {
       const lista = await docker().listContainers({
         all: true,
-        filters: { label: [`${ROTULO_GERENCIADO}=true`] },
+        filters: {
+          label: [`${ROTULO_GERENCIADO}=true`, `${ROTULO_PORTA}=${String(config.porta)}`],
+        },
       })
       for (const c of lista) {
         if (emUso.has(c.Id)) continue
@@ -466,6 +486,7 @@ export class GerenciadorDeLabs {
       Env: ['LANG=C.UTF-8', 'TERM=xterm-256color', 'DEVLAB=1'],
       Labels: {
         [ROTULO_GERENCIADO]: 'true',
+        [ROTULO_PORTA]: String(config.porta),
         'devlab.lab': labId,
         'devlab.licao': licao.id,
       },

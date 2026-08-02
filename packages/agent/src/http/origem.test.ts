@@ -31,26 +31,44 @@ describe('origemPermitida', () => {
 })
 
 describe('hostPermitido', () => {
-  it('aceita loopback na porta do agente', () => {
+  it('aceita loopback em qualquer porta', () => {
     assert.equal(hostPermitido('127.0.0.1:7788'), true)
     assert.equal(hostPermitido('localhost:7788'), true)
     assert.equal(hostPermitido('localhost'), true)
   })
 
+  it('aceita a porta do Vite: é o Host que o proxy encaminha', () => {
+    // `changeOrigin: false` faz o Vite repassar o Host do browser (5173), não
+    // o do agente (7788). Exigir a porta do agente aqui recusava com 403 todo
+    // POST, DELETE e upgrade de WebSocket vindo da UI — o app inteiro.
+    assert.equal(hostPermitido('127.0.0.1:5173'), true)
+    assert.equal(hostPermitido('localhost:5173'), true)
+  })
+
   it('recusa nome de domínio — é isso que fecha DNS rebinding', () => {
     // O atacante faz o domínio dele resolver para 127.0.0.1; o browser passa a
     // tratar tudo como same-origin, o que dispensa CORS. O Host, porém, chega
-    // com o nome do domínio.
+    // com o nome do domínio, e é por ele que a guarda decide.
     assert.equal(hostPermitido('rebind.evil.com:7788'), false)
     assert.equal(hostPermitido('meu-pc.local:7788'), false)
+    assert.equal(hostPermitido('127.0.0.1.evil.com:7788'), false)
+    assert.equal(hostPermitido('localhost.evil.com'), false)
   })
 
-  it('recusa porta diferente da do agente', () => {
-    assert.equal(hostPermitido('127.0.0.1:9999'), false)
+  it('recusa userinfo que finge ser loopback', () => {
+    // `127.0.0.1@evil.com` tem host evil.com: quem parseia na mão erra isso.
+    assert.equal(hostPermitido('127.0.0.1@evil.com'), false)
+    assert.equal(hostPermitido('127.0.0.1@evil.com:7788'), false)
   })
 
-  it('recusa host ausente', () => {
+  it('aceita IPv6 loopback com e sem porta', () => {
+    assert.equal(hostPermitido('[::1]:7788'), true)
+    assert.equal(hostPermitido('[::1]'), true)
+  })
+
+  it('recusa host ausente ou malformado', () => {
     assert.equal(hostPermitido(undefined), false)
     assert.equal(hostPermitido(''), false)
+    assert.equal(hostPermitido(':::'), false)
   })
 })

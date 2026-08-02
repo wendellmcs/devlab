@@ -159,8 +159,13 @@ PY
 
 echo "== destruir =="
 curl -sf -X DELETE "$API/labs/$LAB" >/dev/null && ok "lab destruído"
-docker ps -a --filter 'label=devlab.gerenciado=true' --format '{{.ID}}' | grep -q . \
-  && erro "sobrou container do devlab" || ok "nenhum container órfão"
+# Filtra pela porta DESTA execução. A prova de fumaça sobe um agente próprio na
+# 7799 e não pode reprovar por causa de um lab legítimo que o aluno tenha aberto
+# no agente normal (7788) — que é exatamente o cenário de rodar `npm run fumaca`
+# com o `devlab iniciar` de pé. Cada instância responde só pelo próprio lixo.
+docker ps -a --filter 'label=devlab.gerenciado=true' \
+             --filter "label=devlab.porta=$PORTA" --format '{{.ID}}' | grep -q . \
+  && erro "sobrou container do devlab (porta $PORTA)" || ok "nenhum container órfão"
 
 echo
 if [ $falhou -eq 0 ]; then

@@ -6,7 +6,7 @@ import os from 'node:os'
 import { config } from './config.ts'
 import { carregarConteudo } from './conteudo/carregador.ts'
 import { diagnosticarDaemon, docker } from './docker/cliente.ts'
-import { ProvedorOllama } from './ia/ollama.ts'
+import { criarProvedor } from './ia/provedor.ts'
 
 export type EstadoVerificacao = 'ok' | 'aviso' | 'falha'
 
@@ -38,6 +38,7 @@ export async function rodarDoctor(): Promise<RelatorioDoctor> {
     await verificarPorta(config.porta, 'agente'),
     await verificarPorta(5173, 'interface'),
     await verificarConteudo(),
+    verificarValidador(),
     await verificarIa(),
   ]
 
@@ -260,6 +261,38 @@ async function verificarConteudo(): Promise<Verificacao> {
 }
 
 /**
+ * python3 + PyYAML, que `npm run valida` / `devlab validar` exigem.
+ *
+ * Nunca é 'falha': o agente, os labs e as lições não dependem disto — só a
+ * validação do conteúdo declarativo depende. Mas ficar calado deixava o
+ * comando morrer com um ModuleNotFoundError sem explicação, e o conselho
+ * reflexo (`pip install pyyaml`) é recusado pelo PEP 668 no Ubuntu 24.04+.
+ */
+function verificarValidador(): Verificacao {
+  const base = { id: 'validador', titulo: 'Validador de conteúdo' }
+  const correcao =
+    'Só afeta "devlab validar". Instale pelo gerenciador da distro: ' +
+    'sudo apt install python3 python3-yaml (Debian/Ubuntu). ' +
+    'Evite "pip install pyyaml": o PEP 668 bloqueia em ambiente gerenciado.'
+
+  try {
+    const versao = execFileSync('python3', ['-c', 'import yaml; print(yaml.__version__)'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    return { ...base, estado: 'ok', detalhe: `python3 com PyYAML ${versao}` }
+  } catch {
+    return {
+      ...base,
+      estado: 'aviso',
+      detalhe: 'python3 com PyYAML não encontrado',
+      correcao,
+    }
+  }
+}
+
+/**
  * A IA é opcional por princípio: aqui ela nunca vira 'falha'.
  * O pior caso é 'aviso' — o DevLab inteiro funciona sem ela.
  */
@@ -276,7 +309,7 @@ async function verificarIa(): Promise<Verificacao> {
     }
   }
 
-  const d = await new ProvedorOllama().diagnosticar()
+  const d = await criarProvedor().diagnosticar()
   if (d.disponivel) {
     return {
       id: 'ia',

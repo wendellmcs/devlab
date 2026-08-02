@@ -20,8 +20,8 @@ visualização** por cima dele.
 | Trilha **Linux · Operador** completa: 12 lições, 36 checks, capstone | pronta |
 | XP, custo de dica, portão de pré-requisitos, progresso em SQLite | pronto |
 | Catálogo de erros de Linux (6 assinaturas reais) | pronto |
-| `devlab doctor` | pronto |
-| Camada de IA opcional (Ollama local) | pronta — **desligada por padrão**, adiantada da Fase 2 |
+| `devlab doctor` · `devlab ia` · `devlab modelo` | pronto |
+| Camada de IA opcional (Ollama local **ou** API na nuvem com a sua chave) | pronta — **desligada por padrão**, adiantada da Fase 2 |
 | Git, SQL, Docker, Servidores, FreeSWITCH, SIP/RTP, Kamailio, Asterisk | Fases 1 a 4 |
 
 ---
@@ -55,11 +55,27 @@ curl -fsSL https://raw.githubusercontent.com/wendellmax/devlab/main/install.sh |
 ```
 
 Ele clona o repositório em `~/devlab` e chama `scripts/setup.sh`, que cuida do
-resto: confere o sistema, instala **Node 24** e o **Docker Engine** se
-faltarem, põe seu usuário no grupo `docker`, oferece o **Ollama** com o modelo
-certo para a memória da sua máquina, instala as dependências, constrói a imagem
-de lab e roda o diagnóstico final. É idempotente — rodar de novo só conserta o
-que faltar.
+resto: confere o sistema, instala **Node 24**, o **Docker Engine** e o
+**python3 + PyYAML** se faltarem, põe seu usuário no grupo `docker`, oferece o
+**Ollama** com o modelo certo para a memória da sua máquina, instala as
+dependências, constrói a imagem de lab e roda o diagnóstico final. É
+idempotente — rodar de novo só conserta o que faltar.
+
+> **Antes de canalizar para o `bash`, leia.** Isto é um script de terceiro que
+> pede `sudo`; desconfiar é o comportamento certo, e não custa nada:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/wendellmax/devlab/main/install.sh | less
+> ```
+>
+> São ~100 linhas. O que ele faz: garante o `git`, clona este repositório e
+> entrega para [`scripts/setup.sh`](scripts/setup.sh) — que é onde o `sudo`
+> realmente acontece, sempre depois de perguntar, e só nos passos que precisam.
+> O setup canaliza três scripts oficiais de terceiros para o shell com
+> privilégio: `get.docker.com`, `deb.nodesource.com` e `ollama.com/install.sh`.
+> Se preferir não usar nenhum, instale Docker, Node 24 e Ollama pelo gerenciador
+> da sua distro antes e rode `./scripts/setup.sh` — ele detecta o que já existe
+> e não reinstala nada.
 
 Se já clonou o repositório:
 
@@ -77,6 +93,8 @@ devlab doctor       # diagnóstico do ambiente
 devlab licoes       # lista trilhas e lições carregadas
 devlab validar      # valida o conteúdo declarativo
 devlab atualizar    # git pull + dependências + setup
+devlab ia           # liga/desliga a IA e troca entre modelo local e nuvem
+devlab modelo       # mostra, lista e troca o modelo em uso
 ```
 
 Abra <http://127.0.0.1:5173>, escolha **Linux → Anatomia do shell** e um
@@ -89,7 +107,10 @@ container sobe em segundos com um bash de verdade dentro dele.
   o módulo nativo `node:sqlite`
 - **Docker Engine** (no Windows: dentro do WSL2, ou Docker Desktop com backend WSL2)
 - ~3 GB de disco para a Fase 0 (20–30 GB quando as trilhas de VoIP entrarem)
-- **Ollama** — opcional, só para a camada de IA
+- **python3 + PyYAML** — só para `devlab validar` (o setup instala; no
+  Debian/Ubuntu é `sudo apt install python3-yaml`, **não** `pip install`, que o
+  PEP 668 bloqueia)
+- **Ollama** — opcional, só para a camada de IA local
 
 > **WSL2 e memória.** Por padrão o WSL2 fica com metade da RAM do Windows. Se o
 > `setup.sh` reclamar de pouca memória para o modelo de IA, aumente o teto em
@@ -99,7 +120,7 @@ container sobe em segundos com um bash de verdade dentro dele.
 
 ## A trilha Linux · Operador
 
-Doze lições encadeadas num DAG linear, 246 XP, terminando num capstone sem
+Doze lições encadeadas num DAG linear, 242 XP, terminando num capstone sem
 dicas. A cobertura segue a especificação item a item:
 
 | Lição | O que exercita |
@@ -123,27 +144,71 @@ reprovam antes da solução e aprovam depois.
 
 ---
 
-## IA local, opcional (Ollama)
+## IA opcional: local (Ollama) ou nuvem (sua chave)
 
-**Desligada por padrão. Roda na sua máquina. Nunca resolve a tarefa.**
+**Desligada por padrão. Nunca resolve a tarefa. Trocável a qualquer momento.**
 
-O PRD previa BYO key com um provedor na nuvem. A implementação usa **Ollama
-local** porque isso é estritamente melhor para este projeto: não há chave para
+O padrão é **Ollama local**, e é o caminho recomendado: não há chave para
 vazar, nenhum dado do aluno sai da máquina e o princípio 4 — *offline após o
 primeiro build* — continua valendo sem asterisco, já que o modelo é baixado uma
 vez como as imagens.
 
+Só que um modelo local útil pede ~8 GB de RAM livres, e nem toda máquina tem.
+Para esse caso existe o **provedor de nuvem com a sua própria chave** — o BYO
+key que o PRD previa. É opt-in explícito, porque o contrato é outro.
+
 ```bash
-DEVLAB_IA=1 devlab iniciar     # ou DEVLAB_IA=1 em .env
+devlab ia               # mostra o estado atual
+devlab ia ollama        # modelo local (padrão)
+devlab ia nuvem         # API com a sua chave
+devlab ia off           # desliga
+
+devlab modelo           # qual modelo está em uso
+devlab modelo --listar  # o que está disponível no provedor atual
+devlab modelo llama3.2:3b   # troca
 ```
 
-Modelo por perfil de máquina (o `setup.sh` escolhe sozinho pela RAM):
+Nada disso exige reinstalar: os comandos editam só a linha correspondente do
+`.env` e valem no próximo `devlab iniciar`.
+
+### Local (Ollama) — o padrão
+
+Modelo por perfil de máquina (o `setup.sh` escolhe sozinho pela RAM, e
+`devlab modelo` troca depois):
 
 | RAM | Modelo | Tamanho | Nota |
 |---|---|---|---|
 | 32 GB+ | `qwen2.5-coder:14b` | ~9 GB | melhor qualidade de explicação |
 | 16 GB+ | `qwen2.5-coder:7b` | ~4,7 GB | o equilíbrio recomendado |
 | 8 GB+ | `llama3.2:3b` | ~2 GB | máquina apertada |
+| menos | — | — | use a nuvem, ou siga sem IA |
+
+### Nuvem (BYO key) — para quem não tem RAM sobrando
+
+```bash
+devlab ia nuvem
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env
+devlab doctor            # confirma chave e modelo numa chamada que não gasta token
+```
+
+O padrão é `claude-opus-5`; troque com `devlab modelo <id>` ou
+`DEVLAB_IA_MODELO_NUVEM`. `DEVLAB_IA_ESFORCO` (`low`…`max`, padrão `low`)
+regula profundidade de raciocínio — tutoria é resposta curta, e `low` já
+responde bem, rápido e barato.
+
+**O que muda em relação ao local, sem rodeio:**
+
+| | Ollama local | Nuvem (BYO key) |
+|---|---|---|
+| Dados do aluno | não saem da máquina | enunciado + últimas linhas do **seu** terminal saem |
+| Chave de API | não existe | sua, no `.env` (gitignored, modo `0600`) |
+| Custo | zero | cobrado na sua conta |
+| Princípio 4 (offline) | vale | não vale **para esta camada** — o núcleo segue offline |
+| Dica, solução, script de check | fora do pacote | **fora do pacote, igual** |
+
+A última linha é o ponto: a garantia de que a IA nunca vê a solução mora em
+`montarContextoSeguro`, que roda **antes** da escolha de provedor. Trocar de
+provedor não abre caminho novo — e há teste provando isso para os dois.
 
 ### Os três momentos de uso
 
@@ -246,7 +311,7 @@ Browser (localhost) → UI React + TypeScript + Vite
 | **3. Verificação por estado, nunca por texto** | `verificacao/executor.ts` só roda scripts que inspecionam o container: o veredito sai do código de saída, nada mais. O agente recebe as teclas (é ele quem faz a ponte do terminal) e guarda a saída recente — mas isso alimenta só a classificação de erro depois de reprovar, nunca a decisão. |
 | **4. Offline após o primeiro build** | `#garantirImagem()` recusa lab com imagem ausente em vez de puxar da rede. O único passo online é `npm run imagens`. |
 | **5. Jogo a serviço da competência** | `progresso/regras.ts`: XP ponderado pela dificuldade da lição, dica desconta de verdade, refazer lição concluída rende zero. A UI mostra **Autonomia** (% resolvido sem ajuda) ao lado do XP. |
-| **6. Isolamento por padrão** | `lab/limites.ts`: `NetworkMode: none`, `CapDrop: ALL` + conjunto mínimo, `no-new-privileges`, sem bind mount, limites de CPU/RAM/PIDs, TTL de ocioso. |
+| **6. Isolamento por padrão** | `lab/limites.ts`: `NetworkMode: none`, `CapDrop: ALL` + conjunto mínimo, `no-new-privileges`, sem bind mount, limites de CPU/RAM/PIDs, TTL de ocioso. Teste de integração confirma no kernel (`CapEff: 0`, sem rede). **Ressalva honesta:** o disco NÃO tem cota por padrão — `StorageOpt` exige overlay2 sobre XFS com `pquota` e recusaria o container no ext4, que é o caso comum. Um `dd` dentro do lab escreve no disco do host. Ligue com `DEVLAB_LIMITE_DISCO` se o seu sistema de arquivos aceitar. |
 
 ---
 
@@ -344,7 +409,8 @@ packages/agent/                 devlab-agent
   src/estado/                   State Extractor
   src/progresso/                SQLite e regras de XP
   src/http/                     API, roteador e PTY Bridge
-  src/cli/devlab.ts             devlab doctor · devlab licoes
+  src/ia/                       provedores (ollama.ts local · nuvem.ts BYO key)
+  src/cli/devlab.ts             devlab doctor · licoes · ia · modelo
 packages/ui/                    interface React de 3 painéis
 scripts/                        setup.sh · install one-liner · dev.sh
   build-imagens.sh              constrói e detecta imagem desatualizada
@@ -406,10 +472,17 @@ resetar, abrir terminal com TTY e destruir o container.
 | `POST` | `/api/ia/:momento` | `explicar_erro` · `revisar_solucao` · `dica_socratica` |
 | `WS` | `/ws/pty?lab=&cols=&rows=` | terminal |
 
-Todas as rotas que mudam estado exigem `Host` de loopback e recusam `Origin`
-de outro site; o WebSocket valida `Origin` no handshake (CORS não protege
-WebSocket). Sem isso, qualquer página aberta noutra aba do browser poderia
-abrir um shell dentro do container.
+**Todas** as rotas exigem `Host` de loopback — GET inclusive, porque DNS
+rebinding não precisa escrever para fazer estrago: bastaria ler `/api/doctor` e
+a árvore de arquivos do container. As que mudam estado recusam ainda `Origin`
+de outro site e exigem `content-type: application/json`. O WebSocket valida
+`Origin` no handshake, já que CORS não protege WebSocket — sem isso, qualquer
+página aberta noutra aba poderia abrir um shell dentro do container.
+
+A guarda de `Host` olha o **nome**, não a porta: em desenvolvimento o browser
+fala com o Vite (5173), que faz proxy para o agente (7788) repassando o `Host`
+original. Exigir a porta do agente recusaria com 403 o app inteiro — e não
+defenderia nada, porque quem decide o `Host` é a URL que o browser visitou.
 
 As dicas não reveladas **não** trafegam para o browser: se trafegassem, o custo
 de XP seria encenação.
@@ -425,6 +498,13 @@ de XP seria encenação.
 | `DEVLAB_DADOS` | `./.devlab` | onde fica o SQLite |
 | `DEVLAB_TTL_LAB_MS` | `2700000` | tempo até um lab ocioso ser destruído |
 | `DEVLAB_LOG` | `info` | `debug` \| `info` \| `aviso` \| `erro` |
+| `DEVLAB_LIMITE_DISCO` | *(desligado)* | cota da camada gravável do lab (ex.: `10g`); exige XFS + `pquota` |
+| `DEVLAB_IA` | `0` | liga a camada de IA |
+| `DEVLAB_IA_PROVEDOR` | `ollama` | `ollama` (local) \| `nuvem` (BYO key) |
+| `DEVLAB_IA_MODELO` | `qwen2.5-coder:7b` | modelo do Ollama |
+| `ANTHROPIC_API_KEY` | — | sua chave, só quando o provedor é `nuvem` |
+| `DEVLAB_IA_MODELO_NUVEM` | `claude-opus-5` | modelo da API |
+| `DEVLAB_IA_ESFORCO` | `low` | `low` … `max` — profundidade de raciocínio na nuvem |
 
 ---
 

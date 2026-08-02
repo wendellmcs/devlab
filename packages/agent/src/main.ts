@@ -8,7 +8,7 @@ import { GerenciadorDeLabs } from './lab/gerenciador.ts'
 import { ExecutorDeChecks } from './verificacao/executor.ts'
 import { ExtratorDeEstado } from './estado/extrator.ts'
 import { ArmazemDeProgresso } from './progresso/store.ts'
-import { ProvedorOllama } from './ia/ollama.ts'
+import { criarProvedor } from './ia/provedor.ts'
 import { ServicoDeIa } from './ia/servico.ts'
 import { montarApi } from './http/api.ts'
 import { montarPontePty } from './http/pty.ts'
@@ -37,7 +37,7 @@ async function principal(): Promise<void> {
   const checks = new ExecutorDeChecks(labs, conteudo.catalogo)
   const extrator = new ExtratorDeEstado(labs)
 
-  const ia = new ServicoDeIa(new ProvedorOllama())
+  const ia = new ServicoDeIa(criarProvedor())
   if (ia.ligada) {
     const d = await ia.estado()
     if (d.disponivel) log.info(`IA local ligada: ${d.modelo} via ${d.provedor}`)

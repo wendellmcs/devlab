@@ -244,4 +244,33 @@ describe('GerenciadorDeLabs (integração)', { skip: motivoPular, concurrency: f
     const licao = licaoDeTeste({ lab: { imagem: 'devlab/nao-existe:0.0.0' } })
     await assert.rejects(() => labs.criar(licao), /não está no cache local/)
   })
+
+  it('setup que falha não deixa container nem vaga ocupada', async () => {
+    // Regressão: `criar()` lançava DEPOIS de pôr o lab no mapa e sem remover o
+    // container, que ficava rodando. Como o cliente recebe 500 e nunca conhece
+    // o labId, não havia como mandar DELETE — seis lições quebradas enchiam o
+    // teto de labs simultâneos e travavam o aluno por 45 min, até o TTL.
+    const licao = licaoDeTeste({
+      lab: { setup: '#!/bin/bash\necho "falha proposital" >&2\nexit 7\n' },
+    })
+
+    const antes = await contarContainersDoTeste()
+    await assert.rejects(() => labs.criar(licao), /setup .* falhou/)
+
+    assert.deepEqual(labs.listar(), [], 'o lab que falhou não pode ocupar vaga')
+    assert.equal(
+      await contarContainersDoTeste(),
+      antes,
+      'o container do lab que falhou tem de sumir junto',
+    )
+  })
 })
+
+/** Containers desta lição de teste que ainda existem no daemon. */
+async function contarContainersDoTeste(): Promise<number> {
+  const lista = await docker().listContainers({
+    all: true,
+    filters: { label: ['devlab.licao=teste-integracao'] },
+  })
+  return lista.length
+}

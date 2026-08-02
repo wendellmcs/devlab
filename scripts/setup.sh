@@ -264,7 +264,10 @@ if tem docker; then
     falha "permission denied no socket do Docker — seu usuário não está no grupo 'docker'"
     PRECISA_RELOGAR=1
     if [ "$SO_CONFERIR" -eq 0 ]; then
-      if confirmar "adicionar '$USER' ao grupo docker? (usa sudo)"; then
+      # $USUARIO, não $USER: sob `set -u` um $USER não exportado (cron, unit do
+      # systemd, ssh não-interativo, container, `su outro` sem `-`) mata o
+      # script aqui — justamente no caminho de quem ainda não está no grupo.
+      if confirmar "adicionar '$USUARIO' ao grupo docker? (usa sudo)"; then
         sudo groupadd -f docker
         sudo usermod -aG docker "$USUARIO"
         ok "adicionado ao grupo docker"
@@ -301,9 +304,14 @@ nota "quando ligada, o modelo roda nesta máquina — nenhum dado sai daqui."
 
 if [ -z "$MODELO_IA_PADRAO" ]; then
   aviso "${RAM_GB} GB de RAM: pouco para um modelo local com resposta útil"
-  nota "pule a IA, ou force um modelo pequeno com DEVLAB_IA_MODELO=llama3.2:1b"
+  nota "há três saídas, e nenhuma bloqueia o curso:"
+  nota "  1. siga sem IA — é o padrão, e o núcleo é 100% determinístico"
+  nota "  2. force um modelo pequeno:  devlab modelo llama3.2:1b"
+  nota "  3. use a nuvem com a SUA chave:  devlab ia nuvem"
+  nota "     (a chave e o custo são seus; enunciado e terminal saem da máquina)"
 else
   ok "modelo recomendado para ${RAM_GB} GB de RAM: ${MODELO_IA_PADRAO}"
+  nota "dá para trocar depois a qualquer momento: devlab modelo <nome>"
 fi
 
 if tem ollama; then
@@ -324,18 +332,64 @@ else
 fi
 
 # Grava a escolha para o agente e o doctor concordarem com o que foi instalado.
-if [ "$SO_CONFERIR" -eq 0 ] && [ -n "$MODELO_IA_PADRAO" ] && [ ! -f .env ]; then
+#
+# O .env é criado mesmo em máquina que não comporta modelo local: sem ele o
+# DOCKER_HOST detectado se perderia, e o aluno ficaria sem o arquivo onde
+# `devlab ia nuvem` vai gravar a chave depois. Modo 0600 porque é exatamente
+# esse o arquivo que passa a guardar ANTHROPIC_API_KEY.
+if [ "$SO_CONFERIR" -eq 0 ] && [ ! -f .env ]; then
+  umask 077
   cat > .env <<EOF
 # Gerado por scripts/setup.sh. Ajuste à vontade.
-# A IA fica DESLIGADA por padrão: mude para 1 quando quiser usá-la.
+# A IA fica DESLIGADA por padrão: ligue com "devlab ia ollama" ou "devlab ia nuvem".
 DEVLAB_IA=0
-DEVLAB_IA_MODELO=${MODELO_IA_PADRAO}
+DEVLAB_IA_PROVEDOR=ollama
 DEVLAB_IA_URL=http://127.0.0.1:11434
 EOF
+  if [ -n "$MODELO_IA_PADRAO" ]; then
+    echo "DEVLAB_IA_MODELO=${MODELO_IA_PADRAO}" >> .env
+  else
+    echo "# Sem RAM para modelo local. Alternativa: devlab ia nuvem (chave sua)." >> .env
+    echo "# ANTHROPIC_API_KEY=sk-ant-..." >> .env
+  fi
   if [ -n "${DOCKER_HOST_DETECTADO:-}" ]; then
     echo "DOCKER_HOST=${DOCKER_HOST_DETECTADO}" >> .env
   fi
-  ok ".env criado (IA desligada por padrão)"
+  chmod 600 .env 2>/dev/null || true
+  ok ".env criado (IA desligada por padrão, modo 0600)"
+fi
+
+# ── 3b. validador de conteúdo (python3 + PyYAML) ───────────────────────────
+# `npm run valida` e `devlab validar` rodam scripts/valida-conteudo.py, que
+# importa yaml. Sem esta checagem o comando morria com um ModuleNotFoundError
+# cru — e o conselho reflexo (`pip install pyyaml`) é BLOQUEADO no Ubuntu
+# 24.04+ pelo PEP 668. O pacote certo é o do apt.
+passo "validador de conteúdo"
+
+if ! tem python3; then
+  aviso "python3 não encontrado — 'devlab validar' não vai rodar"
+  nota "o núcleo funciona sem ele: só a validação do conteúdo depende do python3."
+  if [ "$SO_CONFERIR" -eq 0 ] && [ "$GERENCIADOR" = apt ]; then
+    if confirmar "instalar python3 e PyYAML? (usa sudo)"; then
+      sudo apt-get install -y python3 python3-yaml
+      ok "python3 $(python3 -V 2>&1 | awk '{print $2}') e PyYAML instalados"
+    fi
+  fi
+elif python3 -c 'import yaml' >/dev/null 2>&1; then
+  ok "python3 $(python3 -V 2>&1 | awk '{print $2}') com PyYAML"
+else
+  aviso "python3 presente, mas sem PyYAML — 'devlab validar' não vai rodar"
+  if [ "$SO_CONFERIR" -eq 0 ]; then
+    if [ "$GERENCIADOR" = apt ]; then
+      if confirmar "instalar PyYAML via apt? (usa sudo)"; then
+        sudo apt-get install -y python3-yaml
+        ok "PyYAML instalado"
+      fi
+    else
+      nota "instale pelo gerenciador da sua distro: python3-yaml (ou python3-pyyaml)"
+      nota "evite 'pip install pyyaml': o PEP 668 bloqueia em ambiente gerenciado."
+    fi
+  fi
 fi
 
 # ── 4. dependências do projeto ─────────────────────────────────────────────
@@ -414,6 +468,7 @@ EOF
       ;;
   esac
   nota "use: devlab doctor · devlab iniciar · devlab validar · devlab atualizar"
+  nota "     devlab ia · devlab modelo   (liga a IA e troca de modelo/provedor)"
 fi
 
 # ── 7. veredito ────────────────────────────────────────────────────────────

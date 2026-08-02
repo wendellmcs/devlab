@@ -6,6 +6,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Menor privilégio explícito. Nenhum job aqui escreve no repositório, publica
+# pacote ou comenta em PR — então o GITHUB_TOKEN não precisa poder fazer nada
+# além de ler o código. Declarar no topo também impede que um job novo herde
+# permissão de escrita sem que alguém repare.
+permissions:
+  contents: read
+
 jobs:
   qualidade:
     name: tipos, testes e conteúdo

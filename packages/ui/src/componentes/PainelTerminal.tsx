@@ -23,9 +23,20 @@ export const PainelTerminal = forwardRef<ControleTerminal, Props>(function Paine
   const hospedeiro = useRef<HTMLDivElement>(null)
   const escape = useRef<HTMLButtonElement>(null)
   const termRef = useRef<Terminal | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   const [conexao, setConexao] = useState<Conexao>('ocioso')
   const [geracao, setGeracao] = useState(0)
+
+  /**
+   * Espelho da escala para o effect de montagem ler o valor atual sem tê-lo
+   * como dependência. Com `escala` nas deps, mexer no tamanho da fonte
+   * derrubava o Terminal e o WebSocket e abria um `docker exec` novo: rolagem
+   * perdida, diretório de volta ao inicial e o processo em execução morto.
+   * Fonte ajustável é requisito de acessibilidade — não pode custar a sessão.
+   */
+  const escalaRef = useRef(escala)
+  escalaRef.current = escala
 
   const enviar = useCallback((mensagem: unknown) => {
     const s = socketRef.current
@@ -68,7 +79,7 @@ export const PainelTerminal = forwardRef<ControleTerminal, Props>(function Paine
     const term = new Terminal({
       fontFamily:
         'ui-monospace, "Cascadia Code", "JetBrains Mono", "Fira Code", Consolas, monospace',
-      fontSize: Math.round(14 * escala),
+      fontSize: Math.round(14 * escalaRef.current),
       lineHeight: 1.2,
       cursorBlink: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
       scrollback: 5000,
@@ -79,6 +90,7 @@ export const PainelTerminal = forwardRef<ControleTerminal, Props>(function Paine
     term.loadAddon(fit)
     term.open(alvo)
     termRef.current = term
+    fitRef.current = fit
 
     // O xterm captura Tab e Shift+Tab e os manda para o shell, o que impede
     // sair do terminal pelo teclado — armadilha de foco (WCAG 2.1.2) num app
@@ -172,8 +184,25 @@ export const PainelTerminal = forwardRef<ControleTerminal, Props>(function Paine
       socketRef.current = null
       term.dispose()
       termRef.current = null
+      fitRef.current = null
     }
-  }, [lab, geracao, escala])
+  }, [lab, geracao])
+
+  // Fonte: muda no terminal vivo. Reflui as colunas e avisa o PTY do novo
+  // tamanho, sem tocar no socket nem no shell lá dentro.
+  useEffect(() => {
+    const term = termRef.current
+    const fit = fitRef.current
+    if (term === null || fit === null) return
+
+    term.options.fontSize = Math.round(14 * escala)
+    try {
+      fit.fit()
+    } catch {
+      return
+    }
+    enviar({ t: 'r', c: term.cols, l: term.rows })
+  }, [escala, enviar])
 
   return (
     <>
