@@ -1,12 +1,12 @@
-id: linux-op-11-capstone
+id: linux-op-12-capstone
 trilha: linux
 nivel: operador
-ordem: 11
+ordem: 12
 titulo: "Capstone: organizar as evidências de um chamado"
 capacidade: "Sei encadear navegação, criação, cópia, movimentação e leitura para entregar uma tarefa real de ponta a ponta."
 xp: 60
 capstone: true
-prereqs: [linux-op-10-globbing]
+prereqs: [linux-op-11-padroes-precisos]
 
 lab:
   setup: |

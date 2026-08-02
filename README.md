@@ -17,7 +17,7 @@ visualização** por cima dele.
 | `devlab-agent` — Lab Manager, PTY Bridge, Verifier Runner, State Extractor, Progress Store | pronto |
 | Interface de 3 painéis (objetivo · terminal real · estado ao vivo) | pronta |
 | Imagem `devlab/linux-base` com árvore semeada | pronta |
-| Trilha **Linux · Operador** completa: 11 lições, incluindo capstone | pronta |
+| Trilha **Linux · Operador** completa: 12 lições, 36 checks, capstone | pronta |
 | XP, custo de dica, portão de pré-requisitos, progresso em SQLite | pronto |
 | Catálogo de erros de Linux (6 assinaturas reais) | pronto |
 | `devlab doctor` | pronto |
@@ -97,6 +97,32 @@ container sobe em segundos com um bash de verdade dentro dele.
 
 ---
 
+## A trilha Linux · Operador
+
+Doze lições encadeadas num DAG linear, 246 XP, terminando num capstone sem
+dicas. A cobertura segue a especificação item a item:
+
+| Lição | O que exercita |
+|---|---|
+| 1 · Anatomia do shell | `echo`, `pwd`, comando/opções/argumentos, `>` vs `>>` |
+| 2 · Enxergar o diretório | `ls -l`, `-a`, `-h` — um check por opção |
+| 3 · Caminhos | absoluto vs relativo, `~`, `cd`, e `..` para criar a pasta irmã |
+| 4 · Hierarquia | `/etc`, `/var/log`, `/tmp`, `man hier` |
+| 5 · Criar | `mkdir -p`, `touch`, chaves `{a,b}`, `tree` |
+| 6 · Copiar e mover | `cp` vs `mv`, verificado dos **dois** lados |
+| 7 · Remover | `rm`, `rmdir`, `rm -r` numa árvore com conteúdo |
+| 8 · Ler arquivos | `head`, `tail`, `wc`, `cat` emendando, `file` |
+| 9 · Pedir ajuda | `--help` para descobrir flag, `which` |
+| 10 · Globbing e aspas | `*` e a armadilha do espaço em nome de arquivo |
+| 11 · Padrões precisos | `?` e classes `[0-9]`, com `porta-10` e `porta-x` como armadilhas |
+| 12 · Capstone | organizar as evidências de um chamado, sem dicas |
+
+Cada `verificar:` inspeciona **estado**: nenhum check olha o comando digitado,
+o que mantém vários caminhos válidos abertos. `npm run valida` prova que os 36
+reprovam antes da solução e aprovam depois.
+
+---
+
 ## IA local, opcional (Ollama)
 
 **Desligada por padrão. Roda na sua máquina. Nunca resolve a tarefa.**
@@ -144,6 +170,35 @@ frequência, mas por construção:
    o selo de *resolvido sem ajuda* — que é o que a métrica de Autonomia mede.
 4. **Retirar a IA não quebra nada.** Sem Ollama, a interface mostra a seção
    explicando como ligar e segue funcionando inteira.
+
+---
+
+## Por que a imagem do lab não segue a distro da sua máquina
+
+O container traz o próprio userspace: o lab é o que o `FROM` disser, esteja o
+host em Ubuntu 26.04, Fedora ou Arch. Fazer o lab herdar a distro do host é
+tecnicamente possível — e é a decisão errada aqui.
+
+O modelo de verificação depende de as ferramentas se comportarem igual para
+todo mundo. O catálogo de erros casa **mensagens literais do GNU** por regex.
+Um exemplo real encontrado durante o desenvolvimento: a máquina onde este
+projeto nasceu usa **uutils coreutils** e **bfs** no lugar do `find` do GNU —
+ali o `mkdir` diz `File exists`, enquanto a lição espera
+`cannot create directory … No such file or directory`. Se o lab herdasse o
+host, dois alunos veriam mensagens diferentes na mesma lição, o CI provaria
+uma imagem que ninguém roda, e "funciona na minha máquina" viraria a regra.
+
+Por isso a base é **fixa por padrão e configurável por escolha**:
+
+```bash
+DEVLAB_IMAGEM_BASE=ubuntu:26.04 npm run imagens
+```
+
+A base entra na impressão digital do contexto, então trocá-la força a
+reconstrução; a imagem carrega o rótulo `devlab.base`, então
+`docker image inspect` responde de onde ela veio quando um check falhar só na
+sua máquina. Só a base padrão é exercitada pelo CI e pelos testes de
+integração — o resto é por sua conta e risco.
 
 ---
 

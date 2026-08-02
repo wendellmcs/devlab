@@ -4,7 +4,7 @@ nivel: operador
 ordem: 3
 titulo: "Caminhos absolutos e relativos"
 capacidade: "Sei chegar a qualquer lugar do sistema de arquivos, partindo da raiz ou de onde estou."
-xp: 14
+xp: 16
 prereqs: [linux-op-02-listar]
 
 objetivo_md: |
@@ -31,6 +31,10 @@ objetivo_md: |
 
   Depois, grave em `caminho-agosto.txt` (na sua pasta pessoal) o **caminho
   absoluto** dessa pasta nova.
+
+  Por fim — e aqui o `..` ganha o dia — **estando dentro de `agosto/`**, crie a
+  pasta irmã `julho/` com um `ata.txt` dentro, sem escrever o caminho inteiro
+  de novo. Uma pasta irmã é `../julho`: sobe um nível e desce no vizinho.
 
 verificar:
   - descricao: "a árvore documentos/2026/agosto existe"
@@ -68,10 +72,24 @@ verificar:
       fi
       exit 0
 
+  - descricao: "a pasta irmã julho/ existe, com ata.txt dentro"
+    script: |
+      #!/bin/bash
+      DIR=/home/aluno/documentos/2026/julho
+      if [ ! -d "$DIR" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a pasta irma julho/ nao existe ao lado de agosto/","dica_diagnostica":"estando dentro de agosto, .. e o diretorio 2026; a irma e ../julho"}'
+        exit 1
+      fi
+      if [ ! -f "$DIR/ata.txt" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"julho/ existe, mas esta vazia","dica_diagnostica":"falta o ata.txt dentro dela: veja com find ~/documentos/2026"}'
+        exit 1
+      fi
+      exit 0
+
 dicas:
-  - "Criar três níveis de pasta de uma vez tem uma opção própria no `mkdir` — procure em `mkdir --help` a que fala em *parents*. Para o caminho absoluto, entre na pasta e pergunte ao shell onde você está."
-  - "A forma é: `mkdir -_ ~/documentos/2026/agosto`, depois `touch ____/ata.txt`, e por fim `cd` até lá e `pwd > ~/caminho-agosto.txt`."
-  - "mkdir -p ~/documentos/2026/agosto && touch ~/documentos/2026/agosto/ata.txt && cd ~/documentos/2026/agosto && pwd > ~/caminho-agosto.txt"
+  - "Criar três níveis de pasta de uma vez tem uma opção própria no `mkdir` — procure em `mkdir --help` a que fala em *parents*. Para o caminho absoluto, entre na pasta e pergunte ao shell onde você está. E para a pasta irmã: de onde você está, o `..` é o andar de cima."
+  - "A forma é: `mkdir -_ ~/documentos/2026/agosto`, depois `touch ____/ata.txt`, entrar lá com `cd` e `pwd > ~/caminho-agosto.txt`. Para a irmã, de dentro de agosto: `mkdir __/julho`."
+  - "mkdir -p ~/documentos/2026/agosto && touch ~/documentos/2026/agosto/ata.txt && cd ~/documentos/2026/agosto && pwd > ~/caminho-agosto.txt && mkdir ../julho && touch ../julho/ata.txt"
 
 erros_comuns:
   - match: "cannot create directory.*No such file or directory"
@@ -81,7 +99,9 @@ erros_comuns:
     explica: "O diretório já existe. Isso não é um problema — `mkdir -p` inclusive não reclama nesse caso."
     categoria: conceitual
 
+
 cards_revisao:
+  - ponto-ponto-sobe-um-nivel
   - caminho-absoluto-comeca-na-raiz
   - til-e-a-pasta-pessoal
   - mkdir-p-cria-os-pais

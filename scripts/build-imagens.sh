@@ -16,6 +16,12 @@ IMAGENS_FASE_0=(
   "linux-base:devlab/linux-base:1.0.0"
 )
 
+# Base das imagens de lab. O padrão é fixo de propósito: o container traz o
+# próprio userspace, então o lab NÃO herda a distro do host — e é isso que faz
+# a mesma lição se comportar igual para todo mundo. Trocar é suportado, mas só
+# o padrão é exercitado pelo CI.
+BASE="${DEVLAB_IMAGEM_BASE:-ubuntu:24.04}"
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "erro: docker não encontrado no PATH. Rode 'npm run doctor' para o diagnóstico completo." >&2
   exit 1
@@ -28,11 +34,11 @@ fi
 # próprio Dockerfile — nunca chegaria a quem já instalou: `devlab atualizar`
 # veria a tag presente e pularia o build.
 digital_do_contexto() {
-  find "$1" -type f -print0 \
-    | sort -z \
-    | xargs -0 sha256sum \
-    | sha256sum \
-    | cut -c1-16
+  # A base entra na digital: trocar de distro tem de forçar reconstrução.
+  {
+    echo "base=$BASE"
+    find "$1" -type f -print0 | sort -z | xargs -0 sha256sum
+  } | sha256sum | cut -c1-16
 }
 
 construir() {
@@ -54,12 +60,13 @@ construir() {
   fi
 
   echo ""
+  echo "    base: $BASE"
   if [ -n "$anterior" ]; then
     echo "==> $tag desatualizada ($anterior -> $atual) — reconstruindo"
   else
     echo "==> construindo $tag  (contexto: images/$dir)"
   fi
-  docker build --label "devlab.contexto=$atual" --tag "$tag" "$contexto"
+  docker build --build-arg "BASE=$BASE" --label "devlab.contexto=$atual" --tag "$tag" "$contexto"
 }
 
 FORCAR=0

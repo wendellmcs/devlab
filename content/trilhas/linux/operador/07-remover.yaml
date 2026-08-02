@@ -4,7 +4,7 @@ nivel: operador
 ordem: 7
 titulo: "Remover com precisão: rm e rmdir"
 capacidade: "Sei apagar exatamente o que quero apagar — e sei que no shell não existe lixeira."
-xp: 16
+xp: 20
 prereqs: [linux-op-06-copiar-mover]
 
 lab:
@@ -17,7 +17,15 @@ lab:
       echo "sobra de processamento $n" > "/home/aluno/temporarios/tmp-$n.txt"
     done
     printf 'relatorio mensal consolidado\nnao apagar\n' > /home/aluno/temporarios/relatorio.txt
-    chown -R aluno:aluno /home/aluno/temporarios
+
+    # Uma árvore com conteúdo, para o rm -r ter o que fazer.
+    install -o aluno -g aluno -d /home/aluno/cache/miniaturas
+    install -o aluno -g aluno -d /home/aluno/cache/sessoes
+    echo 'cache de miniatura' > /home/aluno/cache/miniaturas/thumb-1.dat
+    echo 'sessao expirada'    > /home/aluno/cache/sessoes/s-4471.dat
+    echo 'indice do cache'    > /home/aluno/cache/indice.db
+
+    chown -R aluno:aluno /home/aluno/temporarios /home/aluno/cache /home/aluno/vazio
 
 objetivo_md: |
   **`rm` é permanente.** Não há lixeira, não há desfazer. É por isso que este
@@ -38,6 +46,9 @@ objetivo_md: |
   1. Apague os três arquivos `tmp-1.txt`, `tmp-2.txt` e `tmp-3.txt`.
   2. **Mantenha** `temporarios/relatorio.txt` intacto.
   3. Apague o diretório `vazio/`.
+  4. Apague a pasta `cache/` **inteira**, com as subpastas e os arquivos
+     dentro. É aqui que entra o `rm -r` — e é o comando que mais apaga
+     trabalho alheio por engano no mundo real. Liste o alvo antes de rodá-lo.
 
 verificar:
   - descricao: "os três arquivos temporários foram apagados"
@@ -78,10 +89,21 @@ verificar:
       fi
       exit 0
 
+  - descricao: "a pasta cache/ foi removida inteira, com o que havia dentro"
+    script: |
+      #!/bin/bash
+      if [ -e /home/aluno/cache ]; then
+        RESTOU=$(find /home/aluno/cache | head -n 5 | tr '\n' ' ')
+        echo "ainda existe: $RESTOU"
+        echo 'DEVLAB_JSON:{"mensagem":"cache/ ainda esta la — ou parte do conteudo dela","dica_diagnostica":"rmdir so serve para diretorio vazio, e rm sozinho recusa diretorio. Veja o que ha dentro com: ls -R ~/cache"}'
+        exit 1
+      fi
+      exit 0
+
 dicas:
-  - "Apagar três arquivos não exige três comandos, mas pode exigir. E diretório tem um comando próprio quando está vazio — `rm` sozinho vai recusar."
-  - "A forma é: `rm ~/temporarios/tmp-1.txt ~/temporarios/tmp-2.txt ~/temporarios/tmp-3.txt` e `_____ ~/vazio`. Cuidado para não incluir o relatorio."
-  - "rm ~/temporarios/tmp-1.txt ~/temporarios/tmp-2.txt ~/temporarios/tmp-3.txt && rmdir ~/vazio"
+  - "Apagar três arquivos não exige três comandos, mas pode exigir. Diretório tem um comando próprio quando está vazio — `rm` sozinho recusa. E quando não está vazio, é preciso dizer ao `rm` que ele pode descer."
+  - "A forma é: `rm ~/temporarios/tmp-1.txt ...`, `_____ ~/vazio` para o vazio e `rm -_ ~/cache` para o que tem conteúdo. Cuidado para não incluir o relatorio."
+  - "rm ~/temporarios/tmp-1.txt ~/temporarios/tmp-2.txt ~/temporarios/tmp-3.txt && rmdir ~/vazio && rm -r ~/cache"
 
 erros_comuns:
   - match: "cannot remove.*Is a directory"
@@ -96,5 +118,6 @@ erros_comuns:
 
 cards_revisao:
   - rm-e-permanente
+  - rm-r-desce-na-arvore
   - rmdir-so-diretorio-vazio
   - rm-r-apaga-conteudo-junto

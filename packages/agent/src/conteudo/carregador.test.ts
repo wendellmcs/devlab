@@ -56,7 +56,7 @@ describe('carregarConteudo', () => {
     assert.ok(conteudo.trilhas.some((t) => t.id === 'linux'))
 
     const linux = conteudo.licoes.filter((l) => l.trilha === 'linux')
-    assert.ok(linux.length >= 11, `esperava ao menos 11 lições, achei ${linux.length}`)
+    assert.ok(linux.length >= 12, `esperava ao menos 12 lições, achei ${linux.length}`)
     assert.ok(linux.some((l) => l.capstone), 'a trilha precisa de um capstone')
   })
 

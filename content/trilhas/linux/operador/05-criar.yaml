@@ -4,7 +4,7 @@ nivel: operador
 ordem: 5
 titulo: "Criar diretórios e arquivos"
 capacidade: "Sei montar uma estrutura de pastas e arquivos do zero, num comando ou em vários."
-xp: 14
+xp: 16
 prereqs: [linux-op-04-hierarquia]
 
 objetivo_md: |
@@ -27,6 +27,10 @@ objetivo_md: |
   ```
 
   O arquivo `CH-1042.txt` pode ficar vazio.
+
+  Depois, confira o resultado com `tree` — que desenha a árvore em vez de
+  listar pasta por pasta — e **grave essa saída** em `estrutura.txt`, na sua
+  pasta pessoal.
 
 verificar:
   - descricao: "chamados/2026/aberto e chamados/2026/fechado existem"
@@ -57,10 +61,32 @@ verificar:
       fi
       exit 0
 
+  - descricao: "estrutura.txt tem a árvore desenhada pelo tree"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/estrutura.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"estrutura.txt nao existe na sua pasta pessoal","dica_diagnostica":"o comando que desenha a arvore de diretorios e o tree; redirecione a saida com >"}'
+        exit 1
+      fi
+      # Os ramos desenhados só existem na saída do tree; o ls não os produz.
+      if ! grep -q '──' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao parece a saida do tree (faltam os ramos da arvore)","dica_diagnostica":"compare ls -R com tree: so o tree desenha os ramos"}'
+        exit 1
+      fi
+      for esperado in aberto fechado CH-1042.txt; do
+        if ! grep -q "$esperado" "$ARQ"; then
+          echo "faltando na arvore: $esperado"
+          echo 'DEVLAB_JSON:{"mensagem":"a arvore gravada nao mostra toda a estrutura","dica_diagnostica":"aponte o tree para ~/chamados, nao para uma subpasta"}'
+          exit 1
+        fi
+      done
+      exit 0
+
 dicas:
-  - "Você precisa de dois comandos diferentes: um cria diretórios, outro cria o arquivo vazio. E lembre que criar três níveis de pasta de uma vez tem uma opção própria."
-  - "A forma é: `mkdir -p ~/chamados/2026/{______,______}` e depois `touch ~/chamados/2026/aberto/CH-1042.txt`."
-  - "mkdir -p ~/chamados/2026/{aberto,fechado} && touch ~/chamados/2026/aberto/CH-1042.txt"
+  - "Você precisa de dois comandos diferentes: um cria diretórios, outro cria o arquivo vazio. E lembre que criar três níveis de pasta de uma vez tem uma opção própria. Para conferir, existe um comando que desenha a árvore."
+  - "A forma é: `mkdir -p ~/chamados/2026/{______,______}`, depois `touch ~/chamados/2026/aberto/CH-1042.txt`, e por fim `____ ~/chamados > ~/estrutura.txt`."
+  - "mkdir -p ~/chamados/2026/{aberto,fechado} && touch ~/chamados/2026/aberto/CH-1042.txt && tree ~/chamados > ~/estrutura.txt"
 
 erros_comuns:
   - match: "cannot create directory.*No such file or directory"
@@ -70,7 +96,9 @@ erros_comuns:
     explica: "Você tentou tratar um diretório como se fosse arquivo. `mkdir` cria pasta; `touch` cria arquivo."
     categoria: conceitual
 
+
 cards_revisao:
+  - tree-desenha-a-arvore
   - mkdir-p-cria-os-pais
   - touch-cria-arquivo-vazio
   - chaves-expandem-em-varias-palavras

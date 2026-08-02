@@ -4,7 +4,7 @@ nivel: operador
 ordem: 8
 titulo: "Ler arquivos: cat, head, tail, wc"
 capacidade: "Sei inspecionar um log sem abrir editor, pegando só o pedaço que interessa."
-xp: 16
+xp: 20
 prereqs: [linux-op-07-remover]
 
 objetivo_md: |
@@ -29,6 +29,11 @@ objetivo_md: |
   1. Grave em `primeiras.txt` as **3 primeiras** linhas.
   2. Grave em `ultimas.txt` as **2 últimas** linhas.
   3. Grave em `total.txt` a **quantidade de linhas** do log.
+  4. Junte os dois logs num arquivo só, `tudo.log`, com `chamadas.log`
+     primeiro e `sistema.log` depois — é para isso que o `cat` serve, o nome
+     vem de *concatenate*.
+  5. Descubra com `file` que tipo de arquivo é `logs/chamadas.log` e grave a
+     resposta em `tipo.txt`.
 
 verificar:
   - descricao: "primeiras.txt tem exatamente as 3 primeiras linhas do log"
@@ -78,10 +83,38 @@ verificar:
       fi
       exit 0
 
+  - descricao: "tudo.log é a emenda dos dois logs, na ordem pedida"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/tudo.log
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"tudo.log nao existe","dica_diagnostica":"o cat aceita varios arquivos de uma vez: cat a b > destino"}'
+        exit 1
+      fi
+      if ! diff -q <(cat /home/aluno/logs/chamadas.log /home/aluno/logs/sistema.log) "$ARQ" >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o conteudo de tudo.log nao bate com os dois logs emendados","dica_diagnostica":"a ordem importa: chamadas.log primeiro, sistema.log depois. Compare com diff."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "tipo.txt registra o que o file diz sobre o log"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/tipo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"tipo.txt nao existe","dica_diagnostica":"o comando file responde que tipo de arquivo e cada coisa; redirecione a saida com >"}'
+        exit 1
+      fi
+      if ! grep -qi 'text' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"tipo.txt nao contem a resposta do file para o log","dica_diagnostica":"rode file ~/logs/chamadas.log sozinho e veja o que ele responde antes de redirecionar"}'
+        exit 1
+      fi
+      exit 0
+
 dicas:
-  - "Três comandos diferentes, um para cada item: começo do arquivo, fim do arquivo e contagem. Todos aceitam a mesma ideia de opção para dizer *quantas* linhas."
-  - "A forma é: `head -n _ arquivo > destino`, `tail -n _ arquivo > destino` e `wc -_ arquivo > destino`."
-  - "head -n 3 ~/logs/chamadas.log > ~/primeiras.txt ; tail -n 2 ~/logs/chamadas.log > ~/ultimas.txt ; wc -l < ~/logs/chamadas.log > ~/total.txt"
+  - "Um comando para o começo, um para o fim e um para contar. O `cat` aceita vários arquivos de uma vez e emenda na ordem em que você escrever. E há um comando cujo nome é literalmente a pergunta *que arquivo é este*."
+  - "A forma é: `head -n _ arquivo > destino`, `tail -n _ arquivo > destino`, `wc -_ arquivo > destino`, `cat arq1 arq2 > destino` e `____ arquivo > destino`."
+  - "head -n 3 ~/logs/chamadas.log > ~/primeiras.txt ; tail -n 2 ~/logs/chamadas.log > ~/ultimas.txt ; wc -l < ~/logs/chamadas.log > ~/total.txt ; cat ~/logs/chamadas.log ~/logs/sistema.log > ~/tudo.log ; file ~/logs/chamadas.log > ~/tipo.txt"
 
 erros_comuns:
   - match: "Is a directory"
@@ -92,6 +125,8 @@ erros_comuns:
     categoria: sintaxe
 
 cards_revisao:
+  - cat-emenda-arquivos
+  - file-diz-o-tipo
   - head-mostra-o-comeco
   - tail-mostra-o-fim
   - wc-l-conta-linhas

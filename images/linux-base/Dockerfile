@@ -3,7 +3,26 @@
 # Ubuntu de verdade, com as páginas de manual restauradas (a imagem base do
 # Ubuntu as exclui via dpkg) e uma árvore de trabalho semeada com material de
 # suporte de TI/telefonia — o mesmo tipo de arquivo que o aluno vê no trabalho.
-FROM ubuntu:24.04
+#
+# A base é um ARG, mas o padrão é FIXO por decisão de projeto, não por inércia.
+# O lab não herda a distro do host: o container traz o próprio userspace, e é
+# isso que faz a mesma lição se comportar igual para todo mundo. O catálogo de
+# erros casa mensagens LITERAIS do GNU por regex, e elas mudam entre releases e
+# entre implementações (uutils, busybox). Herdar o host tornaria o veredito de
+# um check dependente da máquina de quem estuda.
+#
+# Trocar é suportado, e o risco é seu:
+#   docker build --build-arg BASE=ubuntu:26.04 …
+#   DEVLAB_IMAGEM_BASE=ubuntu:26.04 npm run imagens
+# Só a base padrão é exercitada pelo CI e pelo teste de integração.
+ARG BASE=ubuntu:24.04
+FROM ${BASE}
+
+# Reexposto depois do FROM para virar rótulo — assim `docker image inspect`
+# diz de qual base a imagem instalada veio, o que é a primeira pergunta quando
+# um check falha só na máquina de alguém.
+ARG BASE
+LABEL devlab.base="${BASE}"
 
 LABEL org.opencontainers.image.title="devlab/linux-base" \
       org.opencontainers.image.description="Lab base da trilha Linux do DevLab" \

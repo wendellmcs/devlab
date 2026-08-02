@@ -1,0 +1,134 @@
+id: linux-op-11-padroes-precisos
+trilha: linux
+nivel: operador
+ordem: 11
+titulo: "Padrões precisos: ? e classes de caracteres"
+capacidade: "Sei escrever um padrão que pega exatamente os arquivos que quero — nem um a mais."
+xp: 22
+prereqs: [linux-op-10-globbing]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno/configs
+    # Nomes escolhidos para o `*` ser grosseiro demais: porta-10 tem dois
+    # dígitos e porta-x não é número. Só `?` e as classes separam isso.
+    for n in 1 2 3 10; do
+      echo "porta=506$n" > "$BASE/porta-$n.conf"
+    done
+    echo 'porta=modelo' > "$BASE/porta-x.conf"
+    chown aluno:aluno "$BASE"/porta-*.conf
+
+objetivo_md: |
+  O `*` resolve o caso fácil. Quando o nome do arquivo carrega informação —
+  e num servidor ele quase sempre carrega — é preciso ser mais exato.
+
+  | Padrão | Casa com | Não casa com |
+  |---|---|---|
+  | `*` | qualquer sequência, inclusive vazia | — |
+  | `?` | **exatamente um** caractere, qualquer um | dois ou zero |
+  | `[123]` | **um** caractere entre os listados | qualquer outro |
+  | `[0-9]` | **um** dígito | letra, ou dois dígitos |
+  | `[!0-9]` | um caractere que **não** é dígito | dígito |
+
+  O setup deixou cinco arquivos em `configs/`:
+
+  ```
+  porta-1.conf   porta-2.conf   porta-3.conf   porta-10.conf   porta-x.conf
+  ```
+
+  Repare na armadilha: `porta-*.conf` pega os cinco. `porta-?.conf` pega
+  quatro — o `porta-10.conf` fica de fora porque `10` são **dois** caracteres,
+  mas o `porta-x.conf` entra, porque `?` não sabe o que é dígito.
+
+  ### Sua tarefa
+
+  Sem listar arquivo por arquivo — use padrões:
+
+  1. Copie para `~/um-caractere/` todos os `porta-…conf` cujo sufixo tem
+     **exatamente um caractere**, seja ele qual for. São quatro.
+  2. Copie para `~/so-digitos/` apenas os de sufixo **numérico de um dígito**.
+     São três — o `porta-x.conf` tem de ficar de fora.
+
+  > Dica de método que vale para a vida toda: teste o padrão com `echo` antes
+  > de usá-lo num comando que altera coisas. `echo configs/porta-?.conf`
+  > mostra exatamente no que ele expande, sem tocar em nada.
+
+verificar:
+  - descricao: "um-caractere/ tem os quatro de sufixo unitário, e não o porta-10"
+    script: |
+      #!/bin/bash
+      DIR=/home/aluno/um-caractere
+      if [ ! -d "$DIR" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a pasta um-caractere/ nao existe","dica_diagnostica":"cp nao cria o diretorio de destino: crie antes com mkdir"}'
+        exit 1
+      fi
+      for nome in porta-1.conf porta-2.conf porta-3.conf porta-x.conf; do
+        if [ ! -f "$DIR/$nome" ]; then
+          echo "faltando: $nome"
+          echo 'DEVLAB_JSON:{"mensagem":"faltou algum arquivo de sufixo unitario","dica_diagnostica":"teste antes: echo ~/configs/porta-?.conf — o ? casa com QUALQUER caractere, inclusive letra"}'
+          exit 1
+        fi
+      done
+      if [ -e "$DIR/porta-10.conf" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o porta-10.conf entrou, e nao deveria: o sufixo dele tem dois caracteres","dica_diagnostica":"um ? casa exatamente um caractere. Voce provavelmente usou * no lugar."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "so-digitos/ tem os três numéricos, sem o porta-x"
+    script: |
+      #!/bin/bash
+      DIR=/home/aluno/so-digitos
+      if [ ! -d "$DIR" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a pasta so-digitos/ nao existe","dica_diagnostica":"crie o destino antes de copiar"}'
+        exit 1
+      fi
+      for nome in porta-1.conf porta-2.conf porta-3.conf; do
+        if [ ! -f "$DIR/$nome" ]; then
+          echo "faltando: $nome"
+          echo 'DEVLAB_JSON:{"mensagem":"faltou algum dos arquivos de sufixo numerico","dica_diagnostica":"uma classe de caracteres entre colchetes lista o que pode entrar — ou uma faixa, com hifen"}'
+          exit 1
+        fi
+      done
+      SOBRA=""
+      for nome in porta-x.conf porta-10.conf; do
+        [ -e "$DIR/$nome" ] && SOBRA="$SOBRA $nome"
+      done
+      if [ -n "$SOBRA" ]; then
+        echo "nao deveria estar aqui:$SOBRA"
+        echo 'DEVLAB_JSON:{"mensagem":"entrou arquivo que nao tem sufixo de um digito","dica_diagnostica":"o ? aceita letra tambem; para restringir a digito use uma classe como [0-9]"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "os originais continuam em configs/"
+    script: |
+      #!/bin/bash
+      for nome in porta-1.conf porta-2.conf porta-3.conf porta-10.conf porta-x.conf; do
+        if [ ! -f "/home/aluno/configs/$nome" ]; then
+          echo "sumiu de configs/: $nome"
+          echo 'DEVLAB_JSON:{"mensagem":"algum original saiu de configs/ — a tarefa era copiar, nao mover","dica_diagnostica":"cp deixa o original no lugar; mv nao. Use Resetar lab e refaca com cp."}'
+          exit 1
+        fi
+      done
+      exit 0
+
+dicas:
+  - "Os dois padrões que faltam estão na tabela do enunciado. Antes de copiar, use `echo` com cada um deles e compare a lista que sai: é a forma mais rápida de ver a diferença entre *um caractere qualquer* e *um dígito*."
+  - "A forma é: `mkdir -p ~/um-caractere ~/so-digitos`, depois `cp ~/configs/porta-_.conf ~/um-caractere/` e `cp ~/configs/porta-[_-_].conf ~/so-digitos/`."
+  - "mkdir -p ~/um-caractere ~/so-digitos && cp ~/configs/porta-?.conf ~/um-caractere/ && cp ~/configs/porta-[0-9].conf ~/so-digitos/"
+
+erros_comuns:
+  - match: "No such file or directory"
+    explica: "Se o padrão não casa com nada, o bash entrega o texto literal ao comando. Confirme com `echo <padrão>` no que ele expande antes de usar."
+    categoria: conceitual
+  - match: "omitting directory"
+    explica: "O padrão pegou um diretório junto. Restrinja o padrão em vez de acrescentar `-r`."
+    categoria: flag_errada
+
+cards_revisao:
+  - interrogacao-casa-um-caractere
+  - colchetes-listam-caracteres-aceitos
+  - echo-testa-o-padrao-antes
