@@ -84,6 +84,19 @@ export const PainelTerminal = forwardRef<ControleTerminal, Props>(function Paine
       cursorBlink: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
       scrollback: 5000,
       allowProposedApi: true,
+      // Sem isto o xterm.js desenha num canvas que o leitor de tela não lê: a
+      // saída do comando — o conteúdo principal da tela — some para quem usa
+      // AT. Custa um espelho em DOM vivo; é o preço de o terminal existir.
+      screenReaderMode: true,
+      /*
+       * Rede de segurança para a cor que NÃO passa pela paleta de 16.
+       *
+       * A paleta curada cobre os códigos ANSI clássicos. Um programa que emita
+       * 256 cores ou 24 bits (`\x1b[38;2;R;G;Bm`) escapa dela inteira — e
+       * `ls --color`, `git diff` e `systemctl` fazem exatamente isso. O xterm
+       * ajusta a cor em tempo de desenho para garantir o piso.
+       */
+      minimumContrastRatio: 7,
       theme: temaDoXterm(),
     })
     const fit = new FitAddon()
@@ -277,17 +290,53 @@ function rotuloDaConexao(c: Conexao): string {
   return mapa[c]
 }
 
-/** Lê as variáveis do tema para o terminal acompanhar claro/escuro. */
+/**
+ * Tema do terminal — paleta ANSI curada a ≥7:1.
+ *
+ * As 16 cores ANSI padrão reprovam em 1.4.6: 8 de 16 sobre fundo escuro, 14 de
+ * 16 sobre fundo claro. E corrigi-las só pela luminosidade COLIDE normal com
+ * bright, o que apaga um canal de informação que os programas usam. A paleta em
+ * `design/tokens.ts` resolve as duas restrições e é testada.
+ *
+ * O terminal fica ESCURO nos dois temas do app, de propósito. Em fundo claro a
+ * 7:1, `white`, `brightWhite` e `brightBlack` colapsam todos no mesmo cinza —
+ * um programa que imprime "branco brilhante" para destacar produziria o cinza
+ * de comentário. Ferramentas profissionais fazem o mesmo (o terminal do VS Code
+ * em tema claro segue escuro), e isso preserva a convenção de cor que o aluno
+ * vai encontrar no trabalho.
+ */
 function temaDoXterm(): Record<string, string> {
   const estilo = getComputedStyle(document.documentElement)
   const cor = (nome: string, padrao: string): string =>
     estilo.getPropertyValue(nome).trim() || padrao
 
+  const fundo = '#0B0E13'
   return {
-    background: cor('--fundo', '#0f1216'),
-    foreground: cor('--texto', '#e6edf3'),
-    cursor: cor('--acento', '#58a6ff'),
-    cursorAccent: cor('--fundo', '#0f1216'),
-    selectionBackground: cor('--acento-fundo', '#12283f'),
+    background: fundo,
+    foreground: cor('--ansi-white', '#D9E0E7'),
+    cursor: cor('--ansi-brightcyan', '#8FE4ED'),
+    cursorAccent: fundo,
+    // Seleção INVERTIDA em vez de fundo tingido: um fundo de seleção precisa
+    // contrastar com o canvas E manter o texto legível por cima, e as duas
+    // coisas juntas não fecham a 7:1. Invertendo, as duas saem de graça.
+    selectionBackground: cor('--ansi-white', '#D9E0E7'),
+    selectionForeground: fundo,
+
+    black: cor('--ansi-black', '#2A323D'),
+    red: cor('--ansi-red', '#F88E83'),
+    green: cor('--ansi-green', '#65BE7A'),
+    yellow: cor('--ansi-yellow', '#C5AA3B'),
+    blue: cor('--ansi-blue', '#67B1FA'),
+    magenta: cor('--ansi-magenta', '#DF92D8'),
+    cyan: cor('--ansi-cyan', '#21BDCE'),
+    white: cor('--ansi-white', '#D9E0E7'),
+    brightBlack: cor('--ansi-brightblack', '#8D949B'),
+    brightRed: cor('--ansi-brightred', '#FABFB7'),
+    brightGreen: cor('--ansi-brightgreen', '#94DEA3'),
+    brightYellow: cor('--ansi-brightyellow', '#E2CC75'),
+    brightBlue: cor('--ansi-brightblue', '#A5D1FF'),
+    brightMagenta: cor('--ansi-brightmagenta', '#FAB7F3'),
+    brightCyan: cor('--ansi-brightcyan', '#8FE4ED'),
+    brightWhite: cor('--ansi-brightwhite', '#F2F5F8'),
   }
 }

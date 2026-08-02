@@ -5,61 +5,33 @@
  * ficou só com o que é específico da lição (objetivo, dicas, terminal, árvore
  * de estado, catálogo de erros).
  *
- * ── Ponte de nomes, temporária e explícita ──────────────────────────────────
- * Os componentes da lição ainda usam os nomes antigos de variável. Em vez de
- * renomear 800 linhas de uma vez — mudança grande sem teste que a cubra — os
- * nomes velhos passam a APONTAR para os tokens novos, que são os testados a
- * 7:1. O efeito é imediato: a tela de lição herda a paleta AAA sem tocar em
- * cada regra. A dívida é o alias, e ela sai quando cada componente migrar.
+ * Consome os tokens de estilos/tokens.css diretamente — não há mais camada de
+ * alias. Nenhum valor de cor deve aparecer neste arquivo.
  */
 
-:root {
-  --fundo: var(--sup-0);
-  --fundo-2: var(--sup-1);
-  --fundo-3: var(--sup-2);
-  --fundo-4: var(--sup-3);
-  --borda: var(--borda-sutil);
-  /* --borda-forte já existe com o mesmo nome nos tokens novos */
-  --texto: var(--texto-1);
-  /* --texto-2 idem */
-  --texto-3: var(--texto-lg);   /* SÓ vale em >=24px; ver design/tokens.ts */
-  --acento: var(--azul);
-  --ok: var(--verde);
-  --aviso: var(--ambar);
-  --falha: var(--vermelho);
-  --xp: var(--roxo);
-
-  /* Fundos tingidos foram a causa de metade das reprovações de contraste:
-     elevavam a superfície e derrubavam o texto por cima. Viram superfície
-     neutra; a cor semântica passa a viver na borda, que não tem requisito. */
-  --acento-fundo: var(--sup-2);
-  --ok-fundo: var(--sup-2);
-  --aviso-fundo: var(--sup-2);
-  --falha-fundo: var(--sup-2);
-}
 
 .etiqueta--ok {
-  color: var(--ok);
-  border-color: var(--ok);
-  background: var(--ok-fundo);
+  color: var(--verde);
+  border-color: var(--verde);
+  background: var(--sup-2);
 }
 
 .etiqueta--aviso {
-  color: var(--aviso);
-  border-color: var(--aviso);
-  background: var(--aviso-fundo);
+  color: var(--ambar);
+  border-color: var(--ambar);
+  background: var(--sup-2);
 }
 
 .etiqueta--falha {
-  color: var(--falha);
-  border-color: var(--falha);
-  background: var(--falha-fundo);
+  color: var(--vermelho);
+  border-color: var(--vermelho);
+  background: var(--sup-2);
 }
 
 .etiqueta--acento {
-  color: var(--acento);
-  border-color: var(--acento);
-  background: var(--acento-fundo);
+  color: var(--azul);
+  border-color: var(--azul);
+  background: var(--sup-2);
 }
 
 /* ── painel esquerdo: objetivo ───────────────────────────────────────────── */
@@ -83,8 +55,8 @@
   display: flex;
   gap: 10px;
   padding: 10px 12px;
-  background: var(--acento-fundo);
-  border-left: 3px solid var(--acento);
+  background: var(--sup-2);
+  border-left: 3px solid var(--azul);
   border-radius: 0 var(--raio) var(--raio) 0;
   font-size: 13px;
   margin-bottom: 18px;
@@ -92,7 +64,7 @@
 
 .capacidade__rotulo {
   font-weight: 700;
-  color: var(--acento);
+  color: var(--azul);
   flex: 0 0 auto;
 }
 
@@ -131,16 +103,16 @@
 }
 
 .md code {
-  background: var(--fundo-3);
-  border: 1px solid var(--borda);
+  background: var(--sup-2);
+  border: 1px solid var(--borda-sutil);
   border-radius: 5px;
   padding: 1px 5px;
 }
 
 .md pre {
   position: relative;
-  background: var(--fundo-2);
-  border: 1px solid var(--borda);
+  background: var(--sup-1);
+  border: 1px solid var(--borda-sutil);
   border-radius: var(--raio);
   padding: 10px 12px;
   margin: 0 0 12px;
@@ -151,8 +123,8 @@
 
 .md pre:hover,
 .md pre:focus-visible {
-  border-color: var(--acento);
-  background: var(--acento-fundo);
+  border-color: var(--azul);
+  background: var(--sup-2);
 }
 
 .md pre::after {
@@ -162,7 +134,7 @@
   right: 8px;
   font-family: var(--fonte);
   font-size: 10px;
-  color: var(--texto-3);
+  color: var(--texto-2);
   opacity: 0;
   transition: opacity var(--transicao);
 }
@@ -183,7 +155,7 @@
   padding: 8px 12px;
   border-left: 3px solid var(--borda-forte);
   color: var(--texto-2);
-  background: var(--fundo-2);
+  background: var(--sup-1);
   border-radius: 0 var(--raio) var(--raio) 0;
 }
 
@@ -196,13 +168,13 @@
 
 .md th,
 .md td {
-  border: 1px solid var(--borda);
+  border: 1px solid var(--borda-sutil);
   padding: 5px 8px;
   text-align: left;
 }
 
 .md th {
-  background: var(--fundo-2);
+  background: var(--sup-1);
 }
 
 /* ── seções da coluna esquerda ───────────────────────────────────────────── */
@@ -210,7 +182,7 @@
 .secao {
   margin-top: 22px;
   padding-top: 18px;
-  border-top: 1px solid var(--borda);
+  border-top: 1px solid var(--borda-sutil);
 }
 
 .secao__titulo {
@@ -222,7 +194,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--texto-3);
+  color: var(--texto-2);
   margin: 0 0 10px;
 }
 
@@ -253,31 +225,31 @@
   font-size: 11px;
   font-weight: 700;
   border: 1px solid var(--borda-forte);
-  background: var(--fundo-3);
-  color: var(--texto-3);
+  background: var(--sup-2);
+  color: var(--texto-2);
   margin-top: 1px;
 }
 
 .check--ok .check__marca {
-  background: var(--ok-fundo);
-  border-color: var(--ok);
-  color: var(--ok);
+  background: var(--sup-2);
+  border-color: var(--verde);
+  color: var(--verde);
 }
 
 .check--falha .check__marca {
-  background: var(--falha-fundo);
-  border-color: var(--falha);
-  color: var(--falha);
+  background: var(--sup-2);
+  border-color: var(--vermelho);
+  color: var(--vermelho);
 }
 
 .check--ok {
-  color: var(--texto);
+  color: var(--texto-1);
 }
 
 .check__detalhe {
   display: block;
   font-size: 12.5px;
-  color: var(--texto-3);
+  color: var(--texto-2);
   margin-top: 2px;
 }
 
@@ -291,8 +263,8 @@
 
 .dica {
   padding: 10px 12px;
-  background: var(--fundo-2);
-  border: 1px solid var(--borda);
+  background: var(--sup-1);
+  border: 1px solid var(--borda-sutil);
   border-radius: var(--raio);
   font-size: 13.5px;
 }
@@ -305,7 +277,7 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--texto-3);
+  color: var(--texto-2);
   margin-bottom: 6px;
 }
 
@@ -326,21 +298,21 @@
 }
 
 .dica__botao:hover:not(:disabled) {
-  border-color: var(--acento);
-  color: var(--texto);
+  border-color: var(--azul);
+  color: var(--texto-1);
 }
 
 .dica__botao:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   border-style: dotted;
-  background: var(--fundo-2);
+  background: var(--sup-1);
 }
 
 .dica__custo {
   font-size: 11px;
   font-weight: 700;
-  color: var(--aviso);
+  color: var(--ambar);
   white-space: nowrap;
 }
 
@@ -348,7 +320,7 @@
 
 .ia__nota {
   font-size: 12.5px;
-  color: var(--texto-3);
+  color: var(--texto-2);
   margin: 0 0 10px;
   line-height: 1.5;
 }
@@ -358,8 +330,8 @@
 }
 
 .ia__nota code {
-  background: var(--fundo-3);
-  border: 1px solid var(--borda);
+  background: var(--sup-2);
+  border: 1px solid var(--borda-sutil);
   border-radius: 4px;
   padding: 1px 5px;
 }
@@ -368,9 +340,9 @@
   margin-top: 12px;
   padding: 12px;
   border: 1px solid var(--borda-forte);
-  border-left: 3px solid var(--xp);
+  border-left: 3px solid var(--roxo);
   border-radius: 0 var(--raio) var(--raio) 0;
-  background: var(--fundo-2);
+  background: var(--sup-1);
   font-size: 13.5px;
 }
 
@@ -389,7 +361,7 @@
   margin-left: auto;
   font-size: 11px;
   font-weight: 500;
-  color: var(--texto-3);
+  color: var(--texto-2);
   font-variant-numeric: tabular-nums;
 }
 
@@ -397,20 +369,20 @@
 
 .resultado {
   border-radius: var(--raio-g);
-  border: 1px solid var(--borda);
+  border: 1px solid var(--borda-sutil);
   padding: 14px;
   margin-bottom: 16px;
-  background: var(--fundo-2);
+  background: var(--sup-1);
 }
 
 .resultado--ok {
-  border-color: var(--ok);
-  background: var(--ok-fundo);
+  border-color: var(--verde);
+  background: var(--sup-2);
 }
 
 .resultado--falha {
-  border-color: var(--falha);
-  background: var(--falha-fundo);
+  border-color: var(--vermelho);
+  background: var(--sup-2);
 }
 
 .resultado__topo {
@@ -424,26 +396,26 @@
 
 .resultado__xp {
   margin-left: auto;
-  color: var(--xp);
+  color: var(--roxo);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
 .erro-catalogado {
   margin-top: 12px;
-  border: 1px solid var(--borda);
+  border: 1px solid var(--borda-sutil);
   border-radius: var(--raio);
   overflow: hidden;
-  background: var(--fundo);
+  background: var(--sup-0);
 }
 
 .erro-catalogado__mensagem {
   padding: 9px 12px;
-  background: var(--fundo-3);
-  border-bottom: 1px solid var(--borda);
+  background: var(--sup-2);
+  border-bottom: 1px solid var(--borda-sutil);
   font-family: var(--fonte-mono);
   font-size: 12.5px;
-  color: var(--falha);
+  color: var(--vermelho);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -461,15 +433,15 @@
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--texto-3);
+  color: var(--texto-2);
   margin-bottom: 2px;
 }
 
 .saida-bruta {
   margin: 8px 0 0;
   padding: 9px 11px;
-  background: var(--fundo);
-  border: 1px solid var(--borda);
+  background: var(--sup-0);
+  border: 1px solid var(--borda-sutil);
   border-radius: var(--raio);
   font-size: 12.5px;
   white-space: pre-wrap;
@@ -485,7 +457,7 @@
   flex: 1 1 auto;
   min-height: 0;
   padding: 8px 4px 4px 10px;
-  background: var(--fundo);
+  background: var(--sup-0);
 }
 
 .terminal .xterm {
@@ -504,16 +476,16 @@
   border-radius: 6px 6px 0 0;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--texto-3);
+  color: var(--texto-2);
   font-size: 12px;
   font-weight: 600;
 }
 
 .aba[aria-selected="true"] {
-  background: var(--fundo);
-  border-color: var(--borda);
-  border-bottom-color: var(--fundo);
-  color: var(--texto);
+  background: var(--sup-0);
+  border-color: var(--borda-sutil);
+  border-bottom-color: var(--sup-0);
+  color: var(--texto-1);
 }
 
 .terminal-vazio {
@@ -522,7 +494,7 @@
   height: 100%;
   padding: 32px;
   text-align: center;
-  color: var(--texto-3);
+  color: var(--texto-2);
 }
 
 /* ── painel direito: estado ──────────────────────────────────────────────── */
@@ -536,8 +508,8 @@
 
 .recurso {
   padding: 9px 11px;
-  background: var(--fundo-2);
-  border: 1px solid var(--borda);
+  background: var(--sup-1);
+  border: 1px solid var(--borda-sutil);
   border-radius: var(--raio);
 }
 
@@ -545,7 +517,7 @@
   font-size: 10.5px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--texto-3);
+  color: var(--texto-2);
   font-weight: 700;
 }
 
@@ -559,7 +531,7 @@
 .recurso__barra {
   height: 3px;
   border-radius: 999px;
-  background: var(--fundo-4);
+  background: var(--sup-3);
   margin-top: 6px;
   overflow: hidden;
 }
@@ -567,7 +539,7 @@
 .recurso__barra i {
   display: block;
   height: 100%;
-  background: var(--acento);
+  background: var(--azul);
   transition: width var(--transicao);
 }
 
@@ -583,7 +555,7 @@
   list-style: none;
   margin: 0;
   padding-left: 14px;
-  border-left: 1px solid var(--borda);
+  border-left: 1px solid var(--borda-sutil);
 }
 
 .arvore li {
@@ -599,16 +571,16 @@
 
 .no__icone {
   flex: 0 0 auto;
-  color: var(--texto-3);
+  color: var(--texto-2);
 }
 
 .no--diretorio .no__nome {
-  color: var(--acento);
+  color: var(--azul);
   font-weight: 600;
 }
 
 .no--link .no__nome {
-  color: var(--xp);
+  color: var(--roxo);
 }
 
 .no__nome {
@@ -619,7 +591,7 @@
 .no__meta {
   margin-left: auto;
   padding-left: 10px;
-  color: var(--texto-3);
+  color: var(--texto-2);
   font-size: 11px;
   flex: 0 0 auto;
 }
@@ -645,7 +617,7 @@
 
 .trilha__resumo {
   font-size: 12.5px;
-  color: var(--texto-3);
+  color: var(--texto-2);
   margin: 0 0 10px;
 }
 
@@ -665,19 +637,19 @@
   width: 100%;
   padding: 9px 11px;
   border-radius: var(--raio);
-  border: 1px solid var(--borda);
-  background: var(--fundo-2);
+  border: 1px solid var(--borda-sutil);
+  background: var(--sup-1);
   text-align: left;
   transition: border-color var(--transicao), background var(--transicao);
 }
 
 .item-licao:hover:not(:disabled) {
-  border-color: var(--acento);
+  border-color: var(--azul);
 }
 
 .item-licao[aria-current="true"] {
-  border-color: var(--acento);
-  background: var(--acento-fundo);
+  border-color: var(--azul);
+  background: var(--sup-2);
 }
 
 .item-licao:disabled {
@@ -695,14 +667,14 @@
   font-size: 11px;
   font-weight: 700;
   border: 1px solid var(--borda-forte);
-  background: var(--fundo-3);
-  color: var(--texto-3);
+  background: var(--sup-2);
+  color: var(--texto-2);
 }
 
 .item-licao--concluida .item-licao__marca {
-  background: var(--ok-fundo);
-  border-color: var(--ok);
-  color: var(--ok);
+  background: var(--sup-2);
+  border-color: var(--verde);
+  color: var(--verde);
 }
 
 .item-licao__texto {
@@ -720,7 +692,7 @@
 
 .item-licao__meta {
   font-size: 11.5px;
-  color: var(--texto-3);
+  color: var(--texto-2);
 }
 
 /* ── mensagens e vazios ──────────────────────────────────────────────────── */
@@ -728,7 +700,7 @@
 .vazio {
   padding: 28px 20px;
   text-align: center;
-  color: var(--texto-3);
+  color: var(--texto-2);
   font-size: 13.5px;
 }
 
@@ -737,15 +709,15 @@
   gap: 10px;
   padding: 11px 13px;
   border-radius: var(--raio);
-  border: 1px solid var(--falha);
-  background: var(--falha-fundo);
+  border: 1px solid var(--vermelho);
+  background: var(--sup-2);
   font-size: 13.5px;
   margin-bottom: 14px;
 }
 
 .alerta--aviso {
-  border-color: var(--aviso);
-  background: var(--aviso-fundo);
+  border-color: var(--ambar);
+  background: var(--sup-2);
 }
 
 .alerta__icone {
@@ -780,17 +752,17 @@
   display: flex;
   gap: 11px;
   padding: 11px 13px;
-  border: 1px solid var(--borda);
+  border: 1px solid var(--borda-sutil);
   border-radius: var(--raio);
-  background: var(--fundo-2);
+  background: var(--sup-1);
 }
 
-.doctor__item--falha {
-  border-color: var(--falha);
+.doctor__item--vermelho {
+  border-color: var(--vermelho);
 }
 
-.doctor__item--aviso {
-  border-color: var(--aviso);
+.doctor__item--ambar {
+  border-color: var(--ambar);
 }
 
 .doctor__correcao {
@@ -818,23 +790,23 @@
   width: 100%;
   padding: 5px 12px;
   border: none;
-  border-bottom: 1px solid var(--borda);
-  background: var(--fundo-2);
-  color: var(--texto-3);
+  border-bottom: 1px solid var(--borda-sutil);
+  background: var(--sup-1);
+  color: var(--texto-2);
   font-size: 11.5px;
   text-align: left;
 }
 
 .terminal__entrada:hover {
-  color: var(--texto);
-  background: var(--fundo-3);
+  color: var(--texto-1);
+  background: var(--sup-2);
 }
 
 .terminal__entrada kbd {
   padding: 1px 5px;
   border: 1px solid var(--borda-forte);
   border-radius: 4px;
-  background: var(--fundo-3);
+  background: var(--sup-2);
   font-size: 10.5px;
 }
 
@@ -857,7 +829,7 @@
 
 .escala__valor {
   font-size: 11px;
-  color: var(--texto-3);
+  color: var(--texto-2);
   font-variant-numeric: tabular-nums;
   min-width: 3.2em;
   text-align: center;
