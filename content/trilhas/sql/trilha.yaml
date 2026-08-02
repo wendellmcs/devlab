@@ -1,0 +1,15 @@
+id: sql
+titulo: "SQL & bancos de dados"
+resumo: >-
+  Consultar e modelar dados, com uma base de CDR de telefonia como
+  dataset-âncora: ASR, ACD e relatório de bilhetagem.
+ordem: 2
+icone: "▦"
+fase: 1
+# Sem lições escritas ainda. Aparece no mapa como "em breve" — o aluno vê o
+# caminho inteiro em vez de concluir que o produto acabou na primeira trilha.
+situacao: em_breve
+capacidades:
+  operador: "Sei consultar e filtrar dados de uma tabela."
+  construtor: "Sei juntar tabelas, agregar e modelar um esquema normalizado."
+  engenheiro: "Sei diagnosticar consulta lenta pelo plano de execução e criar o índice certo."

@@ -172,6 +172,15 @@ export const TrilhaSchema = z.object({
   ordem: z.number().int().nonnegative(),
   icone: z.string().default('•'),
   fase: z.number().int().nonnegative().default(0),
+  /**
+   * Trilha sem lições ainda escritas aparece no mapa como "em breve".
+   *
+   * Mostrar o caminho inteiro é decisão pedagógica, não vitrine: sem isso o
+   * aluno abre o app, vê uma trilha só e conclui que o produto acabou — em vez
+   * de entender que está no começo de uma jornada de dez. A honestidade está
+   * no rótulo: o que não existe é dito que não existe, em vez de escondido.
+   */
+  situacao: z.enum(['disponivel', 'em_breve']).default('disponivel'),
   /** Declaração de capacidade por nível, mostrada na skill tree. */
   capacidades: z.record(z.enum(NIVEIS), z.string()).default({}),
 })

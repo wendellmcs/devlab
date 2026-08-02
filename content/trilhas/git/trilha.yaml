@@ -1,0 +1,15 @@
+id: git
+titulo: "Git & versionamento"
+resumo: >-
+  Guardar histórico, desfazer sem medo e versionar configuração de
+  telefonia — dialplan, kamailio.cfg, playbook.
+ordem: 1
+icone: "⎇"
+fase: 1
+# Sem lições escritas ainda. Aparece no mapa como "em breve" — o aluno vê o
+# caminho inteiro em vez de concluir que o produto acabou na primeira trilha.
+situacao: em_breve
+capacidades:
+  operador: "Sei registrar mudanças e ler o histórico do repositório."
+  construtor: "Sei trabalhar com branches, remotos e resolver conflitos."
+  engenheiro: "Sei recuperar histórico perdido e escolher o workflow certo para a equipe."

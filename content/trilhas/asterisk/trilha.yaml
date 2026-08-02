@@ -1,0 +1,15 @@
+id: asterisk
+titulo: "Asterisk"
+resumo: >-
+  PJSIP, extensions.conf, filas, AMI e ARI — com comparação direta contra
+  o FreeSWITCH e migração de fluxo.
+ordem: 7
+icone: "✆"
+fase: 4
+# Sem lições escritas ainda. Aparece no mapa como "em breve" — o aluno vê o
+# caminho inteiro em vez de concluir que o produto acabou na primeira trilha.
+situacao: em_breve
+capacidades:
+  operador: "Sei navegar a configuração e o console do Asterisk."
+  construtor: "Sei escrever dialplan e configurar endpoints PJSIP."
+  engenheiro: "Sei integrar por AMI/ARI e migrar um fluxo entre Asterisk e FreeSWITCH."

@@ -6,6 +6,7 @@ resumo: >-
 ordem: 0
 icone: "⌘"
 fase: 0
+situacao: disponivel
 capacidades:
   operador: "Sei navegar e executar comandos individuais para inspecionar e alterar o estado."
   construtor: "Sei compor fluxos de vários passos e diagnosticar falhas comuns."
