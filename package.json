@@ -18,7 +18,7 @@
     "agente": "npm run dev --workspace @devlab/agent",
     "ui": "npm run dev --workspace @devlab/ui",
     "imagens": "bash scripts/build-imagens.sh",
-    "teste": "npm run teste --workspace @devlab/agent",
+    "teste": "npm run teste --workspaces --if-present",
     "teste:integracao": "npm run teste:integracao --workspace @devlab/agent",
     "fumaca": "bash scripts/fumaca.sh",
     "valida": "python3 scripts/valida-conteudo.py",

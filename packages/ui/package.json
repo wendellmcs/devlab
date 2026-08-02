@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tipos": "tsc --noEmit"
+    "tipos": "tsc --noEmit",
+    "teste": "node --test src/design/tokens.test.ts"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.10.0",
