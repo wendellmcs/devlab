@@ -1,0 +1,81 @@
+id: linux-op-09-ajuda
+trilha: linux
+nivel: operador
+ordem: 9
+titulo: "Pedir ajuda ao próprio sistema"
+capacidade: "Sei descobrir sozinho a opção que preciso, sem sair do terminal."
+xp: 18
+prereqs: [linux-op-08-ler-arquivos]
+
+objetivo_md: |
+  Ninguém decora flags. O que separa quem trava de quem resolve é saber
+  **onde perguntar** — e a resposta está na própria máquina.
+
+  | Recurso | Uso |
+  |---|---|
+  | `comando --help` | resumo rápido das opções |
+  | `man comando` | o manual completo (`/` busca, `q` sai) |
+  | `apropos assunto` | procura comandos por assunto |
+  | `type comando` | diz se é builtin, alias ou programa |
+  | `which comando` | mostra o caminho do executável |
+
+  Dentro do `man`, procure a seção **OPTIONS**. Buscar com `/palavra` e pular
+  entre ocorrências com `n` economiza muito tempo.
+
+  ### Sua tarefa
+
+  Sem que ninguém te diga qual é a opção:
+
+  1. Descubra qual opção do `wc` conta **apenas palavras** e grave em
+     `palavras.txt` a contagem de palavras de `documentos/notas.txt`.
+  2. Grave em `caminho-ls.txt` o **caminho completo do executável** do `ls`.
+
+verificar:
+  - descricao: "palavras.txt tem a contagem de palavras de documentos/notas.txt"
+    script: |
+      #!/bin/bash
+      ALVO=/home/aluno/documentos/notas.txt
+      ARQ=/home/aluno/palavras.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"palavras.txt nao existe","dica_diagnostica":"rode wc --help e procure na lista a opcao descrita como word count"}'
+        exit 1
+      fi
+      ESPERADO=$(wc -w < "$ALVO")
+      OBTIDO=$(awk 'NR==1 {print $1}' "$ARQ")
+      if [ "$OBTIDO" != "$ESPERADO" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o numero gravado nao e a contagem de palavras do arquivo","dica_diagnostica":"cuidado para nao gravar a contagem de linhas ou de bytes: sao opcoes diferentes do mesmo comando"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "caminho-ls.txt aponta para o executável do ls"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/caminho-ls.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"caminho-ls.txt nao existe","dica_diagnostica":"ha um comando que responde exatamente qual executavel o shell usaria"}'
+        exit 1
+      fi
+      if ! grep -qE '(^|[[:space:]])/(usr/)?bin/ls([[:space:]]|$)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao contem o caminho do executavel do ls","dica_diagnostica":"compare a saida de type ls com a de which ls: uma delas devolve so o caminho"}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Para o primeiro item, `wc --help` lista as opções com uma descrição de uma linha cada — uma delas fala em palavras. Para o segundo, existe um comando cujo nome é literalmente a pergunta *qual*."
+  - "A forma é: `wc -_ documentos/notas.txt > palavras.txt` e `_____ ls > caminho-ls.txt`."
+  - "wc -w ~/documentos/notas.txt > ~/palavras.txt ; which ls > ~/caminho-ls.txt"
+
+erros_comuns:
+  - match: "No manual entry"
+    explica: "Não existe página de manual com esse nome. Confira a grafia, ou tente `comando --help`, que quase sempre existe."
+    categoria: sintaxe
+  - match: "invalid option|unrecognized option"
+    explica: "A opção não existe nesse comando. `--help` lista as válidas — é mais rápido que adivinhar."
+    categoria: flag_errada
+
+cards_revisao:
+  - help-lista-as-opcoes
+  - man-tem-a-secao-options
+  - which-mostra-o-executavel

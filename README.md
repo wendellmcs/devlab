@@ -1,0 +1,428 @@
+# DevLab — Oficina Prática de Infraestrutura e VoIP
+
+Curso + oficina prática de infraestrutura e telefonia IP, rodando **localmente**
+em Linux (no Windows, dentro do WSL2). O software é **de verdade**, em
+containers descartáveis; a aplicação é a camada de **curso, verificação e
+visualização** por cima dele.
+
+> **Estado atual: Fase 0 (MVP) implementada.** O loop central está fechado —
+> comando real → verificação por estado → progresso — sem nenhuma dependência de IA.
+
+---
+
+## O que já existe
+
+| Peça | Situação |
+|---|---|
+| `devlab-agent` — Lab Manager, PTY Bridge, Verifier Runner, State Extractor, Progress Store | pronto |
+| Interface de 3 painéis (objetivo · terminal real · estado ao vivo) | pronta |
+| Imagem `devlab/linux-base` com árvore semeada | pronta |
+| Trilha **Linux · Operador** completa: 11 lições, incluindo capstone | pronta |
+| XP, custo de dica, portão de pré-requisitos, progresso em SQLite | pronto |
+| Catálogo de erros de Linux (6 assinaturas reais) | pronto |
+| `devlab doctor` | pronto |
+| Camada de IA opcional (Ollama local) | pronta — **desligada por padrão**, adiantada da Fase 2 |
+| Git, SQL, Docker, Servidores, FreeSWITCH, SIP/RTP, Kamailio, Asterisk | Fases 1 a 4 |
+
+---
+
+## Compatibilidade
+
+| Ambiente | Situação |
+|---|---|
+| **Linux nativo** (Ubuntu, Debian, Fedora, Arch…) | suportado |
+| **Windows via WSL2** com distro Linux | suportado — instale *dentro* do WSL2 |
+| Windows sem WSL2 · macOS | **não suportado** |
+
+O requisito real é **Linux com Docker**, não WSL2. O WSL2 é apenas o caminho de
+quem está no Windows. O gate é explícito: `install.sh` e `scripts/setup.sh`
+abortam fora do Linux, e o `devlab doctor` informa se está em Linux nativo ou
+sobre WSL2.
+
+Não é uma limitação que dê para contornar de leve: o currículo ensina systemd,
+cgroups, firewall e captura de pacote em containers reais. O PRD documenta um
+caminho de fallback em navegador puro (§16, Anexo A) — que custa fidelidade e
+não é o caminho recomendado.
+
+---
+
+## Instalação
+
+Dentro do **Ubuntu do WSL2** (ou de qualquer Linux), um comando:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wendellmax/devlab/main/install.sh | bash
+```
+
+Ele clona o repositório em `~/devlab` e chama `scripts/setup.sh`, que cuida do
+resto: confere o sistema, instala **Node 24** e o **Docker Engine** se
+faltarem, põe seu usuário no grupo `docker`, oferece o **Ollama** com o modelo
+certo para a memória da sua máquina, instala as dependências, constrói a imagem
+de lab e roda o diagnóstico final. É idempotente — rodar de novo só conserta o
+que faltar.
+
+Se já clonou o repositório:
+
+```bash
+./scripts/setup.sh              # bootstrap completo
+./scripts/setup.sh --so-conferir  # só diagnostica, não instala nada
+./scripts/setup.sh -y --sem-ia    # sem perguntas, sem IA
+```
+
+Depois disso existe o comando `devlab` no seu PATH:
+
+```bash
+devlab iniciar      # sobe o agente (:7788) e a interface (:5173)
+devlab doctor       # diagnóstico do ambiente
+devlab licoes       # lista trilhas e lições carregadas
+devlab validar      # valida o conteúdo declarativo
+devlab atualizar    # git pull + dependências + setup
+```
+
+Abra <http://127.0.0.1:5173>, escolha **Linux → Anatomia do shell** e um
+container sobe em segundos com um bash de verdade dentro dele.
+
+### O que o setup exige
+
+- **Linux** — no Windows, o Ubuntu do WSL2
+- **Node.js 24+** — o agente roda TypeScript direto, sem passo de build, e usa
+  o módulo nativo `node:sqlite`
+- **Docker Engine** (no Windows: dentro do WSL2, ou Docker Desktop com backend WSL2)
+- ~3 GB de disco para a Fase 0 (20–30 GB quando as trilhas de VoIP entrarem)
+- **Ollama** — opcional, só para a camada de IA
+
+> **WSL2 e memória.** Por padrão o WSL2 fica com metade da RAM do Windows. Se o
+> `setup.sh` reclamar de pouca memória para o modelo de IA, aumente o teto em
+> `C:\Users\<você>\.wslconfig` (`[wsl2]` / `memory=16GB`) e rode `wsl --shutdown`.
+
+---
+
+## IA local, opcional (Ollama)
+
+**Desligada por padrão. Roda na sua máquina. Nunca resolve a tarefa.**
+
+O PRD previa BYO key com um provedor na nuvem. A implementação usa **Ollama
+local** porque isso é estritamente melhor para este projeto: não há chave para
+vazar, nenhum dado do aluno sai da máquina e o princípio 4 — *offline após o
+primeiro build* — continua valendo sem asterisco, já que o modelo é baixado uma
+vez como as imagens.
+
+```bash
+DEVLAB_IA=1 devlab iniciar     # ou DEVLAB_IA=1 em .env
+```
+
+Modelo por perfil de máquina (o `setup.sh` escolhe sozinho pela RAM):
+
+| RAM | Modelo | Tamanho | Nota |
+|---|---|---|---|
+| 32 GB+ | `qwen2.5-coder:14b` | ~9 GB | melhor qualidade de explicação |
+| 16 GB+ | `qwen2.5-coder:7b` | ~4,7 GB | o equilíbrio recomendado |
+| 8 GB+ | `llama3.2:3b` | ~2 GB | máquina apertada |
+
+### Os três momentos de uso
+
+| Momento | Quando | Pode mostrar comando? |
+|---|---|---|
+| **Explicar meu erro** | depois de uma verificação reprovada | não |
+| **Revisar minha solução** | depois de você passar | **sim** — o exercício já foi vencido |
+| **Pergunta guia** | quando quiser | não — responde com uma pergunta |
+
+### Como "nunca resolve a tarefa" é garantido
+
+Não por instrução no prompt, que um modelo local pequeno ignora com alguma
+frequência, mas por construção:
+
+1. **A IA nunca vê a solução.** O contexto é montado por *lista de permissões*
+   em [`montarContextoSeguro`](packages/agent/src/ia/servico.ts): passam
+   enunciado, descrições dos critérios, saída do terminal e o diagnóstico dos
+   checks reprovados. As dicas, a `solucao_referencia`, o corpo dos scripts de
+   check, o `setup` e o `break` não existem para ela. Há teste provando que
+   nenhum desses segredos atravessa.
+2. **Blocos de código são removidos** da resposta nos momentos em que comando é
+   proibido, e o aluno é avisado de que isso aconteceu.
+3. **Usar custa.** Cada consulta debita o mesmo que a dica de nível 3 e derruba
+   o selo de *resolvido sem ajuda* — que é o que a métrica de Autonomia mede.
+4. **Retirar a IA não quebra nada.** Sem Ollama, a interface mostra a seção
+   explicando como ligar e segue funcionando inteira.
+
+---
+
+## Configuração
+
+Copie [`.env.example`](.env.example) para `.env` — o agente carrega
+automaticamente. O `setup.sh` já cria um com a IA desligada e o modelo
+recomendado preenchido.
+
+---
+
+## Arquitetura
+
+```
+Linux  (nativo, ou dentro do WSL2 quando o host é Windows)
+    ├── Docker Engine
+    ├── devlab-agent  (Node 24 + TypeScript, sem build)
+    │     ├── Lab Manager      → ciclo de vida dos containers, limites, reset, injeção de falha
+    │     ├── PTY Bridge       → docker exec -t → WebSocket → xterm.js (uma sessão por aba)
+    │     ├── Verifier Runner  → copia e roda os checks dentro do lab
+    │     ├── State Extractor  → lê o container e alimenta o painel da direita
+    │     └── Progress Store   → SQLite local (XP, tentativas, dicas, erros)
+    └── Imagens de lab em cache
+Browser (localhost) → UI React + TypeScript + Vite
+```
+
+### Decisões de stack e o porquê
+
+| Decisão | Motivo |
+|---|---|
+| **Node 24 executando `.ts` direto** | O type stripping nativo elimina o passo de build do agente. `tsc` fica só para checagem de tipos (`npm run tipos`). |
+| **`node:sqlite` embutido** | Zero dependência nativa. Sem `better-sqlite3`, sem `node-gyp`, sem compilador no ambiente. |
+| **`dockerode` para tudo, inclusive o PTY** | `exec` com `Tty: true` devolve um stream duplex — é o terminal, sem precisar de `node-pty` (que exigiria compilação nativa). |
+| **`node:http` + `ws` crus** | O agente expõe uma API pequena. Um framework acrescentaria superfície de versão sem ganho. |
+| **Conteúdo em YAML, fora do código** | Escrever lição não pode exigir recompilar aplicação. É o que faz as 10 trilhas caberem. |
+
+---
+
+## Onde cada princípio não-negociável foi atendido
+
+| Princípio | Onde |
+|---|---|
+| **1. Execução real, ambiente descartável** | `lab/gerenciador.ts` — container por lição, `AutoRemove`, `reiniciar()` destrói e recria a partir da imagem. `rm -rf /` mata só o lab. |
+| **2. Núcleo 100% sem IA** | Existe um cliente de IA (`ia/ollama.ts`), mas o núcleo não depende dele: `DEVLAB_IA=0` por padrão, `/api/ia/*` responde 409 quando desligada, e a prova de fumaça verifica isso. Conteúdo, checks, dicas e catálogo são determinísticos. |
+| **3. Verificação por estado, nunca por texto** | `verificacao/executor.ts` só roda scripts que inspecionam o container: o veredito sai do código de saída, nada mais. O agente recebe as teclas (é ele quem faz a ponte do terminal) e guarda a saída recente — mas isso alimenta só a classificação de erro depois de reprovar, nunca a decisão. |
+| **4. Offline após o primeiro build** | `#garantirImagem()` recusa lab com imagem ausente em vez de puxar da rede. O único passo online é `npm run imagens`. |
+| **5. Jogo a serviço da competência** | `progresso/regras.ts`: XP ponderado pela dificuldade da lição, dica desconta de verdade, refazer lição concluída rende zero. A UI mostra **Autonomia** (% resolvido sem ajuda) ao lado do XP. |
+| **6. Isolamento por padrão** | `lab/limites.ts`: `NetworkMode: none`, `CapDrop: ALL` + conjunto mínimo, `no-new-privileges`, sem bind mount, limites de CPU/RAM/PIDs, TTL de ocioso. |
+
+---
+
+## Modelo de conteúdo
+
+Cada lição é um YAML em `content/trilhas/<trilha>/<nivel>/`. O formato completo
+está em [`packages/agent/src/conteudo/schema.ts`](packages/agent/src/conteudo/schema.ts).
+
+```yaml
+id: linux-op-01-shell
+trilha: linux
+nivel: operador
+ordem: 1
+titulo: "Anatomia do shell"
+capacidade: "Sei executar um comando e gravar a saída dele em um arquivo."
+xp: 10
+prereqs: []
+
+lab:                      # tudo opcional — os padrões já são os seguros
+  setup: |                # roda como root ao subir o lab
+    install -o aluno -g aluno -d /home/aluno/temporarios
+  break: |                # injeção de falha, para labs quebra/conserta
+    iptables -A INPUT -p udp --dport 16384:32768 -j DROP
+
+objetivo_md: |
+  Enunciado em Markdown. Blocos de código viram botões que inserem no terminal.
+
+verificar:                # inspeciona ESTADO, nunca o comando digitado
+  - descricao: "saudacao.txt tem o texto pedido"
+    script: |
+      #!/bin/bash
+      [ -f /home/aluno/saudacao.txt ] || {
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo ainda nao existe","dica_diagnostica":"liste com ls -l ~"}'
+        exit 1
+      }
+      exit 0
+
+dicas:                    # escada de 3 degraus; vazio = tarefa sem ajuda
+  - "empurrão conceitual"
+  - "a forma do comando, com lacuna"
+  - "a solução"
+
+erros_comuns:
+  - match: "command not found"
+    explica: "O shell não achou esse programa."
+    categoria: sintaxe
+
+cards_revisao: [echo-escreve-na-saida]
+```
+
+### Como um check comunica diagnóstico
+
+O script devolve o veredito pelo **código de saída** e, opcionalmente, uma
+explicação estruturada numa linha:
+
+```bash
+echo 'DEVLAB_JSON:{"mensagem":"o que está errado","dica_diagnostica":"como investigar"}'
+```
+
+A UI mostra sempre a mensagem original primeiro e a explicação depois — o aluno
+precisa aprender a ler o erro de verdade.
+
+### Adicionando uma lição
+
+1. Crie o YAML em `content/trilhas/<trilha>/<nivel>/`.
+2. Rode `npm run valida`. Ele não precisa de Docker: confere o schema, o
+   grafo de pré-requisitos, a sintaxe de todo script (`bash -n`) e então
+   **executa os checks numa árvore falsa**, exigindo que reprovem antes da
+   solução de referência e aprovem depois. É o que pega os dois erros caros:
+   check que aprova sozinho (e portanto não mede nada) e dica de nível 3 que
+   não é um comando executável.
+
+   Uma ressalva honesta sobre o alcance: ele roda com o **bash e as ferramentas
+   do seu host**, não com as da imagem. Se o seu sistema usa uutils coreutils ou
+   `bfs` no lugar do `find` do GNU, as mensagens diferem das do lab. Quem prova
+   o comportamento contra a imagem de verdade é `npm run teste:integracao`.
+3. Recarregue sem reiniciar o agente: `curl -X POST localhost:7788/api/conteudo/recarregar`.
+
+Lições sem dicas (capstones) declaram `solucao_referencia` — um campo que
+existe só para o validador e **nunca** é enviado ao browser.
+
+---
+
+## Estrutura do repositório
+
+```
+content/                        conteúdo declarativo (YAML), separado do código
+  trilhas/linux/                trilha + lições
+  catalogo/linux.yaml           catálogo de erros
+images/linux-base/              Dockerfile + árvore semeada da imagem
+packages/agent/                 devlab-agent
+  src/conteudo/                 schema (zod) e carregador
+  src/lab/                      Lab Manager e limites de isolamento
+  src/verificacao/              Verifier Runner e classificação de erros
+  src/estado/                   State Extractor
+  src/progresso/                SQLite e regras de XP
+  src/http/                     API, roteador e PTY Bridge
+  src/cli/devlab.ts             devlab doctor · devlab licoes
+packages/ui/                    interface React de 3 painéis
+scripts/                        setup.sh · install one-liner · dev.sh
+  build-imagens.sh              constrói e detecta imagem desatualizada
+  valida-conteudo.py            valida e executa os checks sem Docker
+  fumaca.sh                     prova o loop central pela API
+```
+
+---
+
+## Testes
+
+```bash
+npm run teste              # unitários, sem Docker
+npm run valida             # valida o conteúdo e executa os checks sem Docker
+npm run teste:integracao   # sobe containers de verdade (pula se faltar Docker ou imagem)
+npm run fumaca             # prova o loop central pela API, ponta a ponta
+npm run tipos              # checagem de tipos dos dois pacotes
+```
+
+A **prova de fumaça** é a que responde "está funcionando?" numa instalação
+nova: sobe o agente numa porta e num banco descartáveis, cria um lab, verifica
+(tem de reprovar), resolve com um comando de verdade dentro do container,
+verifica de novo (tem de aprovar e creditar exatamente 10 XP), confirma que
+refazer não rende XP outra vez, que a dica cobra, que a árvore de arquivos do
+painel reflete o arquivo recém-criado, que a IA está desligada, que o reset
+devolve o lab ao estado inicial e que não sobra container órfão.
+
+Os unitários cobrem schema de conteúdo, carregador (YAML inválido, prereq
+fantasma, ciclo no DAG), regras de XP e persistência, extração de diagnóstico,
+classificação de erros, montagem da árvore de arquivos, roteamento HTTP e a
+tradução dos limites de isolamento para o Docker.
+
+O teste de integração exercita o ciclo completo: criar lab, executar comando,
+gravar arquivo por cópia, aplicar `setup`, confirmar limite de memória e
+ausência de rede, reprovar e aprovar o mesmo check conforme o estado muda,
+resetar, abrir terminal com TTY e destruir o container.
+
+---
+
+## API do agente
+
+| Método | Rota | Para quê |
+|---|---|---|
+| `GET` | `/api/saude` | estado do agente |
+| `GET` | `/api/doctor` | diagnóstico do ambiente |
+| `POST` | `/api/conteudo/recarregar` | recarrega os YAML sem reiniciar |
+| `GET` | `/api/trilhas` | trilhas, lições e o que está desbloqueado |
+| `GET` | `/api/licoes/:id` | lição (sem as dicas ainda não reveladas) |
+| `POST` | `/api/licoes/:id/dica` | revela um degrau da escada e debita o XP |
+| `POST` | `/api/labs` | cria o lab de uma lição |
+| `POST` | `/api/labs/:id/reset` | destrói e recria o lab |
+| `DELETE` | `/api/labs/:id` | destrói o lab |
+| `GET` | `/api/labs/:id/estado` | árvore de arquivos e recursos, lidos do container |
+| `POST` | `/api/labs/:id/verificar` | roda os checks e registra a tentativa |
+| `GET` | `/api/progresso` | XP, conclusões, autonomia, histórico de erros |
+| `GET` | `/api/erros` | catálogo de erros (material didático) |
+| `GET` | `/api/labs` · `/api/labs/:id` | labs ativos |
+| `GET` | `/api/ia/estado` | se a IA está ligada e disponível |
+| `POST` | `/api/ia/:momento` | `explicar_erro` · `revisar_solucao` · `dica_socratica` |
+| `WS` | `/ws/pty?lab=&cols=&rows=` | terminal |
+
+Todas as rotas que mudam estado exigem `Host` de loopback e recusam `Origin`
+de outro site; o WebSocket valida `Origin` no handshake (CORS não protege
+WebSocket). Sem isso, qualquer página aberta noutra aba do browser poderia
+abrir um shell dentro do container.
+
+As dicas não reveladas **não** trafegam para o browser: se trafegassem, o custo
+de XP seria encenação.
+
+---
+
+## Variáveis de ambiente
+
+| Variável | Padrão | Efeito |
+|---|---|---|
+| `DEVLAB_PORTA` | `7788` | porta do agente |
+| `DEVLAB_CONTEUDO` | `./content` | diretório do conteúdo |
+| `DEVLAB_DADOS` | `./.devlab` | onde fica o SQLite |
+| `DEVLAB_TTL_LAB_MS` | `2700000` | tempo até um lab ocioso ser destruído |
+| `DEVLAB_LOG` | `info` | `debug` \| `info` \| `aviso` \| `erro` |
+
+---
+
+## Antes de publicar no GitHub
+
+O repositório não contém nenhum caminho, nome de usuário, e-mail ou
+identificador da máquina onde foi desenvolvido. Os dados semeados nos labs
+(ramais, CDR, contatos) são fictícios e usam o domínio de exemplo
+`exemplo.local`. `.env`, `.devlab/` (o banco de progresso), `node_modules/` e
+`dist/` estão no `.gitignore`; o `package-lock.json` está versionado, para que
+`npm ci` reproduza exatamente as mesmas dependências.
+
+O [`.gitattributes`](.gitattributes) força LF em todo o repositório. Não é
+preferência de estilo: clonar pelo Git do Windows converteria os `.sh` para
+CRLF e eles quebrariam dentro do WSL2 com `bad interpreter: ...^M` — os scripts
+de check, que rodam dentro dos containers, falhariam do mesmo jeito.
+
+Se você bifurcar o projeto, troque o caminho do repositório em
+[`install.sh`](install.sh) (variável `REPO`) e na seção de instalação deste
+README:
+
+```bash
+sed -i 's|wendellmax/devlab|<voce>/<repo>|g' install.sh README.md
+```
+
+### Licença
+
+O código deste repositório está sob [MIT](LICENSE) — © 2026 Wendell Max.
+
+Uma distinção que importa neste projeto: a licença cobre **o código do DevLab**,
+não o software que os labs instalam. As imagens de lab montam Ubuntu,
+FreeSWITCH (MPL 1.1), Asterisk (GPLv2), Kamailio (GPLv2+) e outros, cada um sob
+a própria licença. Como o repositório traz apenas os `Dockerfile` que baixam
+esse software na sua máquina, nada disso é redistribuído por aqui e não há
+conflito. Se um dia você **publicar imagens prontas** num registry, aí sim
+estará distribuindo binários GPL — e as obrigações dessas licenças passam a
+valer sobre a imagem.
+
+---
+
+## Próxima fase
+
+O PRD sugere dois caminhos, e a arquitetura suporta os dois porque as trilhas
+são independentes:
+
+- **Fase 1** — Git (DAG animado do repositório real), SQL (Postgres com dataset
+  de CDR), completar Linux (Construtor e Engenheiro), repetição espaçada SM-2 e
+  Treinos do Dia, material de apoio, skill tree.
+- **Atalho para retorno imediato no trabalho: pular para a Fase 3** —
+  FreeSWITCH com softphone `pjsua` real e a trilha de Troubleshooting SIP/RTP
+  (sngrep, tshark, SIPp) com o **ladder SIP** alimentado por captura real.
+
+O que já está pronto para receber qualquer uma das duas: labs multi-container
+via `compose.yaml` (o schema de `lab` já prevê), capacidades extras por lição
+(`NET_ADMIN`/`NET_RAW` para captura de pacote), injeção de falha (`break`) e o
+catálogo de erros versionado.

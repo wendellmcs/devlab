@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  qualidade:
+    name: tipos, testes e conteúdo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # `npm run valida` depende de PyYAML; o runner não o traz por padrão.
+      - name: Dependência do validador de conteúdo
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Checagem de tipos
+        run: npm run tipos
+
+      - name: Testes unitários
+        run: npm run teste
+
+      - name: Validação do conteúdo declarativo
+        run: npm run valida
+
+      - name: Build da interface
+        run: npm run build --workspace @devlab/ui
+
+  labs:
+    name: labs reais (imagem + integração)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # Evita deriva de upstream: os checks rodam contra a imagem real antes
+      # de qualquer mudança ser promovida.
+      - name: Construir devlab/linux-base
+        run: npm run imagens
+
+      - name: Testes de integração (containers de verdade)
+        run: npm run teste:integracao
+
+      # Prova o sistema cabeado: HTTP, XP, portão das dicas, IA desligada.
+      - name: Prova de fumaça (loop central pela API)
+        run: npm run fumaca
+
+  instalador:
+    name: sintaxe dos scripts de instalação
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n
+        run: |
+          for s in install.sh scripts/*.sh; do
+            bash -n "$s" || exit 1
+            echo "ok  $s"
+          done
+      - name: shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck -S warning install.sh scripts/*.sh

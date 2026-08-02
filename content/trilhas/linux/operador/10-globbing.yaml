@@ -1,0 +1,106 @@
+id: linux-op-10-globbing
+trilha: linux
+nivel: operador
+ordem: 10
+titulo: "Globbing e aspas"
+capacidade: "Sei selecionar vários arquivos com um padrão e sei proteger do shell os nomes com espaço."
+xp: 18
+prereqs: [linux-op-09-ajuda]
+
+objetivo_md: |
+  Quem expande `*.log` **não é o comando** — é o shell, antes de o comando
+  rodar. Entender isso resolve metade dos enganos com nomes de arquivo.
+
+  | Padrão | Casa com |
+  |---|---|
+  | `*` | qualquer sequência, inclusive vazia |
+  | `?` | exatamente um caractere |
+  | `[abc]` | um caractere entre os listados |
+
+  E o outro lado da moeda: espaço é **separador de argumentos**. Sem aspas,
+  `touch nota importante.txt` cria **dois** arquivos. Com `'nota importante.txt'`,
+  cria um só.
+
+  ### Sua tarefa
+
+  1. Crie a pasta `relatorios/` e copie para dentro dela **todos** os arquivos
+     `.log` de `logs/`, usando um padrão em vez de listar um por um.
+  2. Crie, em `documentos/`, um arquivo vazio chamado exatamente
+     `nota importante.txt` — com o espaço no meio, e sem criar arquivos extras.
+
+verificar:
+  - descricao: "relatorios/ tem os arquivos .log copiados, sem alteração"
+    script: |
+      #!/bin/bash
+      DIR=/home/aluno/relatorios
+      if [ ! -d "$DIR" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a pasta relatorios/ nao existe","dica_diagnostica":"cp nao cria o diretorio de destino: crie antes com mkdir"}'
+        exit 1
+      fi
+      # O laço abaixo itera a ORIGEM. Se o aluno usou mv, o glob não casa
+      # com nada e o bash entrega o literal — daí a checagem explícita antes.
+      for esperado in chamadas.log sistema.log; do
+        if [ ! -f "/home/aluno/logs/$esperado" ]; then
+          echo "sumiu de logs/: $esperado"
+          echo 'DEVLAB_JSON:{"mensagem":"o arquivo saiu de logs/ — a tarefa era copiar, nao mover","dica_diagnostica":"cp deixa o original no lugar; mv nao. Use Resetar lab e refaca com cp."}'
+          exit 1
+        fi
+      done
+      FALTOU=""
+      for origem in /home/aluno/logs/*.log; do
+        nome=$(basename "$origem")
+        destino="$DIR/$nome"
+        if [ ! -f "$destino" ]; then
+          FALTOU="$FALTOU $nome"
+        elif ! cmp -s "$origem" "$destino"; then
+          echo 'DEVLAB_JSON:{"mensagem":"um dos arquivos copiados tem conteudo diferente do original","dica_diagnostica":"refaca a copia; se editou por engano, use Resetar lab"}'
+          exit 1
+        fi
+      done
+      if [ -n "$FALTOU" ]; then
+        echo "faltando em relatorios/:$FALTOU"
+        echo 'DEVLAB_JSON:{"mensagem":"nem todos os .log de logs/ chegaram em relatorios/","dica_diagnostica":"teste o padrao antes de copiar: echo ~/logs/*.log mostra no que ele expande"}'
+        exit 1
+      fi
+      if [ ! -f "$DIR/chamadas.log" ] || [ ! -f "$DIR/sistema.log" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"faltou pelo menos um dos dois logs","dica_diagnostica":"confira quantos arquivos .log existem em logs/ com: ls ~/logs"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "existe o arquivo 'nota importante.txt', com o espaço no nome"
+    script: |
+      #!/bin/bash
+      ARQ="/home/aluno/documentos/nota importante.txt"
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe um arquivo chamado nota importante.txt em documentos/","dica_diagnostica":"sem aspas, o shell entende dois argumentos e cria dois arquivos. Liste com: ls -l ~/documentos"}'
+        exit 1
+      fi
+      SOBRA=""
+      for extra in /home/aluno/documentos/nota /home/aluno/documentos/importante.txt; do
+        [ -e "$extra" ] && SOBRA="$SOBRA $(basename "$extra")"
+      done
+      if [ -n "$SOBRA" ]; then
+        echo "arquivos extras criados por falta de aspas:$SOBRA"
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo certo existe, mas sobraram arquivos criados pela versao sem aspas","dica_diagnostica":"apague os extras com rm — lembrando de usar aspas quando o nome tiver espaco"}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Para o primeiro item, existe um caractere que representa *qualquer coisa* num nome de arquivo. Para o segundo, o problema não é o comando: é o shell partindo o nome no espaço."
+  - "A forma é: `mkdir ~/relatorios && cp ~/logs/_.log ~/relatorios/` e `touch ~/documentos/'____ ____.txt'` — repare ONDE as aspas começam: o ~ tem de ficar fora delas para o shell expandir."
+  - "mkdir -p ~/relatorios && cp ~/logs/*.log ~/relatorios/ && touch ~/documentos/'nota importante.txt'"
+
+erros_comuns:
+  - match: "No such file or directory"
+    explica: "Se o padrão não casa com nada, o bash entrega o texto literal ao comando — e aí o comando reclama de um arquivo chamado `*.log`. Teste antes com `echo`."
+    categoria: conceitual
+  - match: "omitting directory"
+    explica: "O padrão pegou um diretório junto. Restrinja o padrão ou use `cp -r`."
+    categoria: flag_errada
+
+cards_revisao:
+  - o-shell-expande-o-glob-nao-o-comando
+  - aspas-protegem-nome-com-espaco
+  - echo-testa-o-padrao-antes

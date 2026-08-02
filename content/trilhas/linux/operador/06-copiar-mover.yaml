@@ -1,0 +1,80 @@
+id: linux-op-06-copiar-mover
+trilha: linux
+nivel: operador
+ordem: 6
+titulo: "Copiar e mover: cp e mv"
+capacidade: "Sei a diferença prática entre copiar e mover, e verifico o resultado dos dois lados."
+xp: 16
+prereqs: [linux-op-05-criar]
+
+objetivo_md: |
+  - `cp origem destino` — o arquivo passa a existir **nos dois lugares**.
+  - `mv origem destino` — o arquivo **deixa de existir** na origem.
+
+  `mv` também é o comando de renomear: mover para o mesmo diretório com outro
+  nome é exatamente isso.
+
+  Para copiar diretórios inteiros existe `cp -r` (recursivo).
+
+  ### Sua tarefa
+
+  1. **Copie** `configs/ramais.txt` para `documentos/ramais-backup.txt`.
+     O original tem que continuar onde está.
+  2. **Mova** `downloads/leia-me.txt` para `documentos/leia-me.txt`.
+     A origem tem que sumir.
+
+verificar:
+  - descricao: "a cópia existe e o original continua no lugar"
+    script: |
+      #!/bin/bash
+      ORIG=/home/aluno/configs/ramais.txt
+      COPIA=/home/aluno/documentos/ramais-backup.txt
+      if [ ! -f "$ORIG" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o original configs/ramais.txt sumiu — isso e sinal de mv onde deveria ser cp","dica_diagnostica":"use o botao Resetar lab para voltar ao estado inicial e refaca com cp"}'
+        exit 1
+      fi
+      if [ ! -f "$COPIA" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"documentos/ramais-backup.txt nao existe","dica_diagnostica":"confira o nome do destino: ls -l ~/documentos"}'
+        exit 1
+      fi
+      if ! cmp -s "$ORIG" "$COPIA"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a copia existe, mas o conteudo difere do original","dica_diagnostica":"compare os dois com: diff ~/configs/ramais.txt ~/documentos/ramais-backup.txt"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o arquivo movido está no destino e não está mais na origem"
+    script: |
+      #!/bin/bash
+      ORIG=/home/aluno/downloads/leia-me.txt
+      DEST=/home/aluno/documentos/leia-me.txt
+      if [ ! -f "$DEST" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"documentos/leia-me.txt nao existe","dica_diagnostica":"veja onde o arquivo esta agora com: find ~ -name leia-me.txt"}'
+        exit 1
+      fi
+      if [ -f "$ORIG" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo ainda esta em downloads/ — isso e sinal de cp onde deveria ser mv","dica_diagnostica":"mv nao deixa copia para tras; cp deixa"}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "São dois comandos diferentes, e a diferença entre eles é justamente o que a verificação olha: se o arquivo continua na origem ou não."
+  - "A forma é: `__ ~/configs/ramais.txt ~/documentos/ramais-backup.txt` e `__ ~/downloads/leia-me.txt ~/documentos/`."
+  - "cp ~/configs/ramais.txt ~/documentos/ramais-backup.txt && mv ~/downloads/leia-me.txt ~/documentos/"
+
+erros_comuns:
+  - match: "omitting directory"
+    explica: "O `cp` sem `-r` recusa diretórios. Para copiar uma pasta inteira, use `cp -r`."
+    categoria: flag_errada
+  - match: "are the same file"
+    explica: "Origem e destino apontam para o mesmo arquivo. Confira o caminho do destino."
+    categoria: sintaxe
+  - match: "No such file or directory"
+    explica: "Um dos dois caminhos não existe. O `cp` e o `mv` não criam o diretório de destino."
+    categoria: conceitual
+
+cards_revisao:
+  - cp-deixa-copia-na-origem
+  - mv-move-e-renomeia
+  - cp-r-para-diretorio

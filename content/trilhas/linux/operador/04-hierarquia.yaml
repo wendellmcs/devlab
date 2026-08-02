@@ -1,0 +1,72 @@
+id: linux-op-04-hierarquia
+trilha: linux
+nivel: operador
+ordem: 4
+titulo: "A hierarquia do sistema de arquivos"
+capacidade: "Sei onde procurar cada tipo de arquivo num servidor Linux que nunca vi antes."
+xp: 14
+prereqs: [linux-op-03-caminhos]
+
+objetivo_md: |
+  No Linux **tudo é arquivo** — e tudo pendura de uma única raiz, `/`.
+  Saber onde as coisas moram é o que separa "procurar" de "ir direto".
+
+  | Diretório | O que guarda |
+  |---|---|
+  | `/etc` | arquivos de **configuração** do sistema e dos serviços |
+  | `/var` | dados que **variam**: `/var/log` são os logs |
+  | `/tmp` | arquivos **temporários**, apagados ao reiniciar |
+  | `/home` | as pastas pessoais dos usuários |
+  | `/usr` | programas e bibliotecas instalados |
+  | `/bin`, `/usr/bin` | os executáveis dos comandos |
+
+  Explore de verdade antes de responder: `ls /`, `ls /etc | head`, `ls /var/log`.
+  A página de manual `man hier` descreve essa hierarquia inteira.
+
+  ### Sua tarefa
+
+  Grave em `fhs.txt`, na sua pasta pessoal, **três linhas**, nesta ordem:
+
+  1. o diretório onde ficam os arquivos de configuração do sistema
+  2. o diretório onde ficam os logs
+  3. o diretório de arquivos temporários
+
+  Lembre que `>` **sobrescreve** o arquivo inteiro e `>>` **acrescenta** ao
+  fim — para três linhas, os dois entram.
+
+verificar:
+  - descricao: "fhs.txt tem as três linhas corretas, na ordem pedida"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/fhs.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo fhs.txt ainda nao existe na sua pasta pessoal","dica_diagnostica":"tres linhas, uma por resposta. O operador >> acrescenta uma linha sem apagar o que ja havia."}'
+        exit 1
+      fi
+      mapfile -t LINHAS < "$ARQ"
+      ESPERADO=(/etc /var/log /tmp)
+      normaliza() { printf '%s' "${1:-}" | tr -d '[:space:]' | sed 's:/\+$::'; }
+      for i in 0 1 2; do
+        if [ "$(normaliza "${LINHAS[$i]:-}")" != "${ESPERADO[$i]}" ]; then
+          echo "a linha $((i + 1)) nao confere"
+          echo 'DEVLAB_JSON:{"mensagem":"uma das tres linhas nao bate com a hierarquia padrao","dica_diagnostica":"revise com man hier, e confira a ordem: 1 configuracao, 2 logs, 3 temporarios. Escreva o caminho absoluto, comecando com barra."}'
+          exit 1
+        fi
+      done
+      exit 0
+
+dicas:
+  - "Você não precisa decorar: `ls /` mostra todos os candidatos, e `man hier` descreve o que cada um guarda. O terceiro é onde qualquer programa joga arquivo descartável."
+  - "A forma é: `echo /____ > fhs.txt` para a primeira linha e depois `echo /____ >> fhs.txt` para as outras duas. Note a diferença entre `>` e `>>`."
+  - "echo /etc > fhs.txt ; echo /var/log >> fhs.txt ; echo /tmp >> fhs.txt"
+
+erros_comuns:
+  - match: "Permission denied"
+    explica: "Boa parte de `/etc` e `/var` é legível, mas alguns diretórios do sistema só abrem para o root. Isso é esperado — para esta tarefa você só precisa dos nomes."
+    categoria: permissao
+
+cards_revisao:
+  - etc-guarda-configuracao
+  - var-log-guarda-logs
+  - tmp-e-descartavel
+  - maior-maior-acrescenta

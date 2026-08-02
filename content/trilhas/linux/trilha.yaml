@@ -1,0 +1,12 @@
+id: linux
+titulo: "Linux & linha de comando"
+resumo: >-
+  O terreno onde todo o resto acontece: navegar, ler, criar e entender o
+  sistema de arquivos de um servidor de verdade.
+ordem: 0
+icone: "⌘"
+fase: 0
+capacidades:
+  operador: "Sei navegar e executar comandos individuais para inspecionar e alterar o estado."
+  construtor: "Sei compor fluxos de vários passos e diagnosticar falhas comuns."
+  engenheiro: "Sei projetar, diagnosticar sob ambiguidade e otimizar."

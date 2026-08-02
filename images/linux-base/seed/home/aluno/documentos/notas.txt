@@ -1,0 +1,7 @@
+Notas do plantao de 28/07
+=========================
+
+- Cliente reclamou de chamada muda no ramal 1004. Verificar RTP, nao dialplan.
+- Gateway saida-1 caiu as 11h07. Failover automatico funcionou.
+- Voicemail parou de gravar: disco cheio na particao /var.
+- Pendente: revisar senha do ramal 1003 (ainda e a senha demo).

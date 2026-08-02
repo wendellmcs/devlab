@@ -1,0 +1,89 @@
+id: linux-op-02-listar
+trilha: linux
+nivel: operador
+ordem: 2
+titulo: "Enxergar o diretório: ls e suas opções"
+capacidade: "Sei listar arquivos com detalhes, incluindo ocultos, e ler cada coluna da saída."
+xp: 12
+prereqs: [linux-op-01-shell]
+
+objetivo_md: |
+  `ls` sozinho mostra pouco. As três opções que você vai usar todo dia:
+
+  | Opção | O que muda |
+  |---|---|
+  | `-l` | formato longo: permissões, dono, tamanho, data |
+  | `-a` | mostra também os arquivos ocultos (os que começam com `.`) |
+  | `-h` | tamanhos legíveis por humano (`4.0K` em vez de `4096`) |
+
+  Opções curtas podem ser combinadas: `-l -a` é o mesmo que `-la`.
+
+  ### Sua tarefa
+
+  Grave em `listagem.txt` uma listagem da sua pasta pessoal que atenda às três
+  condições ao mesmo tempo: **formato longo**, **incluindo ocultos** e com
+  **tamanhos legíveis**.
+
+  Cada uma das três é verificada separadamente — assim você vê exatamente qual
+  faltou.
+
+verificar:
+  - descricao: "a listagem está em formato longo (-l)"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/listagem.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo listagem.txt ainda nao existe","dica_diagnostica":"redirecione a saida do ls com > listagem.txt"}'
+        exit 1
+      fi
+      if ! grep -qE '^[dlbcps-][rwxsStT-]{9}' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao ha linhas no formato longo (permissoes, dono, tamanho, data)","dica_diagnostica":"o formato longo vem da opcao -l"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "a listagem inclui os arquivos ocultos (-a)"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/listagem.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo listagem.txt ainda nao existe"}'
+        exit 1
+      fi
+      if ! grep -q '\.bashrc' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a listagem nao mostra o .bashrc, que e um arquivo oculto da sua pasta","dica_diagnostica":"arquivos que comecam com ponto so aparecem com a opcao -a"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "os tamanhos estão em formato legível (-h)"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/listagem.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo listagem.txt ainda nao existe"}'
+        exit 1
+      fi
+      if ! grep -qE '[0-9](\.[0-9])?[KMGT]([[:space:]]|$)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"os tamanhos aparecem em bytes crus, sem sufixo K/M/G","dica_diagnostica":"compare ls -l com ls -lh: a diferenca e 4096 virar 4.0K"}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "As três opções que a tarefa pede existem todas no `ls` e podem ser usadas de uma vez só. Comece rodando `ls` sozinho e vá acrescentando uma de cada vez para ver o que muda."
+  - "A forma é: `ls -___ ~ > listagem.txt`. Falta descobrir quais três letras entram no lugar."
+  - "ls -lah ~ > listagem.txt"
+
+erros_comuns:
+  - match: "cannot access|No such file or directory"
+    explica: "O caminho passado ao `ls` não existe. `~` é um atalho para /home/aluno; confira a grafia."
+    categoria: sintaxe
+  - match: "invalid option"
+    explica: "Uma das letras não é uma opção válida do `ls`. Consulte `ls --help` para ver a lista real."
+    categoria: flag_errada
+
+cards_revisao:
+  - ls-l-formato-longo
+  - ls-a-arquivos-ocultos
+  - ls-h-tamanho-legivel

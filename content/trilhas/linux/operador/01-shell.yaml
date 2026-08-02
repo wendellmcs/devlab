@@ -1,0 +1,81 @@
+id: linux-op-01-shell
+trilha: linux
+nivel: operador
+ordem: 1
+titulo: "Anatomia do shell: comando, opções e argumentos"
+capacidade: "Sei executar um comando, ler a saída dele e gravar essa saída em um arquivo."
+xp: 10
+prereqs: []
+
+objetivo_md: |
+  O terminal ao lado é um **bash de verdade**, dentro de um container só seu.
+  Nada do que você fizer aqui sai daqui — e o botão **Resetar lab** recria tudo
+  do zero em segundos.
+
+  Todo comando no shell tem a mesma forma:
+
+  ```
+  comando -opções argumentos
+  ```
+
+  Dois comandos para começar: `echo` escreve na saída; `pwd` responde em que
+  diretório você está. E o operador `>` desvia a saída de um comando para um
+  arquivo em vez da tela. Guarde a diferença agora: **`>` sobrescreve** o
+  arquivo inteiro, e **`>>` acrescenta** ao fim do que já existe.
+
+  ### Sua tarefa
+
+  1. Crie o arquivo `saudacao.txt` na sua pasta pessoal, contendo exatamente:
+     `bom dia, DevLab`
+  2. Crie o arquivo `onde-estou.txt` contendo o caminho do diretório em que
+     você está agora.
+
+  > A verificação olha o **estado dos arquivos**, não o que você digitou.
+  > Qualquer caminho válido serve.
+
+verificar:
+  - descricao: "saudacao.txt existe e tem exatamente o texto pedido"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/saudacao.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo saudacao.txt ainda nao existe em /home/aluno","dica_diagnostica":"liste a pasta com: ls -l ~"}'
+        exit 1
+      fi
+      if [ "$(cat "$ARQ")" != "bom dia, DevLab" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe, mas o conteudo nao bate","dica_diagnostica":"veja o que ficou gravado com: cat ~/saudacao.txt — a virgula e o D maiusculo importam"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "onde-estou.txt guarda o caminho do diretório pessoal"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/onde-estou.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo onde-estou.txt ainda nao existe","dica_diagnostica":"o comando que responde onde voce esta e o pwd"}'
+        exit 1
+      fi
+      if ! grep -qx '/home/aluno' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe, mas nao contem o caminho /home/aluno numa linha inteira","dica_diagnostica":"rode pwd sozinho no terminal e compare com: cat ~/onde-estou.txt"}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "O shell tem um comando que só repete o que você mandou, e outro que responde em que diretório você está. Falta guardar a resposta em disco em vez de mostrá-la na tela."
+  - "A forma é: `echo ____ > saudacao.txt` e `pwd > ____`. O `>` cria o arquivo (e sobrescreve se já existir)."
+  - "echo 'bom dia, DevLab' > saudacao.txt ; pwd > onde-estou.txt"
+
+erros_comuns:
+  - match: "command not found"
+    explica: "O shell não achou esse programa. Quase sempre é erro de digitação no nome do comando, ou o comando não existe nesta imagem."
+    categoria: ferramenta_errada
+  - match: "No such file or directory"
+    explica: "O `>` cria o arquivo, mas não cria o diretório onde ele deveria ficar. Confirme com `pwd` em que pasta você está."
+    categoria: conceitual
+
+cards_revisao:
+  - echo-escreve-na-saida
+  - pwd-diretorio-atual
+  - redirecionamento-maior-sobrescreve

@@ -1,0 +1,165 @@
+id: linux-op-11-capstone
+trilha: linux
+nivel: operador
+ordem: 11
+titulo: "Capstone: organizar as evidências de um chamado"
+capacidade: "Sei encadear navegação, criação, cópia, movimentação e leitura para entregar uma tarefa real de ponta a ponta."
+xp: 60
+capstone: true
+prereqs: [linux-op-10-globbing]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno/chamado-1042
+    install -o aluno -g aluno -d "$BASE"
+
+    cat > "$BASE/captura-01.log" <<'FIM'
+    2026-08-01 09:14:02 INVITE 1004 -> 9911
+    2026-08-01 09:14:02 100 Trying
+    2026-08-01 09:14:03 180 Ringing
+    2026-08-01 09:14:09 200 OK
+    2026-08-01 09:14:09 ACK
+    FIM
+
+    cat > "$BASE/captura-02.log" <<'FIM'
+    2026-08-01 09:16:41 BYE 1004 -> 9911
+    2026-08-01 09:16:41 200 OK
+    2026-08-01 09:16:41 chamada encerrada NORMAL_CLEARING
+    FIM
+
+    cat > "$BASE/notas.txt" <<'FIM'
+    Chamado 1042
+    Cliente relata audio so de um lado na ligacao para 9911.
+    Capturas anexadas para analise.
+    FIM
+
+    echo 'rascunho descartavel gerado pela ferramenta de captura' > "$BASE/rascunho.tmp"
+    chown -R aluno:aluno "$BASE"
+
+objetivo_md: |
+  Chegou o chamado **1042**. A pasta `chamado-1042/` veio como sempre vem: tudo
+  jogado na raiz, com sobra de ferramenta no meio.
+
+  Deixe a pasta apresentável, sem ajuda desta vez.
+
+  ### O que precisa estar feito
+
+  1. Existem duas pastas dentro de `chamado-1042/`: **`evidencias`** e **`saida`**.
+  2. Todos os arquivos `.log` estão dentro de `evidencias/` — e não sobrou
+     nenhum `.log` solto na raiz do chamado.
+  3. O arquivo `rascunho.tmp` foi apagado.
+  4. `saida/total-linhas.txt` contém o **número total de linhas** somando os
+     dois logs.
+  5. `saida/notas.txt` é uma **cópia** de `notas.txt` — o original continua na
+     raiz do chamado.
+
+  > Sem dicas nesta lição, por desenho: é a tarefa integrativa do portão de
+  > maestria. Se travar, o lab tem `man` e `--help` inteiros à sua disposição.
+
+verificar:
+  - descricao: "as pastas evidencias/ e saida/ existem"
+    script: |
+      #!/bin/bash
+      FALTOU=""
+      for d in /home/aluno/chamado-1042/evidencias /home/aluno/chamado-1042/saida; do
+        [ -d "$d" ] || FALTOU="$FALTOU $(basename "$d")"
+      done
+      if [ -n "$FALTOU" ]; then
+        echo "faltando:$FALTOU"
+        echo 'DEVLAB_JSON:{"mensagem":"as duas pastas de destino ainda nao existem","dica_diagnostica":"veja a estrutura atual com: find ~/chamado-1042"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "os dois .log estão em evidencias/ e não sobrou nenhum na raiz"
+    script: |
+      #!/bin/bash
+      BASE=/home/aluno/chamado-1042
+      for nome in captura-01.log captura-02.log; do
+        if [ ! -f "$BASE/evidencias/$nome" ]; then
+          echo "faltando em evidencias/: $nome"
+          echo 'DEVLAB_JSON:{"mensagem":"nem todos os logs chegaram em evidencias/","dica_diagnostica":"localize os arquivos com: find ~/chamado-1042 -name *.log"}'
+          exit 1
+        fi
+      done
+      SOLTOS=$(find "$BASE" -maxdepth 1 -name '*.log' -printf '%f ')
+      if [ -n "$SOLTOS" ]; then
+        echo "ainda na raiz do chamado: $SOLTOS"
+        echo 'DEVLAB_JSON:{"mensagem":"os logs foram copiados, mas nao movidos: sobraram copias na raiz","dica_diagnostica":"cp deixa o original para tras; mv nao"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "rascunho.tmp foi removido"
+    script: |
+      #!/bin/bash
+      if [ -e /home/aluno/chamado-1042/rascunho.tmp ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"rascunho.tmp ainda existe na pasta do chamado","dica_diagnostica":"liste tudo, inclusive ocultos, com: ls -la ~/chamado-1042"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "saida/total-linhas.txt tem a soma correta de linhas dos logs"
+    script: |
+      #!/bin/bash
+      BASE=/home/aluno/chamado-1042
+      ARQ="$BASE/saida/total-linhas.txt"
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"saida/total-linhas.txt nao existe","dica_diagnostica":"wc aceita varios arquivos de uma vez e imprime uma linha total no fim"}'
+        exit 1
+      fi
+      ESPERADO=$(find "$BASE" -name '*.log' -exec cat {} + | wc -l)
+      # `wc -l a b` imprime uma linha por arquivo e o total no FIM — pegar o
+      # primeiro número reprovaria justamente quem seguisse a dica abaixo.
+      OBTIDO=$(grep -oE '[0-9]+' "$ARQ" | tail -n 1)
+      if [ "$OBTIDO" != "$ESPERADO" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o total gravado nao bate com a soma real de linhas dos dois logs","dica_diagnostica":"rodando wc -l nos dois arquivos, a ultima linha da saida ja e o total"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "saida/notas.txt é cópia fiel e o original segue na raiz"
+    script: |
+      #!/bin/bash
+      BASE=/home/aluno/chamado-1042
+      if [ ! -f "$BASE/notas.txt" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o notas.txt original saiu da raiz do chamado — era para ser copia, nao mudanca de lugar","dica_diagnostica":"cp mantem o original; mv nao"}'
+        exit 1
+      fi
+      if [ ! -f "$BASE/saida/notas.txt" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"saida/notas.txt nao existe","dica_diagnostica":"confira o destino da copia com: ls -l ~/chamado-1042/saida"}'
+        exit 1
+      fi
+      if ! cmp -s "$BASE/notas.txt" "$BASE/saida/notas.txt"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a copia existe mas difere do original","dica_diagnostica":"compare com: diff ~/chamado-1042/notas.txt ~/chamado-1042/saida/notas.txt"}'
+        exit 1
+      fi
+      exit 0
+
+dicas: []
+
+# Não vai para o browser: existe só para o validador de conteúdo provar que os
+# checks reprovam antes e aprovam depois. Um capstone não tem dica 3 de onde tirar.
+solucao_referencia: |
+  cd ~/chamado-1042
+  mkdir -p evidencias saida
+  mv *.log evidencias/
+  rm rascunho.tmp
+  cat evidencias/*.log | wc -l > saida/total-linhas.txt
+  cp notas.txt saida/notas.txt
+
+erros_comuns:
+  - match: "Directory not empty"
+    explica: "`rmdir` só remove diretório vazio. Aqui não é preciso remover diretório nenhum — só o arquivo `.tmp`."
+    categoria: flag_errada
+  - match: "cannot stat|No such file or directory"
+    explica: "Algum caminho não existe. Rode `find ~/chamado-1042` para ver o estado real antes de repetir o comando."
+    categoria: sintaxe
+
+cards_revisao:
+  - mv-move-e-renomeia
+  - cp-deixa-copia-na-origem
+  - wc-l-conta-linhas
+  - o-shell-expande-o-glob-nao-o-comando

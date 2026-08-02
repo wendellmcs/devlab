@@ -1,0 +1,7 @@
+# ramal  contexto   codec        observacao
+1001     interno    PCMA,G729    suporte n1
+1002     interno    PCMA,G729    suporte n2
+1003     interno    PCMA         senha demo - trocar
+1004     interno    G729         softphone em rede externa (NAT)
+1005     interno    PCMA,G722    infraestrutura
+9911     externo    PCMA         gateway de saida

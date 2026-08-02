@@ -1,0 +1,76 @@
+id: linux-op-05-criar
+trilha: linux
+nivel: operador
+ordem: 5
+titulo: "Criar diretórios e arquivos"
+capacidade: "Sei montar uma estrutura de pastas e arquivos do zero, num comando ou em vários."
+xp: 14
+prereqs: [linux-op-04-hierarquia]
+
+objetivo_md: |
+  - `mkdir pasta` cria um diretório. Com `-p`, cria também os pais que faltarem.
+  - `touch arquivo` cria um arquivo vazio (ou só atualiza a data, se já existir).
+
+  A chave de chaves do bash — `{a,b}` — expande em várias palavras:
+  `mkdir -p base/{um,dois}` cria `base/um` e `base/dois` de uma vez.
+
+  ### Sua tarefa
+
+  Monte, na sua pasta pessoal, exatamente esta estrutura:
+
+  ```
+  chamados/
+  └── 2026/
+      ├── aberto/
+      │   └── CH-1042.txt
+      └── fechado/
+  ```
+
+  O arquivo `CH-1042.txt` pode ficar vazio.
+
+verificar:
+  - descricao: "chamados/2026/aberto e chamados/2026/fechado existem"
+    script: |
+      #!/bin/bash
+      FALTOU=""
+      for d in /home/aluno/chamados/2026/aberto /home/aluno/chamados/2026/fechado; do
+        [ -d "$d" ] || FALTOU="$FALTOU $d"
+      done
+      if [ -n "$FALTOU" ]; then
+        echo "faltando:$FALTOU"
+        echo 'DEVLAB_JSON:{"mensagem":"a estrutura de diretorios esta incompleta","dica_diagnostica":"confira o que existe hoje com: find ~/chamados -type d"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "CH-1042.txt está dentro de chamados/2026/aberto"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/chamados/2026/aberto/CH-1042.txt
+      if [ -d "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"CH-1042.txt foi criado como diretorio, nao como arquivo","dica_diagnostica":"mkdir cria diretorio; para arquivo vazio use touch. Remova o diretorio com rmdir e refaca."}'
+        exit 1
+      fi
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"CH-1042.txt nao esta em chamados/2026/aberto","dica_diagnostica":"procure onde ele foi parar com: find ~ -name CH-1042.txt"}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Você precisa de dois comandos diferentes: um cria diretórios, outro cria o arquivo vazio. E lembre que criar três níveis de pasta de uma vez tem uma opção própria."
+  - "A forma é: `mkdir -p ~/chamados/2026/{______,______}` e depois `touch ~/chamados/2026/aberto/CH-1042.txt`."
+  - "mkdir -p ~/chamados/2026/{aberto,fechado} && touch ~/chamados/2026/aberto/CH-1042.txt"
+
+erros_comuns:
+  - match: "cannot create directory.*No such file or directory"
+    explica: "Sem `-p`, o `mkdir` não cria os diretórios intermediários."
+    categoria: flag_errada
+  - match: "Is a directory"
+    explica: "Você tentou tratar um diretório como se fosse arquivo. `mkdir` cria pasta; `touch` cria arquivo."
+    categoria: conceitual
+
+cards_revisao:
+  - mkdir-p-cria-os-pais
+  - touch-cria-arquivo-vazio
+  - chaves-expandem-em-varias-palavras

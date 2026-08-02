@@ -1,0 +1,100 @@
+id: linux-op-07-remover
+trilha: linux
+nivel: operador
+ordem: 7
+titulo: "Remover com precisão: rm e rmdir"
+capacidade: "Sei apagar exatamente o que quero apagar — e sei que no shell não existe lixeira."
+xp: 16
+prereqs: [linux-op-06-copiar-mover]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    install -o aluno -g aluno -d /home/aluno/temporarios
+    install -o aluno -g aluno -d /home/aluno/vazio
+    for n in 1 2 3; do
+      echo "sobra de processamento $n" > "/home/aluno/temporarios/tmp-$n.txt"
+    done
+    printf 'relatorio mensal consolidado\nnao apagar\n' > /home/aluno/temporarios/relatorio.txt
+    chown -R aluno:aluno /home/aluno/temporarios
+
+objetivo_md: |
+  **`rm` é permanente.** Não há lixeira, não há desfazer. É por isso que este
+  lab existe: aqui você pode errar à vontade e resetar.
+
+  - `rm arquivo` apaga um arquivo.
+  - `rmdir pasta` apaga um diretório **vazio** — e falha se não estiver vazio.
+  - `rm -r pasta` apaga a pasta e tudo dentro dela.
+
+  Repare que `rm -r` é o comando que apaga trabalho alheio por engano. Antes de
+  rodá-lo, vale sempre listar o alvo primeiro.
+
+  ### Sua tarefa
+
+  O setup deste lab deixou uma pasta `temporarios/` com quatro arquivos e uma
+  pasta `vazio/`.
+
+  1. Apague os três arquivos `tmp-1.txt`, `tmp-2.txt` e `tmp-3.txt`.
+  2. **Mantenha** `temporarios/relatorio.txt` intacto.
+  3. Apague o diretório `vazio/`.
+
+verificar:
+  - descricao: "os três arquivos temporários foram apagados"
+    script: |
+      #!/bin/bash
+      SOBROU=""
+      for n in 1 2 3; do
+        ARQ="/home/aluno/temporarios/tmp-$n.txt"
+        [ -e "$ARQ" ] && SOBROU="$SOBROU tmp-$n.txt"
+      done
+      if [ -n "$SOBROU" ]; then
+        echo "ainda existem:$SOBROU"
+        echo 'DEVLAB_JSON:{"mensagem":"nem todos os arquivos temporarios foram removidos","dica_diagnostica":"liste o que sobrou com: ls -l ~/temporarios"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "relatorio.txt continua intacto"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/temporarios/relatorio.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"relatorio.txt foi apagado junto — no shell nao ha como desfazer isso","dica_diagnostica":"use Resetar lab e refaca apagando so os tmp-*.txt. Esse e exatamente o erro que rm -r causa em producao."}'
+        exit 1
+      fi
+      if ! grep -q 'relatorio mensal consolidado' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"relatorio.txt existe mas foi alterado","dica_diagnostica":"a tarefa era apagar os outros arquivos, sem tocar neste"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o diretório vazio/ não existe mais"
+    script: |
+      #!/bin/bash
+      if [ -e /home/aluno/vazio ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o diretorio vazio/ ainda esta la","dica_diagnostica":"rm sozinho recusa diretorios; existe um comando proprio para diretorio vazio"}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Apagar três arquivos não exige três comandos, mas pode exigir. E diretório tem um comando próprio quando está vazio — `rm` sozinho vai recusar."
+  - "A forma é: `rm ~/temporarios/tmp-1.txt ~/temporarios/tmp-2.txt ~/temporarios/tmp-3.txt` e `_____ ~/vazio`. Cuidado para não incluir o relatorio."
+  - "rm ~/temporarios/tmp-1.txt ~/temporarios/tmp-2.txt ~/temporarios/tmp-3.txt && rmdir ~/vazio"
+
+erros_comuns:
+  - match: "cannot remove.*Is a directory"
+    explica: "O `rm` sem opção não apaga diretórios. Use `rmdir` se estiver vazio, ou `rm -r` se quiser levar o conteúdo junto."
+    categoria: flag_errada
+  - match: "Directory not empty"
+    explica: "`rmdir` só apaga diretório vazio. Ou esvazie antes, ou use `rm -r` sabendo o que vai junto."
+    categoria: conceitual
+  - match: "No such file or directory"
+    explica: "O caminho não existe — pode ser erro de digitação, ou o arquivo já foi apagado numa tentativa anterior."
+    categoria: sintaxe
+
+cards_revisao:
+  - rm-e-permanente
+  - rmdir-so-diretorio-vazio
+  - rm-r-apaga-conteudo-junto

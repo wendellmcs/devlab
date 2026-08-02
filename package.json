@@ -1,0 +1,25 @@
+{
+  "name": "devlab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevLab: Oficina Prática de Infraestrutura e VoIP — execução real em containers descartáveis",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "doctor": "npm run doctor --workspace @devlab/agent",
+    "agente": "npm run dev --workspace @devlab/agent",
+    "ui": "npm run dev --workspace @devlab/ui",
+    "imagens": "bash scripts/build-imagens.sh",
+    "teste": "npm run teste --workspace @devlab/agent",
+    "teste:integracao": "npm run teste:integracao --workspace @devlab/agent",
+    "fumaca": "bash scripts/fumaca.sh",
+    "valida": "python3 scripts/valida-conteudo.py",
+    "tipos": "npm run tipos --workspaces --if-present"
+  }
+}

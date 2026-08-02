@@ -1,0 +1,22 @@
+# Fim de linha LF em todo o repositório.
+#
+# Isto não é preferência de estilo: o DevLab é clonado dentro do WSL2 a partir
+# de um Windows, e o Git do Windows converte para CRLF por padrão. Um shell
+# script com CRLF quebra com "bad interpreter: /usr/bin/env bash^M", e um
+# script de check dentro do container falharia do mesmo jeito — com uma
+# mensagem que não ajuda ninguém.
+* text=auto eol=lf
+
+*.sh      text eol=lf
+*.py      text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+Dockerfile text eol=lf
+
+# Os arquivos semeados na imagem viram conteúdo de lab: têm de chegar
+# byte a byte como estão aqui, senão os checks que comparam conteúdo falham.
+images/linux-base/seed/** text eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary

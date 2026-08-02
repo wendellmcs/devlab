@@ -1,0 +1,87 @@
+id: linux-op-03-caminhos
+trilha: linux
+nivel: operador
+ordem: 3
+titulo: "Caminhos absolutos e relativos"
+capacidade: "Sei chegar a qualquer lugar do sistema de arquivos, partindo da raiz ou de onde estou."
+xp: 14
+prereqs: [linux-op-02-listar]
+
+objetivo_md: |
+  Existem dois jeitos de nomear um lugar:
+
+  - **Absoluto** — começa na raiz: `/home/aluno/logs`. Funciona de qualquer lugar.
+  - **Relativo** — começa de onde você está: `logs`, `../configs`, `./scripts`.
+
+  Os três atalhos que aparecem o tempo todo:
+
+  | Atalho | Significa |
+  |---|---|
+  | `~` | seu diretório pessoal (`/home/aluno`) |
+  | `.` | o diretório atual |
+  | `..` | o diretório acima |
+
+  `cd` move você. `cd` sem argumento volta para casa.
+
+  ### Sua tarefa
+
+  Crie o arquivo `ata.txt` dentro de `documentos/2026/agosto/`, na sua pasta
+  pessoal. Os diretórios intermediários ainda não existem — você vai precisar
+  criá-los.
+
+  Depois, grave em `caminho-agosto.txt` (na sua pasta pessoal) o **caminho
+  absoluto** dessa pasta nova.
+
+verificar:
+  - descricao: "a árvore documentos/2026/agosto existe"
+    script: |
+      #!/bin/bash
+      DIR=/home/aluno/documentos/2026/agosto
+      if [ ! -d "$DIR" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o diretorio /home/aluno/documentos/2026/agosto nao existe","dica_diagnostica":"mkdir sozinho so cria um nivel por vez; veja mkdir --help e procure a opcao que cria os pais"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "ata.txt está dentro de agosto/"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/documentos/2026/agosto/ata.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"ata.txt nao esta em documentos/2026/agosto","dica_diagnostica":"confira onde ele foi parar com: find ~ -name ata.txt"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "caminho-agosto.txt guarda o caminho absoluto da pasta"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/caminho-agosto.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"caminho-agosto.txt nao existe na sua pasta pessoal","dica_diagnostica":"entre na pasta nova e redirecione a saida do pwd"}'
+        exit 1
+      fi
+      LINHA=$(sed 's:/*$::' "$ARQ" | head -n 1)
+      if [ "$LINHA" != "/home/aluno/documentos/2026/agosto" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o caminho gravado nao e o absoluto da pasta agosto","dica_diagnostica":"caminho absoluto comeca com barra: deve ser /home/aluno/documentos/2026/agosto"}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Criar três níveis de pasta de uma vez tem uma opção própria no `mkdir` — procure em `mkdir --help` a que fala em *parents*. Para o caminho absoluto, entre na pasta e pergunte ao shell onde você está."
+  - "A forma é: `mkdir -_ ~/documentos/2026/agosto`, depois `touch ____/ata.txt`, e por fim `cd` até lá e `pwd > ~/caminho-agosto.txt`."
+  - "mkdir -p ~/documentos/2026/agosto && touch ~/documentos/2026/agosto/ata.txt && cd ~/documentos/2026/agosto && pwd > ~/caminho-agosto.txt"
+
+erros_comuns:
+  - match: "cannot create directory.*No such file or directory"
+    explica: "O `mkdir` sem `-p` só cria o último nível: ele exige que os diretórios acima já existam."
+    categoria: flag_errada
+  - match: "File exists"
+    explica: "O diretório já existe. Isso não é um problema — `mkdir -p` inclusive não reclama nesse caso."
+    categoria: conceitual
+
+cards_revisao:
+  - caminho-absoluto-comeca-na-raiz
+  - til-e-a-pasta-pessoal
+  - mkdir-p-cria-os-pais

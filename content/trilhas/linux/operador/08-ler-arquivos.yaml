@@ -1,0 +1,97 @@
+id: linux-op-08-ler-arquivos
+trilha: linux
+nivel: operador
+ordem: 8
+titulo: "Ler arquivos: cat, head, tail, wc"
+capacidade: "Sei inspecionar um log sem abrir editor, pegando só o pedaço que interessa."
+xp: 16
+prereqs: [linux-op-07-remover]
+
+objetivo_md: |
+  Num servidor, log grande é regra. Abrir tudo na tela raramente ajuda.
+
+  | Comando | Para quê |
+  |---|---|
+  | `cat arquivo` | despeja o arquivo inteiro |
+  | `less arquivo` | navega página a página (sai com `q`) |
+  | `head -n 5 arquivo` | as 5 primeiras linhas |
+  | `tail -n 5 arquivo` | as 5 últimas linhas |
+  | `wc -l arquivo` | conta as linhas |
+  | `file arquivo` | diz que tipo de arquivo é |
+
+  O log de chamadas do lab está em `logs/chamadas.log`. Cada linha é uma
+  chamada: ramal de origem, destino, status e duração — um CDR simplificado.
+
+  ### Sua tarefa
+
+  Na sua pasta pessoal, a partir de `logs/chamadas.log`:
+
+  1. Grave em `primeiras.txt` as **3 primeiras** linhas.
+  2. Grave em `ultimas.txt` as **2 últimas** linhas.
+  3. Grave em `total.txt` a **quantidade de linhas** do log.
+
+verificar:
+  - descricao: "primeiras.txt tem exatamente as 3 primeiras linhas do log"
+    script: |
+      #!/bin/bash
+      LOG=/home/aluno/logs/chamadas.log
+      ARQ=/home/aluno/primeiras.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"primeiras.txt nao existe","dica_diagnostica":"o comando que pega o comeco de um arquivo e o head"}'
+        exit 1
+      fi
+      if ! diff -q <(head -n 3 "$LOG") "$ARQ" >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o conteudo de primeiras.txt nao bate com as 3 primeiras linhas do log","dica_diagnostica":"compare lado a lado com: diff <(head -n 3 ~/logs/chamadas.log) ~/primeiras.txt"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "ultimas.txt tem exatamente as 2 últimas linhas do log"
+    script: |
+      #!/bin/bash
+      LOG=/home/aluno/logs/chamadas.log
+      ARQ=/home/aluno/ultimas.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"ultimas.txt nao existe","dica_diagnostica":"o comando que pega o fim de um arquivo e o tail"}'
+        exit 1
+      fi
+      if ! diff -q <(tail -n 2 "$LOG") "$ARQ" >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o conteudo de ultimas.txt nao bate com as 2 ultimas linhas do log","dica_diagnostica":"o padrao de head e tail e o mesmo: a opcao -n diz quantas linhas"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "total.txt registra o número de linhas do log"
+    script: |
+      #!/bin/bash
+      LOG=/home/aluno/logs/chamadas.log
+      ARQ=/home/aluno/total.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"total.txt nao existe","dica_diagnostica":"o comando que conta linhas e o wc, com a opcao que seleciona linhas"}'
+        exit 1
+      fi
+      ESPERADO=$(wc -l < "$LOG")
+      OBTIDO=$(awk 'NR==1 {print $1}' "$ARQ")
+      if [ "$OBTIDO" != "$ESPERADO" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o numero gravado nao confere com a contagem real de linhas","dica_diagnostica":"wc sem opcao conta linhas, palavras e bytes de uma vez; existe uma opcao que conta so linhas"}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Três comandos diferentes, um para cada item: começo do arquivo, fim do arquivo e contagem. Todos aceitam a mesma ideia de opção para dizer *quantas* linhas."
+  - "A forma é: `head -n _ arquivo > destino`, `tail -n _ arquivo > destino` e `wc -_ arquivo > destino`."
+  - "head -n 3 ~/logs/chamadas.log > ~/primeiras.txt ; tail -n 2 ~/logs/chamadas.log > ~/ultimas.txt ; wc -l < ~/logs/chamadas.log > ~/total.txt"
+
+erros_comuns:
+  - match: "Is a directory"
+    explica: "Você apontou o comando para um diretório em vez de um arquivo. Confirme com `ls -l` o que é o quê."
+    categoria: conceitual
+  - match: "No such file or directory"
+    explica: "O caminho do log está errado. Ele fica em `~/logs/chamadas.log`."
+    categoria: sintaxe
+
+cards_revisao:
+  - head-mostra-o-comeco
+  - tail-mostra-o-fim
+  - wc-l-conta-linhas

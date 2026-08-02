@@ -1,0 +1,67 @@
+# Catálogo de erros — Linux.
+#
+# Como a execução é real, os erros vêm das ferramentas de verdade. Cada entrada
+# casa a ASSINATURA REAL da mensagem com uma explicação estruturada. A UI mostra
+# sempre a mensagem original primeiro: o aluno precisa aprender a ler o erro.
+versao: 1
+
+erros:
+  - id: linux-command-not-found
+    trilhas: [linux]
+    match: "command not found"
+    titulo: "command not found (código 127)"
+    categoria: ferramenta_errada
+    significa: "O shell procurou um programa com esse nome em todos os diretórios do PATH e não encontrou nenhum."
+    porque: "Quase sempre é erro de digitação. As outras causas: o programa não está instalado nesta imagem, ou está num diretório fora do PATH."
+    investigar: "Confira a grafia. Depois teste com `type <nome>` e `which <nome>`. Para ver onde o shell procura: `echo $PATH`."
+    corrigir: "Corrija o nome, ou chame o programa pelo caminho completo (`/opt/coisa/programa`), ou acrescente o diretório ao PATH."
+
+  - id: linux-no-such-file
+    trilhas: [linux]
+    match: "No such file or directory"
+    titulo: "No such file or directory"
+    categoria: sintaxe
+    significa: "O caminho informado não existe — nem como arquivo, nem como diretório."
+    porque: "Erro de digitação, caminho relativo interpretado a partir de um diretório diferente do esperado, ou o arquivo realmente não foi criado ainda. Em redirecionamento, o `>` cria o arquivo mas nunca cria o diretório que o contém."
+    investigar: "Rode `pwd` para saber de onde o caminho relativo está partindo e `ls -la <diretório>` para ver o que existe de fato. Um glob que não casa com nada também chega ao comando como texto literal."
+    corrigir: "Ajuste o caminho, ou crie antes o diretório com `mkdir -p`."
+
+  - id: linux-permission-denied
+    trilhas: [linux]
+    match: "Permission denied"
+    titulo: "Permission denied"
+    categoria: permissao
+    significa: "O arquivo ou diretório existe, mas o seu usuário não tem a permissão necessária para essa operação."
+    porque: "Leitura exige `r`; escrita exige `w`; executar um programa exige `x`. Em diretório, `x` é o que permite *entrar* — sem ele, nem listar caminhos internos funciona. Arquivos do sistema costumam pertencer ao root."
+    investigar: "Veja dono e permissões com `ls -l <arquivo>` e quem você é com `id`. Para um diretório no meio do caminho, `ls -ld <diretório>`."
+    corrigir: "Ajuste a permissão com `chmod` ou o dono com `chown` (quando você puder), ou execute o comando como o usuário certo. `chmod 777` resolve na hora e abre um buraco de segurança — não é correção."
+
+  - id: linux-is-a-directory
+    trilhas: [linux]
+    match: "Is a directory"
+    titulo: "Is a directory"
+    categoria: conceitual
+    significa: "Você apontou para um diretório um comando que esperava um arquivo comum."
+    porque: "Acontece ao redirecionar para um caminho que já é diretório, ao rodar `cat` numa pasta, ou ao usar `rm` sem `-r`. O `cp` é o caso vizinho e tem mensagem própria: `cp: -r not specified; omitting directory`."
+    investigar: "Confirme o que é o quê com `ls -ld <caminho>`: a primeira letra `d` indica diretório."
+    corrigir: "Aponte para um arquivo dentro do diretório, ou use `rm -r` se a intenção era levar o conteúdo junto."
+
+  - id: linux-device-busy
+    trilhas: [linux]
+    match: "Device or resource busy"
+    titulo: "Device or resource busy"
+    categoria: conceitual
+    significa: "O recurso está em uso por algum processo e por isso não pode ser removido, desmontado ou alterado agora."
+    porque: "Algum processo tem o arquivo aberto ou está com o diretório como diretório de trabalho. É o erro clássico de tentar desmontar um ponto de montagem em uso."
+    investigar: "Descubra quem está segurando com `fuser -vm <caminho>` (o `lsof` faz o mesmo, mas não vem instalado neste lab). Confira também se você mesmo não está *dentro* do diretório."
+    corrigir: "Saia do diretório, encerre o processo que o mantém aberto e repita a operação."
+
+  - id: linux-no-space-left
+    trilhas: [linux]
+    match: "No space left on device"
+    titulo: "No space left on device"
+    categoria: conceitual
+    significa: "A partição de destino encheu — ou acabaram os inodes, mesmo havendo bytes livres."
+    porque: "Log sem rotação, arquivo temporário esquecido, gravação em massa. Muitos arquivos minúsculos esgotam os inodes antes do espaço."
+    investigar: "`df -h` mostra o espaço por partição e `df -i` mostra os inodes. Para achar o culpado: `du -sh /var/* | sort -h`."
+    corrigir: "Libere espaço, rotacione os logs ou aumente a partição. Num servidor de telefonia, disco cheio derruba gravação e voicemail antes de derrubar a sinalização."
