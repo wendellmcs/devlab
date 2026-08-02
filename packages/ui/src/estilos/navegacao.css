@@ -1,0 +1,513 @@
+/*
+ * Cabeçalho, mapas e cartões — direção visual "Ferramenta".
+ *
+ * A hierarquia aqui NÃO vem de cor. Com 7:1 obrigatório em todo texto, os
+ * cinzas médios e pastéis que normalmente separam níveis de informação deixam
+ * de existir. O que separa passa a ser: peso tipográfico, escala (Major Third,
+ * 1.25), espaço negativo e borda — e borda pode ser cinza médio porque cai em
+ * 1.4.11 (AA-only, 3:1), não em 1.4.6.
+ */
+
+/* ── cabeçalho ───────────────────────────────────────────────────────────── */
+
+.cabecalho {
+  display: flex;
+  align-items: center;
+  gap: var(--e-4);
+  padding: var(--e-2) var(--e-4);
+  background: var(--sup-1);
+  border-block-end: 1px solid var(--borda-media);
+  min-block-size: 52px;
+}
+
+.migalhas {
+  min-inline-size: 0;
+}
+
+.migalhas__lista {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-wrap: wrap;
+}
+
+.migalhas__item {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+}
+
+.migalhas__sep {
+  color: var(--texto-2);
+}
+
+.migalhas__link {
+  color: var(--texto-2);
+  text-decoration: none;
+  padding: var(--e-1) var(--e-2);
+  border-radius: var(--raio);
+}
+
+.migalhas__link:hover {
+  color: var(--texto-1);
+  background: var(--sup-3);
+  text-decoration: underline;
+}
+
+/* O item atual é o único em peso alto: hierarquia por peso, não por cor. */
+.migalhas__atual {
+  font-weight: 600;
+  color: var(--texto-1);
+}
+
+.cabecalho__status {
+  flex: 1;
+  min-inline-size: 0;
+  color: var(--texto-2);
+  font-size: var(--t-sm);
+  text-align: end;
+}
+
+.cabecalho__acoes {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+}
+
+.placar {
+  display: flex;
+  align-items: baseline;
+  gap: var(--e-1);
+  padding: var(--e-1) var(--e-3);
+  border: 1px solid var(--borda-media);
+  border-radius: var(--raio);
+  text-decoration: none;
+  color: var(--texto-1);
+}
+
+.placar:hover {
+  background: var(--sup-3);
+}
+
+.placar__valor {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.placar__rotulo {
+  font-size: var(--t-xs);
+  color: var(--texto-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.escala {
+  display: flex;
+  align-items: center;
+  gap: var(--e-1);
+}
+
+.escala__valor {
+  min-inline-size: 4ch;
+  text-align: center;
+  font-size: var(--t-sm);
+  color: var(--texto-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── botões ──────────────────────────────────────────────────────────────── */
+
+.botao {
+  padding: var(--e-2) var(--e-3);
+  background: var(--sup-2);
+  color: var(--texto-1);
+  /* borda-forte porque a fronteira do controle carrega significado: 1.4.11 */
+  border: 1px solid var(--borda-forte);
+  border-radius: var(--raio);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--transicao);
+}
+
+.botao:hover:not(:disabled) {
+  background: var(--sup-3);
+}
+
+.botao:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.botao--icone {
+  padding: var(--e-2);
+}
+
+.botao--discreto {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* ── alerta ──────────────────────────────────────────────────────────────── */
+
+.alerta {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  padding: var(--e-3) var(--e-4);
+  background: var(--sup-2);
+  /* Barra lateral semântica no lugar de fundo tingido: fundo colorido eleva a
+     superfície e derruba o contraste do texto — foi o que reprovou metade da
+     paleta antiga. A cor fica na borda, que não tem requisito de 7:1. */
+  border-inline-start: 3px solid var(--vermelho);
+  border-block-end: 1px solid var(--borda-media);
+}
+
+.alerta__icone {
+  color: var(--vermelho);
+}
+
+/* ── mapa ────────────────────────────────────────────────────────────────── */
+
+.mapa {
+  block-size: 100%;
+  padding: var(--e-6) var(--e-5) var(--e-7);
+}
+
+.mapa__cabecalho {
+  margin-inline: auto;
+  margin-block-end: var(--e-6);
+}
+
+.mapa__cabecalho h1 {
+  font-size: var(--t-2xl);
+}
+
+.mapa__intro {
+  color: var(--texto-2);
+}
+
+.mapa__lista,
+.lista-simples {
+  display: grid;
+  gap: var(--e-3);
+  max-inline-size: 68ch;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+/* ── cartão de trilha ────────────────────────────────────────────────────── */
+
+.cartao {
+  display: flex;
+  gap: var(--e-4);
+  padding: var(--e-4);
+  background: var(--sup-1);
+  border: 1px solid var(--borda-media);
+  border-radius: var(--raio-g);
+  text-decoration: none;
+  color: var(--texto-1);
+  transition: background var(--transicao), border-color var(--transicao);
+}
+
+a.cartao:hover {
+  background: var(--sup-3);
+  border-color: var(--borda-forte);
+}
+
+.cartao--breve {
+  /* Sem opacidade: reduzir opacidade reduz o contraste calculado e quebra o
+     7:1 que o teste garante. A distinção vem do traço e do rótulo. */
+  border-style: dashed;
+}
+
+.cartao__icone {
+  font-size: var(--t-xl);
+  line-height: 1;
+  inline-size: 1.5em;
+  text-align: center;
+  color: var(--texto-2);
+}
+
+.cartao__corpo {
+  display: grid;
+  gap: var(--e-2);
+  min-inline-size: 0;
+}
+
+.cartao__titulo {
+  font-size: var(--t-lg);
+  font-weight: 600;
+}
+
+.cartao__resumo {
+  color: var(--texto-2);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+}
+
+.cartao__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+  margin-block-start: var(--e-1);
+}
+
+.cartao__niveis {
+  font-size: var(--t-xs);
+  color: var(--texto-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ── etiquetas ───────────────────────────────────────────────────────────── */
+
+.etiqueta {
+  display: inline-block;
+  padding: var(--e-1) var(--e-2);
+  border-radius: var(--raio);
+  font-size: var(--t-xs);
+  border: 1px solid var(--borda-forte);
+  color: var(--texto-2);
+}
+
+.etiqueta--breve {
+  border-style: dashed;
+}
+
+.etiqueta--capstone {
+  margin-inline-start: var(--e-2);
+  border-color: var(--roxo);
+  color: var(--roxo);
+}
+
+/* ── progresso ───────────────────────────────────────────────────────────── */
+
+.progresso {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+}
+
+.progresso__trilho {
+  inline-size: 96px;
+  block-size: 6px;
+  background: var(--sup-3);
+  border: 1px solid var(--borda-media);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progresso__preenchido {
+  display: block;
+  block-size: 100%;
+  background: var(--verde);
+}
+
+/* O texto ao lado é o que faz o estado não depender só de cor (1.4.1). */
+.progresso__texto {
+  font-size: var(--t-xs);
+  color: var(--texto-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── módulo (nível dentro da trilha) ─────────────────────────────────────── */
+
+.modulo {
+  max-inline-size: 68ch;
+  margin: 0 auto var(--e-6);
+}
+
+.modulo__cabecalho {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  padding-block-end: var(--e-2);
+  border-block-end: 1px solid var(--borda-media);
+}
+
+.modulo__titulo {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  /* Rótulo secundário sem cinza: caixa alta + tracking + tamanho menor fazem o
+     trabalho de hierarquia que a cor faria, e passam 7:1. */
+  letter-spacing: 0.12em;
+  color: var(--texto-1);
+  flex: 1;
+}
+
+.modulo__capacidade {
+  margin: var(--e-3) 0 var(--e-4);
+  color: var(--texto-2);
+  font-size: var(--t-sm);
+}
+
+.modulo__licoes {
+  display: grid;
+  gap: var(--e-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ── item de lição ───────────────────────────────────────────────────────── */
+
+.item {
+  display: flex;
+  gap: var(--e-3);
+  align-items: flex-start;
+  padding: var(--e-3);
+  background: var(--sup-1);
+  border: 1px solid var(--borda-sutil);
+  border-radius: var(--raio);
+  text-decoration: none;
+  color: var(--texto-1);
+  transition: background var(--transicao);
+}
+
+a.item:hover {
+  background: var(--sup-3);
+  border-color: var(--borda-forte);
+}
+
+.item--travado {
+  border-style: dashed;
+}
+
+.item__marca {
+  inline-size: 1.5em;
+  text-align: center;
+  color: var(--texto-2);
+}
+
+.item__corpo {
+  display: grid;
+  gap: var(--e-1);
+  min-inline-size: 0;
+}
+
+.item__titulo {
+  font-weight: 500;
+}
+
+.item__estado {
+  font-size: var(--t-sm);
+  color: var(--texto-2);
+}
+
+/* ── métricas da área do aluno ───────────────────────────────────────────── */
+
+.metricas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--e-3);
+  max-inline-size: 68ch;
+  margin: 0 auto var(--e-6);
+}
+
+.metrica {
+  display: grid;
+  gap: var(--e-1);
+  padding: var(--e-4);
+  background: var(--sup-1);
+  border: 1px solid var(--borda-media);
+  border-radius: var(--raio-g);
+}
+
+.metrica--destaque {
+  border-inline-start: 3px solid var(--verde);
+}
+
+.metrica__valor {
+  font-size: var(--t-2xl);
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.metrica__rotulo {
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.metrica__nota {
+  font-size: var(--t-sm);
+  color: var(--texto-2);
+}
+
+/* ── vazio ───────────────────────────────────────────────────────────────── */
+
+.vazio {
+  display: grid;
+  place-items: center;
+  block-size: 100%;
+  padding: var(--e-6);
+  color: var(--texto-2);
+}
+
+/* ── três painéis da lição ───────────────────────────────────────────────── */
+
+.paineis {
+  display: grid;
+  /* 36 / 44 / 20 — instruções à esquerda é a convenção de Katacoda, Instruqt,
+     Codecademy e Boot.dev; só o KodeKloud inverte, e está sozinho. */
+  grid-template-columns: 36fr 44fr 20fr;
+  block-size: 100%;
+  min-block-size: 0;
+}
+
+.painel {
+  min-inline-size: 0;
+  min-block-size: 0;
+  display: flex;
+  flex-direction: column;
+  border-inline-end: 1px solid var(--borda-media);
+}
+
+.painel:last-child {
+  border-inline-end: none;
+}
+
+.painel--objetivo {
+  padding: var(--e-5);
+  /* Painel de leitura: arejado. O contraste de densidade entre painéis separa
+     as regiões sem gastar cor. */
+  line-height: 1.6;
+}
+
+.painel--estado {
+  padding: var(--e-4);
+  background: var(--sup-1);
+  /* Painel de dados: denso e com números tabulares. */
+  font-size: var(--t-sm);
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── abaixo de 1024px o DevLab não tenta se virar ────────────────────────── */
+
+.aviso-largura {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .paineis,
+  .mapa {
+    display: none;
+  }
+
+  .aviso-largura {
+    display: grid;
+    place-items: center;
+    block-size: 100%;
+    padding: var(--e-6);
+    text-align: center;
+    color: var(--texto-2);
+  }
+}

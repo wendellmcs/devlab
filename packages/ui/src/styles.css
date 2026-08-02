@@ -1,343 +1,41 @@
-/* DevLab — tema escuro por padrão (é um app de terminal), claro quando o SO pedir.
-   Status nunca depende só de cor: sempre há ícone e texto junto. */
+/* DevLab — estilos de componente da tela de lição.
+ *
+ * As cores, o reset, o app shell, o cabeçalho, os botões e os mapas moram em
+ * estilos/tokens.css, estilos/base.css e estilos/navegacao.css. Este arquivo
+ * ficou só com o que é específico da lição (objetivo, dicas, terminal, árvore
+ * de estado, catálogo de erros).
+ *
+ * ── Ponte de nomes, temporária e explícita ──────────────────────────────────
+ * Os componentes da lição ainda usam os nomes antigos de variável. Em vez de
+ * renomear 800 linhas de uma vez — mudança grande sem teste que a cubra — os
+ * nomes velhos passam a APONTAR para os tokens novos, que são os testados a
+ * 7:1. O efeito é imediato: a tela de lição herda a paleta AAA sem tocar em
+ * cada regra. A dívida é o alias, e ela sai quando cada componente migrar.
+ */
 
 :root {
-  --fundo: #0f1216;
-  --fundo-2: #161b22;
-  --fundo-3: #1c232c;
-  --fundo-4: #232c37;
-  --borda: #3a4552;
-  --borda-forte: #556373;
-  --texto: #e6edf3;
-  --texto-2: #a2b0be;
-  --texto-3: #8b98a6;
-  --acento: #58a6ff;
-  --acento-fundo: #12283f;
-  --ok: #3fb950;
-  --ok-fundo: #102a17;
-  --aviso: #d29922;
-  --aviso-fundo: #2b2109;
-  --falha: #f85149;
-  --falha-fundo: #2d1416;
-  --xp: #d2a8ff;
+  --fundo: var(--sup-0);
+  --fundo-2: var(--sup-1);
+  --fundo-3: var(--sup-2);
+  --fundo-4: var(--sup-3);
+  --borda: var(--borda-sutil);
+  /* --borda-forte já existe com o mesmo nome nos tokens novos */
+  --texto: var(--texto-1);
+  /* --texto-2 idem */
+  --texto-3: var(--texto-lg);   /* SÓ vale em >=24px; ver design/tokens.ts */
+  --acento: var(--azul);
+  --ok: var(--verde);
+  --aviso: var(--ambar);
+  --falha: var(--vermelho);
+  --xp: var(--roxo);
 
-  --raio: 8px;
-  --raio-g: 12px;
-  --fonte: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --fonte-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "Fira Code", Consolas, monospace;
-  --transicao: 140ms ease;
-
-  color-scheme: dark;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --fundo: #ffffff;
-    --fundo-2: #f6f8fa;
-    --fundo-3: #eef1f5;
-    --fundo-4: #e3e8ee;
-    --borda: #b9c4d0;
-    --borda-forte: #8e9cab;
-    --texto: #14181d;
-    --texto-2: #4a5561;
-    --texto-3: #596470;
-    --acento: #0b5cad;
-    --acento-fundo: #e3f0ff;
-    --ok: #17692c;
-    --ok-fundo: #e5f5e9;
-    --aviso: #8a5d00;
-    --aviso-fundo: #fdf3d9;
-    --falha: #c0202c;
-    --falha-fundo: #fdeaea;
-    --xp: #7b3fd4;
-
-    color-scheme: light;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --transicao: 0ms;
-  }
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#raiz {
-  height: 100%;
-  margin: 0;
-}
-
-html {
-  /* Sem isto o `font-size: 15px` do body ignorava a preferência de tamanho de
-     fonte do navegador. Agora a base é relativa e a escala do aluno multiplica. */
-  font-size: calc(100% * var(--escala, 1));
-}
-
-body {
-  background: var(--fundo);
-  color: var(--texto);
-  font-family: var(--fonte);
-  font-size: 0.95rem;
-  line-height: 1.55;
-  -webkit-font-smoothing: antialiased;
-}
-
-:focus-visible {
-  outline: 2px solid var(--acento);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-button {
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-}
-
-code,
-kbd,
-pre {
-  font-family: var(--fonte-mono);
-  font-size: 0.9em;
-}
-
-/* ── esqueleto ───────────────────────────────────────────────────────────── */
-
-.app {
-  display: grid;
-  grid-template-rows: auto auto 1fr;
-  min-height: 100%;
-  /* `overflow: hidden` deixava o desktop arrumado e CORTAVA o conteúdo com
-     zoom alto ou janela estreita — inclusive o botão de reset, sem barra de
-     rolagem que o recuperasse (WCAG 1.4.10). */
-  overflow: auto;
-}
-
-.paineis {
-  display: grid;
-  grid-template-columns: minmax(320px, 400px) minmax(420px, 1fr) minmax(300px, 360px);
-  gap: 1px;
-  background: var(--borda);
-  overflow: hidden;
-  min-height: 0;
-}
-
-@media (max-width: 720px) {
-  .paineis {
-    grid-template-columns: 1fr;
-    grid-auto-rows: minmax(320px, auto);
-    overflow: visible;
-  }
-}
-
-.painel {
-  background: var(--fundo);
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.painel__cabecalho {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--borda);
-  background: var(--fundo-2);
-  flex: 0 0 auto;
-}
-
-.painel__titulo {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--texto-3);
-  margin: 0;
-}
-
-.painel__corpo {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 16px;
-}
-
-.painel__corpo--sem-espaco {
-  padding: 0;
-}
-
-@media (max-width: 1180px) {
-  .paineis {
-    grid-template-columns: minmax(280px, 340px) 1fr;
-  }
-  .painel--estado {
-    display: none;
-  }
-}
-
-/* ── barra superior ──────────────────────────────────────────────────────── */
-
-.barra {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  padding: 8px 16px;
-  min-height: 54px;
-  background: var(--fundo-2);
-  border-bottom: 1px solid var(--borda);
-  flex: 0 0 auto;
-}
-
-.barra__marca {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.barra__marca small {
-  font-weight: 500;
-  font-size: 11px;
-  color: var(--texto-3);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.barra__espaco {
-  flex: 1 1 auto;
-}
-
-.barra__grupo {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.medidor {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background: var(--fundo-3);
-  border: 1px solid var(--borda);
-  border-radius: 999px;
-  font-size: 12px;
-  color: var(--texto-2);
-  white-space: nowrap;
-}
-
-.medidor strong {
-  color: var(--texto);
-  font-variant-numeric: tabular-nums;
-}
-
-.medidor--xp strong {
-  color: var(--xp);
-}
-
-/* ── botões ──────────────────────────────────────────────────────────────── */
-
-.botao {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: var(--raio);
-  border: 1px solid var(--borda-forte);
-  background: var(--fundo-3);
-  color: var(--texto);
-  font-size: 13px;
-  font-weight: 550;
-  transition: background var(--transicao), border-color var(--transicao);
-  white-space: nowrap;
-}
-
-.botao:hover:not(:disabled) {
-  background: var(--fundo-4);
-}
-
-.botao:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.botao--primario {
-  background: var(--acento);
-  border-color: var(--acento);
-  color: #06121f;
-}
-
-@media (prefers-color-scheme: light) {
-  .botao--primario {
-    color: #ffffff;
-  }
-}
-
-.botao--primario:hover:not(:disabled) {
-  filter: brightness(1.08);
-  background: var(--acento);
-}
-
-.botao--perigo {
-  color: var(--falha);
-  border-color: var(--falha);
-  background: transparent;
-}
-
-.botao--perigo:hover:not(:disabled) {
-  background: var(--falha-fundo);
-}
-
-.botao--discreto {
-  background: transparent;
-  border-color: transparent;
-  color: var(--texto-2);
-  padding: 6px 10px;
-}
-
-.botao--discreto:hover:not(:disabled) {
-  background: var(--fundo-3);
-  color: var(--texto);
-}
-
-.botao--largo {
-  width: 100%;
-}
-
-/* ── etiquetas ───────────────────────────────────────────────────────────── */
-
-.etiqueta {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  border: 1px solid var(--borda-forte);
-  background: var(--fundo-3);
-  color: var(--texto-2);
-  white-space: nowrap;
+  /* Fundos tingidos foram a causa de metade das reprovações de contraste:
+     elevavam a superfície e derrubavam o texto por cima. Viram superfície
+     neutra; a cor semântica passa a viver na borda, que não tem requisito. */
+  --acento-fundo: var(--sup-2);
+  --ok-fundo: var(--sup-2);
+  --aviso-fundo: var(--sup-2);
+  --falha-fundo: var(--sup-2);
 }
 
 .etiqueta--ok {

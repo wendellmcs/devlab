@@ -1,6 +1,11 @@
 import { createRoot } from 'react-dom/client'
 
 import '@xterm/xterm/css/xterm.css'
+// Ordem importa: tokens (gerado a partir de design/tokens.ts) antes de tudo,
+// porque as demais folhas só consomem variáveis.
+import './estilos/tokens.css'
+import './estilos/base.css'
+import './estilos/navegacao.css'
 import './styles.css'
 import { App } from './App.tsx'
 

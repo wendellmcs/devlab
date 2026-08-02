@@ -7,9 +7,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "tokens": "node src/design/gerar-css.ts",
     "preview": "vite preview",
     "tipos": "tsc --noEmit",
-    "teste": "node --test src/design/tokens.test.ts"
+    "teste": "node --test src/design/tokens.test.ts src/rota.test.ts"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.10.0",

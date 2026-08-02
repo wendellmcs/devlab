@@ -25,6 +25,8 @@ export type ResumoLicao = {
   progresso: ProgressoLicao | null
 }
 
+export type SituacaoTrilha = 'disponivel' | 'em_breve'
+
 export type Trilha = {
   id: string
   titulo: string
@@ -32,6 +34,8 @@ export type Trilha = {
   ordem: number
   icone: string
   fase: number
+  /** `em_breve` = trilha prevista no currículo, sem lições escritas ainda. */
+  situacao: SituacaoTrilha
   capacidades: Partial<Record<Nivel, string>>
   licoes: ResumoLicao[]
 }

@@ -1,0 +1,188 @@
+/*
+ * Base e app shell.
+ *
+ * A regra que organiza tudo: o <body> NUNCA rola. O app ocupa a altura da
+ * viewport e cada região rola por conta própria. Antes, o documento inteiro
+ * rolava — o cabeçalho subia, o terminal saía da tela e o aluno perdia a
+ * referência de onde estava. "Rolagem infinita" era o sintoma; documento em vez
+ * de aplicação era a causa.
+ *
+ * As cores vivem em tokens.css, gerado a partir de design/tokens.ts, que é
+ * testado a 7:1. Nenhum valor de cor deve aparecer neste arquivo.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#raiz {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* dvh acompanha a barra do navegador; vh não. */
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--sup-0);
+  color: var(--texto-1);
+  font-family: var(--fonte);
+  font-size: calc(15px * var(--escala, 1));
+  /* 1.5 é piso de WCAG 1.4.8 (AAA), não preferência estética. */
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Ilusão de irradiação: texto claro sobre fundo escuro parece mais pesado que o
+ * mesmo peso sobre fundo claro — um 500 lê como 600. Meio grau de tracking
+ * devolve a proporção sem mexer no peso nem causar deslocamento de layout.
+ */
+@media (prefers-color-scheme: dark) {
+  body {
+    letter-spacing: 0.006em;
+  }
+}
+
+/* ── movimento ───────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── foco ────────────────────────────────────────────────────────────────── */
+
+/*
+ * Anel duplo (WCAG 2.4.13, AAA).
+ *
+ * Um anel de cor única some sobre alguma superfície — o anel azul antigo
+ * desaparecia em cima do item já marcado com borda azul, e ali a MUDANÇA de
+ * contraste entre focado e não-focado ficava abaixo de 3:1. Com dois anéis de
+ * polaridade oposta, um deles sempre contrasta: o escuro ganha em fundo claro,
+ * o claro ganha em fundo escuro. É o mesmo princípio do amarelo+preto do GOV.UK.
+ */
+:focus-visible {
+  outline: 3px solid var(--foco-interno);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px var(--foco-externo);
+  border-radius: var(--raio);
+}
+
+/* :focus sem -visible marcaria clique de mouse; só teclado deve acender. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── skip links ──────────────────────────────────────────────────────────── */
+
+.pular {
+  position: absolute;
+  top: var(--e-2);
+  left: var(--e-2);
+  z-index: 100;
+  padding: var(--e-2) var(--e-3);
+  background: var(--sup-2);
+  color: var(--texto-1);
+  border: 1px solid var(--borda-forte);
+  border-radius: var(--raio);
+  text-decoration: none;
+  /* Fora da tela até receber foco — some do fluxo visual sem sumir do DOM. */
+  transform: translateY(-200%);
+}
+
+.pular:focus-visible {
+  transform: translateY(0);
+}
+
+/* Conteúdo só para leitor de tela, ainda focável. `display:none` não serve. */
+.sr-apenas {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── app shell ───────────────────────────────────────────────────────────── */
+
+.app {
+  display: grid;
+  /* cabeçalho fixo · conteúdo elástico. Nada de terceira faixa: rodapé rouba
+     altura de um app cujo conteúdo principal é um terminal. */
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100dvh;
+}
+
+/* minmax(0,1fr) e não 1fr: sem isso o filho com overflow estoura a grade. */
+.app__conteudo {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Região que rola sozinha. A barra some quando não há transbordo. */
+.rolagem {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+/* ── tipografia de leitura ───────────────────────────────────────────────── */
+
+/*
+ * WCAG 1.4.8 (AAA) trata isto como requisito, e é também o que faz o texto
+ * longo de ensino ficar legível: ≤80 caracteres por linha, entrelinha 1.5+, e
+ * espaço entre parágrafos ≥1.5× a entrelinha.
+ */
+.leitura {
+  max-width: 68ch;
+  line-height: 1.6;
+  text-align: left; /* nunca justificar: rios de espaço branco atrapalham */
+}
+
+.leitura > * + * {
+  margin-top: calc(1.6em * 1.5);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+a {
+  color: var(--azul);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+/* ── alvos de toque/clique ───────────────────────────────────────────────── */
+
+/*
+ * 44×44 CSS px (WCAG 2.5.5, AAA). Vale para mouse também: alvo pequeno é
+ * imprecisão para todo mundo, e erro de clique num botão de "destruir lab" é
+ * caro. Onde o desenho pede um controle visualmente menor, o alvo é ampliado
+ * por padding, não reduzido.
+ */
+button,
+[role='button'],
+a.alvo {
+  min-block-size: 44px;
+  min-inline-size: 44px;
+}

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement, type RefObject } from 'react'
 
 import { api, ErroDaApi } from './api.ts'
+import { useRota, type Navegar, type Rota } from './rota.ts'
 import type {
   EstadoDaIa,
   EstadoDoLab,
@@ -13,16 +14,21 @@ import type {
   ResumoProgresso,
   Trilha,
 } from './tipos.ts'
-import { BarraSuperior } from './componentes/BarraSuperior.tsx'
+import { Cabecalho, migalhasDe } from './componentes/Cabecalho.tsx'
+import { MapaDaTrilha, MapaTrilhas } from './componentes/Trilha.tsx'
+import { AreaDoAluno } from './componentes/AreaDoAluno.tsx'
 import { PainelObjetivo } from './componentes/PainelObjetivo.tsx'
 import { PainelTerminal, type ControleTerminal } from './componentes/PainelTerminal.tsx'
 import { PainelEstado } from './componentes/PainelEstado.tsx'
-import { ListaDeTrilhas } from './componentes/ListaDeTrilhas.tsx'
 import { TelaDoctor } from './componentes/TelaDoctor.tsx'
 
 const INTERVALO_ESTADO_MS = 2500
 
+type Tema = 'escuro' | 'claro'
+
 export function App(): ReactElement {
+  const [rota, navegar] = useRota()
+
   const [doctor, setDoctor] = useState<RelatorioDoctor | null>(null)
   const [trilhas, setTrilhas] = useState<Trilha[]>([])
   const [resumo, setResumo] = useState<ResumoProgresso | null>(null)
@@ -38,7 +44,10 @@ export function App(): ReactElement {
     const salva = Number(localStorage.getItem('devlab.escala'))
     return Number.isFinite(salva) && salva >= 0.8 && salva <= 1.6 ? salva : 1
   })
-  const [vista, setVista] = useState<'licao' | 'trilhas'>('trilhas')
+  const [tema, setTema] = useState<Tema>(() => {
+    const salvo = localStorage.getItem('devlab.tema')
+    return salvo === 'claro' || salvo === 'escuro' ? salvo : 'escuro'
+  })
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [falha, setFalha] = useState<string | null>(null)
 
@@ -48,6 +57,12 @@ export function App(): ReactElement {
   /** Espelho de `lab` para os callbacks não dependerem dele e se recriarem. */
   const labRef = useRef<LabInfo | null>(null)
   labRef.current = lab
+  /** Espelho de `licao`, pelo mesmo motivo, dentro do efeito de rota. */
+  const licaoRef = useRef<Licao | null>(null)
+  licaoRef.current = licao
+
+  const alvoDeFoco = useRef<HTMLElement>(null)
+  const primeiraTela = useRef(true)
 
   const relatarFalha = useCallback((e: unknown) => {
     if (e instanceof ErroDaApi) {
@@ -71,6 +86,11 @@ export function App(): ReactElement {
     document.documentElement.style.setProperty('--escala', String(escala))
     localStorage.setItem('devlab.escala', String(escala))
   }, [escala])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-tema', tema)
+    localStorage.setItem('devlab.tema', tema)
+  }, [tema])
 
   const mudarEscala = useCallback((valor: number) => {
     setEscala(Math.min(1.6, Math.max(0.8, Math.round(valor * 10) / 10)))
@@ -116,42 +136,69 @@ export function App(): ReactElement {
     }
   }, [lab])
 
-  const abrirLicao = useCallback(
-    async (id: string) => {
-      // Guarda de sequência: sem ela, dois cliques rápidos em lições
-      // diferentes deixavam um container órfão (o segundo não sabia do lab do
-      // primeiro) e podiam terminar mostrando a lição A com o terminal de B,
-      // conforme a ordem em que as respostas chegassem.
-      const meuPedido = pedidoAtual.current + 1
-      pedidoAtual.current = meuPedido
+  /**
+   * A ROTA manda no lab: entrar numa lição sobe o lab dela, sair destrói.
+   *
+   * Antes isso morava num handler de clique, então o botão voltar do navegador
+   * deixava o container de pé sem nenhuma tela apontando para ele — e o aluno
+   * só descobria ao esbarrar no teto de labs simultâneos.
+   */
+  useEffect(() => {
+    const meuPedido = pedidoAtual.current + 1
+    pedidoAtual.current = meuPedido
+
+    void (async () => {
+      const anterior = labRef.current
+
+      if (rota.tela !== 'licao') {
+        if (anterior !== null) {
+          setLab(null)
+          await api.destruirLab(anterior.id).catch(() => undefined)
+        }
+        setLicao(null)
+        setVerificacao(null)
+        setRespostaIa(null)
+        return
+      }
+
+      // Já estamos nesta lição com lab de pé: nada a fazer (evita recriar o
+      // container a cada re-render do efeito).
+      if (licaoRef.current?.id === rota.licaoId && anterior !== null) return
 
       setOcupado('Subindo o lab…')
       setFalha(null)
       setVerificacao(null)
       setRespostaIa(null)
       try {
-        const anterior = labRef.current
         if (anterior !== null) await api.destruirLab(anterior.id).catch(() => undefined)
         if (pedidoAtual.current !== meuPedido) return
         setLab(null)
 
-        const { lab: novoLab, licao: nova } = await api.criarLab(id)
+        const { lab: novoLab, licao: nova } = await api.criarLab(rota.licaoId)
         if (pedidoAtual.current !== meuPedido) {
-          // Outro clique venceu: este lab não tem dono na tela.
+          // Outra navegação venceu: este lab não tem dono na tela.
           await api.destruirLab(novoLab.id).catch(() => undefined)
           return
         }
         setLicao(nova)
         setLab(novoLab)
-        setVista('licao')
       } catch (e) {
         if (pedidoAtual.current === meuPedido) relatarFalha(e)
       } finally {
         if (pedidoAtual.current === meuPedido) setOcupado(null)
       }
-    },
-    [relatarFalha],
-  )
+    })()
+  }, [rota, relatarFalha])
+
+  // Foco no conteúdo ao trocar de tela: quem navega por teclado precisa saber
+  // que chegou, e o leitor de tela precisa anunciar a página nova.
+  useEffect(() => {
+    if (primeiraTela.current) {
+      primeiraTela.current = false
+      return
+    }
+    alvoDeFoco.current?.focus()
+  }, [rota])
 
   const resetar = useCallback(async () => {
     if (lab === null) return
@@ -202,13 +249,11 @@ export function App(): ReactElement {
   const pedirIa = useCallback(
     async (momento: MomentoIa) => {
       if (lab === null) return
-      setOcupado('Consultando o modelo local…')
+      setOcupado('Consultando o modelo…')
       setFalha(null)
       try {
         const r = await api.iaResponder(momento, lab.id)
         setRespostaIa(r)
-        // A lição volta atualizada: usar IA marca a solução e derruba o selo
-        // de "sem ajuda", e isso precisa aparecer na hora.
         setLicao(r.licao)
       } catch (e) {
         relatarFalha(e)
@@ -248,23 +293,29 @@ export function App(): ReactElement {
 
   return (
     <div className="app">
-      <BarraSuperior
+      <a className="pular" href="#conteudo">
+        Pular para o conteúdo
+      </a>
+      {rota.tela === 'licao' && (
+        <a className="pular pular--2" href="#terminal">
+          Pular para o terminal
+        </a>
+      )}
+
+      <Cabecalho
+        migalhas={migalhasDe(rota, trilhas, licao)}
+        resumo={resumo}
         escala={escala}
         aoMudarEscala={mudarEscala}
-        resumo={resumo}
-        lab={lab}
-        recursos={estado?.recursos ?? null}
+        tema={tema}
+        aoAlternarTema={() => setTema((t) => (t === 'escuro' ? 'claro' : 'escuro'))}
+        navegar={navegar}
         ocupado={ocupado}
-        vista={vista}
-        aoTrocarVista={setVista}
-        aoResetar={resetar}
+        aoResetar={lab !== null ? () => void resetar() : undefined}
       />
 
-      {/* Fora dos painéis de propósito: antes, uma falha ao abrir a lição só
-          era renderizada dentro do PainelObjetivo — que nem chega a montar
-          quando a abertura falha. O usuário via o chip sumir e mais nada. */}
       {falha !== null && (
-        <div className="alerta alerta--global" role="alert">
+        <div className="alerta" role="alert">
           <span className="alerta__icone" aria-hidden="true">
             ✘
           </span>
@@ -280,38 +331,95 @@ export function App(): ReactElement {
         </div>
       )}
 
-      <div className="paineis">
-        <section className="painel painel--objetivo" aria-label="Objetivo e dicas">
-          {vista === 'trilhas' || licao === null ? (
-            <ListaDeTrilhas
-              trilhas={trilhas}
-              licaoAtual={licao?.id ?? null}
-              aoEscolher={(id) => void abrirLicao(id)}
-            />
-          ) : (
-            <PainelObjetivo
-              licao={licao}
-              verificacao={verificacao}
-              ocupado={ocupado}
-              podeVerificar={lab !== null && lab.estado === 'pronto'}
-              ia={ia}
-              respostaIa={respostaIa}
-              aoVerificar={() => void verificar()}
-              aoRevelarDica={(n) => void revelarDica(n)}
-              aoPedirIa={(m) => void pedirIa(m)}
-              aoInserirComando={inserirNoTerminal}
-            />
-          )}
-        </section>
+      {/* tabIndex -1 recebe foco por script sem entrar na ordem de tabulação. */}
+      <main className="app__conteudo" id="conteudo" ref={alvoDeFoco} tabIndex={-1}>
+        <Conteudo
+          rota={rota}
+          trilhas={trilhas}
+          resumo={resumo}
+          licao={licao}
+          lab={lab}
+          estado={estado}
+          verificacao={verificacao}
+          ia={ia}
+          respostaIa={respostaIa}
+          escala={escala}
+          ocupado={ocupado}
+          navegar={navegar}
+          terminal={terminal}
+          aoVerificar={() => void verificar()}
+          aoRevelarDica={(n) => void revelarDica(n)}
+          aoPedirIa={(m) => void pedirIa(m)}
+          aoInserirComando={inserirNoTerminal}
+        />
+      </main>
+    </div>
+  )
+}
 
-        <section className="painel painel--terminal" aria-label="Terminal do lab">
-          <PainelTerminal ref={terminal} lab={lab} escala={escala} />
-        </section>
+function Conteudo(p: {
+  rota: Rota
+  trilhas: Trilha[]
+  resumo: ResumoProgresso | null
+  licao: Licao | null
+  lab: LabInfo | null
+  estado: EstadoDoLab | null
+  verificacao: ResultadoVerificacao | null
+  ia: EstadoDaIa | null
+  respostaIa: RespostaDaIa | null
+  escala: number
+  ocupado: string | null
+  navegar: Navegar
+  terminal: RefObject<ControleTerminal | null>
+  aoVerificar: () => void
+  aoRevelarDica: (n: number) => void
+  aoPedirIa: (m: MomentoIa) => void
+  aoInserirComando: (t: string) => void
+}): ReactElement {
+  const { rota } = p
 
-        <section className="painel painel--estado" aria-label="Estado do lab ao vivo">
-          <PainelEstado estado={estado} lab={lab} />
-        </section>
-      </div>
+  if (rota.tela === 'mapa') {
+    return <MapaTrilhas trilhas={p.trilhas} navegar={p.navegar} />
+  }
+
+  if (rota.tela === 'aluno') {
+    return <AreaDoAluno resumo={p.resumo} trilhas={p.trilhas} navegar={p.navegar} />
+  }
+
+  if (rota.tela === 'trilha') {
+    const t = p.trilhas.find((x) => x.id === rota.trilhaId)
+    if (t === undefined) return <div className="vazio">Carregando trilha…</div>
+    return <MapaDaTrilha trilha={t} navegar={p.navegar} />
+  }
+
+  return (
+    <div className="paineis">
+      <section className="painel painel--objetivo rolagem" aria-label="Objetivo e dicas">
+        {p.licao === null ? (
+          <div className="vazio">Subindo o lab…</div>
+        ) : (
+          <PainelObjetivo
+            licao={p.licao}
+            verificacao={p.verificacao}
+            ocupado={p.ocupado}
+            podeVerificar={p.lab !== null && p.lab.estado === 'pronto'}
+            ia={p.ia}
+            respostaIa={p.respostaIa}
+            aoVerificar={p.aoVerificar}
+            aoRevelarDica={p.aoRevelarDica}
+            aoPedirIa={p.aoPedirIa}
+            aoInserirComando={p.aoInserirComando}
+          />
+        )}
+      </section>
+
+      <section className="painel painel--terminal" id="terminal" aria-label="Terminal do lab">
+        <PainelTerminal ref={p.terminal} lab={p.lab} escala={p.escala} />
+      </section>
+
+      <section className="painel painel--estado rolagem" aria-label="Estado do lab ao vivo">
+        <PainelEstado estado={p.estado} lab={p.lab} />
+      </section>
     </div>
   )
 }

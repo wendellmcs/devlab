@@ -1,0 +1,110 @@
+/* GERADO por design/gerar-css.ts — não edite à mão.
+ * A fonte é design/tokens.ts, que é testado a 7:1 por design/tokens.test.ts.
+ * Para mudar uma cor: mude o token, rode o teste, regenere. */
+
+:root {
+  --e-1: 4px;
+  --e-2: 8px;
+  --e-3: 12px;
+  --e-4: 16px;
+  --e-5: 24px;
+  --e-6: 32px;
+  --e-7: 48px;
+  --t-xs: 0.75rem;
+  --t-sm: 0.875rem;
+  --t-md: 1rem;
+  --t-lg: 1.25rem;
+  --t-xl: 1.563rem;
+  --t-2xl: 1.953rem;
+  --raio: 6px;
+  --raio-g: 10px;
+  --transicao: 140ms ease;
+  --fonte: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --fonte-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "Fira Code", Consolas, monospace;
+
+  /* terminal — paleta ANSI curada, ≥7:1 e sem colisão normal/bright */
+  --ansi-black: #2A323D;
+  --ansi-red: #F88E83;
+  --ansi-green: #65BE7A;
+  --ansi-yellow: #C5AA3B;
+  --ansi-blue: #67B1FA;
+  --ansi-magenta: #DF92D8;
+  --ansi-cyan: #21BDCE;
+  --ansi-white: #D9E0E7;
+  --ansi-brightblack: #8D949B;
+  --ansi-brightred: #FABFB7;
+  --ansi-brightgreen: #94DEA3;
+  --ansi-brightyellow: #E2CC75;
+  --ansi-brightblue: #A5D1FF;
+  --ansi-brightmagenta: #FAB7F3;
+  --ansi-brightcyan: #8FE4ED;
+  --ansi-brightwhite: #F2F5F8;
+}
+
+/* Escuro é o tema canônico: em fundo escuro o AAA custa muito menos croma. */
+:root,
+:root[data-tema='escuro'] {
+  --sup-0: #0B0E13;
+  --sup-1: #10151C;
+  --sup-2: #151B24;
+  --sup-3: #1B222C;
+  --borda-sutil: #303942;
+  --borda-media: #454F58;
+  --borda-forte: #636C76;
+  --texto-1: #D9E0E7;
+  --texto-2: #A6ADB3;
+  --texto-lg: #83898F;
+  --azul: #64B1FD;
+  --verde: #61BF79;
+  --ambar: #E39C5F;
+  --vermelho: #FD8B83;
+  --roxo: #BF99FE;
+  --foco-interno: #0B0E13;
+  --foco-externo: #F2F5F8;
+  color-scheme: dark;
+}
+
+:root[data-tema='claro'] {
+  --sup-0: #FFFFFF;
+  --sup-1: #F5F7F9;
+  --sup-2: #ECEFF3;
+  --sup-3: #E2E7ED;
+  --borda-sutil: #D0D7DE;
+  --borda-media: #AFB8C1;
+  --borda-forte: #6E7781;
+  --texto-1: #21272E;
+  --texto-2: #454C53;
+  --texto-lg: #616870;
+  --azul: #034D86;
+  --verde: #025814;
+  --ambar: #723E06;
+  --vermelho: #9A020E;
+  --roxo: #621CBB;
+  --foco-interno: #0B0E13;
+  --foco-externo: #F2F5F8;
+  color-scheme: light;
+}
+
+/* Sem escolha manual, segue o sistema. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-tema]) {
+    --sup-0: #FFFFFF;
+    --sup-1: #F5F7F9;
+    --sup-2: #ECEFF3;
+    --sup-3: #E2E7ED;
+    --borda-sutil: #D0D7DE;
+    --borda-media: #AFB8C1;
+    --borda-forte: #6E7781;
+    --texto-1: #21272E;
+    --texto-2: #454C53;
+    --texto-lg: #616870;
+    --azul: #034D86;
+    --verde: #025814;
+    --ambar: #723E06;
+    --vermelho: #9A020E;
+    --roxo: #621CBB;
+    --foco-interno: #0B0E13;
+    --foco-externo: #F2F5F8;
+    color-scheme: light;
+  }
+}
