@@ -405,6 +405,21 @@ else
   ok "dependências instaladas"
 fi
 
+# ── 4b. interface ──────────────────────────────────────────────────────────
+# O agente serve a própria UI, então o build é parte da instalação — não é
+# passo de desenvolvedor. `dist/` não é versionado (é artefato), logo todo
+# clone novo e todo `git pull` que mexa na interface precisa passar por aqui.
+passo "interface"
+
+if [ "$SO_CONFERIR" -eq 1 ]; then
+  aviso "build da interface pulado"
+elif npm run build --workspace @devlab/ui >/dev/null 2>&1; then
+  ok "interface construída (packages/ui/dist)"
+else
+  falha "não foi possível construir a interface"
+  nota "rode 'npm run build --workspace @devlab/ui' para ver o erro completo"
+fi
+
 # ── 5. imagens de lab ──────────────────────────────────────────────────────
 passo "imagens de lab"
 
@@ -440,8 +455,13 @@ export PATH="$(dirname "${NODE_BIN:-/usr/bin/node}"):\$PATH"
 
 cd "\$RAIZ"
 case "\${1:-ajuda}" in
-  iniciar|start|dev) exec npm run dev ;;
+  # Uso normal: um processo, uma porta, e o agente serve a própria interface.
+  iniciar|start)     exec npm run iniciar ;;
+  # Desenvolvimento da UI: Vite com HMR. Reinicia o agente ao salvar, o que
+  # derruba labs abertos — por isso não é o caminho de quem está estudando.
+  dev)               exec npm run dev ;;
   imagens)           exec npm run imagens ;;
+  construir)         exec npm run build ;;
   testar)            exec npm run teste ;;
   validar)           exec npm run valida ;;
   atualizar)
@@ -490,8 +510,8 @@ if [ "${PRECISA_RELOGAR:-0}" -eq 1 ]; then
 fi
 
 if npm run doctor --silent; then
-  printf '\n%s  Pronto.%s Suba tudo com: %snpm run dev%s\n' "$VERDE" "$RESET" "$NEGRITO" "$RESET"
-  printf '  Depois abra %shttp://127.0.0.1:5173%s\n\n' "$AZUL" "$RESET"
+  printf '\n%s  Pronto.%s Suba com: %sdevlab iniciar%s\n' "$VERDE" "$RESET" "$NEGRITO" "$RESET"
+  printf '  Depois abra %shttp://127.0.0.1:%s%s\n\n' "$AZUL" "${DEVLAB_PORTA:-7788}" "$RESET"
 else
   printf '\n%s  Faltam itens acima.%s Corrija e rode %s./scripts/setup.sh%s de novo.\n\n' \
     "$AMARELO" "$RESET" "$NEGRITO" "$RESET"

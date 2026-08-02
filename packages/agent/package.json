@@ -15,7 +15,7 @@
     "start": "node --env-file-if-exists=../../.env src/main.ts",
     "doctor": "node --env-file-if-exists=../../.env src/cli/devlab.ts doctor",
     "tipos": "tsc --noEmit",
-    "teste": "node --test src/conteudo/schema.test.ts src/conteudo/carregador.test.ts src/progresso/store.test.ts src/verificacao/diagnostico.test.ts src/estado/extrator.test.ts src/http/roteador.test.ts src/http/origem.test.ts src/lab/limites.test.ts src/ia/servico.test.ts src/ia/nuvem.test.ts",
+    "teste": "node --test src/conteudo/schema.test.ts src/conteudo/carregador.test.ts src/progresso/store.test.ts src/verificacao/diagnostico.test.ts src/estado/extrator.test.ts src/http/roteador.test.ts src/http/origem.test.ts src/http/estaticos.test.ts src/lab/limites.test.ts src/ia/servico.test.ts src/ia/nuvem.test.ts",
     "teste:integracao": "node --test --test-timeout=180000 src/lab/gerenciador.integracao.test.ts"
   },
   "dependencies": {

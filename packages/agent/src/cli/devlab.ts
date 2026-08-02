@@ -33,7 +33,7 @@ async function doctor(): Promise<number> {
 
   console.log('')
   if (relatorio.pronto) {
-    console.log(pintar(COR.ok, '✔ ambiente pronto.') + ' Suba tudo com: npm run dev')
+    console.log(pintar(COR.ok, '✔ ambiente pronto.') + ' Suba com: devlab iniciar')
   } else {
     console.log(pintar(COR.falha, '✘ ambiente incompleto.') + ' Resolva os itens marcados acima.')
   }
@@ -212,13 +212,15 @@ function ajuda(): number {
   console.log(`
 ${pintar(NEGRITO, 'devlab')} — Oficina Prática de Infraestrutura e VoIP
 
+  devlab iniciar   sobe o DevLab (um processo) em http://127.0.0.1:7788
   devlab doctor    valida WSL2, Docker, cgroup v2, disco, portas e conteúdo
   devlab licoes    lista as trilhas e lições carregadas de content/
   devlab ia        liga/desliga a IA e troca entre modelo local e nuvem
   devlab modelo    mostra, lista e troca o modelo em uso
+  devlab atualizar git pull + dependências + build da interface
   devlab ajuda     mostra esta mensagem
 
-Para subir o agente e a interface:  npm run dev
+Para MEXER na interface (Vite com HMR, porta 5173):  devlab dev
 `)
   return 0
 }

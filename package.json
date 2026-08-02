@@ -12,6 +12,8 @@
   },
   "scripts": {
     "dev": "bash scripts/dev.sh",
+    "iniciar": "bash scripts/iniciar.sh",
+    "build": "npm run build --workspace @devlab/ui",
     "doctor": "npm run doctor --workspace @devlab/agent",
     "agente": "npm run dev --workspace @devlab/agent",
     "ui": "npm run dev --workspace @devlab/ui",

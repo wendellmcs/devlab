@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# Sobe o devlab-agent e a UI juntos, em modo desenvolvimento.
+# Sobe o agente e o dev server do Vite juntos — modo DESENVOLVIMENTO.
+#
+# Use isto para MEXER na interface: o Vite dá recarga automática e o agente
+# sobe com --watch. Note os efeitos colaterais, que são aceitáveis aqui e não
+# no uso normal: mexer num arquivo carregado reinicia o agente e derruba os
+# labs abertos, e o browser fala com a 5173 enquanto a API fica na 7788.
+#
+# Para USAR o DevLab (um processo, uma porta, labs estáveis): scripts/iniciar.sh
 set -euo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,8 +28,10 @@ encerrar() {
 }
 trap encerrar EXIT INT TERM
 
-echo "[devlab] agente  -> http://127.0.0.1:${DEVLAB_PORTA:-7788}"
-echo "[devlab] interface-> http://127.0.0.1:5173"
+echo "[devlab] MODO DESENVOLVIMENTO (HMR; o agente reinicia ao salvar)"
+echo "[devlab] agente    -> http://127.0.0.1:${DEVLAB_PORTA:-7788}"
+echo "[devlab] interface -> http://127.0.0.1:5173   <- abra esta"
+echo "[devlab] para usar de verdade: npm run iniciar"
 echo ""
 
 npm run dev --workspace @devlab/agent &

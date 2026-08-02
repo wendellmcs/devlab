@@ -88,17 +88,24 @@ Se já clonou o repositório:
 Depois disso existe o comando `devlab` no seu PATH:
 
 ```bash
-devlab iniciar      # sobe o agente (:7788) e a interface (:5173)
+devlab iniciar      # sobe o DevLab (um processo, http://127.0.0.1:7788)
 devlab doctor       # diagnóstico do ambiente
 devlab licoes       # lista trilhas e lições carregadas
 devlab validar      # valida o conteúdo declarativo
 devlab atualizar    # git pull + dependências + setup
 devlab ia           # liga/desliga a IA e troca entre modelo local e nuvem
 devlab modelo       # mostra, lista e troca o modelo em uso
+devlab dev          # só para MEXER na interface (Vite com HMR, :5173)
 ```
 
-Abra <http://127.0.0.1:5173>, escolha **Linux → Anatomia do shell** e um
+Abra <http://127.0.0.1:7788>, escolha **Linux → Anatomia do shell** e um
 container sobe em segundos com um bash de verdade dentro dele.
+
+> **Um processo, uma porta, uma origem.** O agente serve a própria interface.
+> Não há dev server no caminho de quem estuda, e não há `--watch` reiniciando o
+> agente — o que importa porque um reinício destrói os labs abertos: trocar o
+> modelo de IA no meio de uma lição mataria o container. O Vite continua
+> existindo, mas só em `devlab dev`, para quem for mexer na UI.
 
 ### O que o setup exige
 
@@ -280,14 +287,15 @@ recomendado preenchido.
 ```
 Linux  (nativo, ou dentro do WSL2 quando o host é Windows)
     ├── Docker Engine
-    ├── devlab-agent  (Node 24 + TypeScript, sem build)
+    ├── devlab-agent  (Node 24 + TypeScript, sem build)  :7788
     │     ├── Lab Manager      → ciclo de vida dos containers, limites, reset, injeção de falha
     │     ├── PTY Bridge       → docker exec -t → WebSocket → xterm.js (uma sessão por aba)
     │     ├── Verifier Runner  → copia e roda os checks dentro do lab
     │     ├── State Extractor  → lê o container e alimenta o painel da direita
-    │     └── Progress Store   → SQLite local (XP, tentativas, dicas, erros)
+    │     ├── Progress Store   → SQLite local (XP, tentativas, dicas, erros)
+    │     └── Estáticos        → serve packages/ui/dist na MESMA porta da API
     └── Imagens de lab em cache
-Browser (localhost) → UI React + TypeScript + Vite
+Browser (localhost:7788) → UI React + TypeScript (build do Vite)
 ```
 
 ### Decisões de stack e o porquê
@@ -299,6 +307,7 @@ Browser (localhost) → UI React + TypeScript + Vite
 | **`dockerode` para tudo, inclusive o PTY** | `exec` com `Tty: true` devolve um stream duplex — é o terminal, sem precisar de `node-pty` (que exigiria compilação nativa). |
 | **`node:http` + `ws` crus** | O agente expõe uma API pequena. Um framework acrescentaria superfície de versão sem ganho. |
 | **Conteúdo em YAML, fora do código** | Escrever lição não pode exigir recompilar aplicação. É o que faz as 10 trilhas caberem. |
+| **O agente serve a UI (uma porta)** | Com o proxy do Vite no meio, o browser falava na 5173 e a API atendia na 7788 — `Host` e `Origin` chegavam de uma origem diferente da que respondia, e as guardas recusavam o app inteiro. Mesma origem torna a comparação trivial e elimina um processo. O Vite fica para desenvolver. |
 
 ---
 
@@ -408,11 +417,13 @@ packages/agent/                 devlab-agent
   src/verificacao/              Verifier Runner e classificação de erros
   src/estado/                   State Extractor
   src/progresso/                SQLite e regras de XP
-  src/http/                     API, roteador e PTY Bridge
+  src/http/                     API, roteador, PTY Bridge e estáticos da UI
   src/ia/                       provedores (ollama.ts local · nuvem.ts BYO key)
   src/cli/devlab.ts             devlab doctor · licoes · ia · modelo
 packages/ui/                    interface React de 3 painéis
-scripts/                        setup.sh · install one-liner · dev.sh
+scripts/                        setup.sh · install one-liner
+  iniciar.sh                    uso normal: um processo, agente serve a UI
+  dev.sh                        desenvolvimento da UI: Vite com HMR
   build-imagens.sh              constrói e detecta imagem desatualizada
   valida-conteudo.py            valida e executa os checks sem Docker
   fumaca.sh                     prova o loop central pela API
@@ -479,10 +490,17 @@ de outro site e exigem `content-type: application/json`. O WebSocket valida
 `Origin` no handshake, já que CORS não protege WebSocket — sem isso, qualquer
 página aberta noutra aba poderia abrir um shell dentro do container.
 
-A guarda de `Host` olha o **nome**, não a porta: em desenvolvimento o browser
-fala com o Vite (5173), que faz proxy para o agente (7788) repassando o `Host`
-original. Exigir a porta do agente recusaria com 403 o app inteiro — e não
-defenderia nada, porque quem decide o `Host` é a URL que o browser visitou.
+A guarda de `Host` olha o **nome**, não a porta. Em uso normal isso é
+redundante — agente e interface vivem na mesma origem (`:7788`). Importa em
+`devlab dev`, onde o browser fala com o Vite (5173) e o proxy repassa o `Host`
+original: exigir a porta do agente recusaria com 403 o app inteiro. E a porta
+não defende nada, porque quem decide o `Host` é a URL que o browser visitou —
+uma página em evil.com não emite `Host: 127.0.0.1` em porta nenhuma.
+
+Os arquivos da interface passam pelas MESMAS guardas: o servidor de estáticos
+só assume depois que elas rodaram, em vez de ficar num caminho paralelo sem
+trava. Caminho fora de `packages/ui/dist` — `..`, `%2e%2e%2f`, byte nulo — é
+recusado com 403.
 
 As dicas não reveladas **não** trafegam para o browser: se trafegassem, o custo
 de XP seria encenação.
@@ -493,7 +511,7 @@ de XP seria encenação.
 
 | Variável | Padrão | Efeito |
 |---|---|---|
-| `DEVLAB_PORTA` | `7788` | porta do agente |
+| `DEVLAB_PORTA` | `7788` | porta do agente **e da interface** |
 | `DEVLAB_CONTEUDO` | `./content` | diretório do conteúdo |
 | `DEVLAB_DADOS` | `./.devlab` | onde fica o SQLite |
 | `DEVLAB_TTL_LAB_MS` | `2700000` | tempo até um lab ocioso ser destruído |

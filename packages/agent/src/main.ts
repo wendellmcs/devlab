@@ -11,6 +11,7 @@ import { ArmazemDeProgresso } from './progresso/store.ts'
 import { criarProvedor } from './ia/provedor.ts'
 import { ServicoDeIa } from './ia/servico.ts'
 import { montarApi } from './http/api.ts'
+import { montarEstaticos, uiConstruida } from './http/estaticos.ts'
 import { montarPontePty } from './http/pty.ts'
 import { origemPermitida } from './http/origem.ts'
 import { responder } from './http/roteador.ts'
@@ -50,10 +51,17 @@ async function principal(): Promise<void> {
   labs.iniciarColetor()
 
   const api = montarApi({ indice, labs, checks, extrator, progresso, ia })
+  const estaticos = montarEstaticos()
 
   const servidor = http.createServer((req, res) => {
     aplicarCabecalhos(req, res)
-    void api.despachar(req, res).catch((e: unknown) => {
+    void (async () => {
+      // A API tem a primeira palavra; o que ela não reivindicar é interface.
+      // As guardas de origem rodam dentro do despacho, então o estático não
+      // ganha um caminho paralelo sem trava.
+      if (await api.despachar(req, res)) return
+      await estaticos(req, res)
+    })().catch((e: unknown) => {
       log.erro('falha não tratada no despacho', e)
       if (!res.writableEnded) responder(res, 500, { erro: 'erro interno' })
     })
@@ -62,8 +70,14 @@ async function principal(): Promise<void> {
   const wss = montarPontePty(servidor, labs)
 
   servidor.listen(config.porta, config.host, () => {
-    log.info(`devlab-agent em http://${config.host}:${config.porta}`)
-    log.info(`interface (vite): http://127.0.0.1:5173`)
+    const endereco = `http://${config.host}:${String(config.porta)}`
+    if (uiConstruida()) {
+      log.info(`DevLab pronto — abra ${endereco}`)
+    } else {
+      log.info(`devlab-agent (só API) em ${endereco}`)
+      log.aviso('a interface não foi construída: npm run build --workspace @devlab/ui')
+      log.aviso('para desenvolver a UI com recarga automática: npm run dev')
+    }
   })
 
   let encerrando = false

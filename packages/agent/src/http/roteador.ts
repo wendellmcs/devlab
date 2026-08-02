@@ -76,13 +76,21 @@ export class Roteador {
     return this
   }
 
-  async despachar(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  /**
+   * Devolve `true` quando respondeu — inclusive nas recusas das guardas.
+   *
+   * `false` significa "nenhuma rota de API casou e o caminho não é de API":
+   * é o sinal para o servidor de arquivos assumir e entregar a interface. As
+   * guardas de origem já rodaram nesse ponto, então o estático herda a mesma
+   * proteção em vez de ficar num caminho paralelo sem trava.
+   */
+  async despachar(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const metodo = (req.method ?? 'GET').toUpperCase()
 
     if (metodo === 'OPTIONS') {
       responder(res, 204, null)
-      return
+      return true
     }
 
     // Anti-DNS-rebinding, em TODO método. Sem isto no GET, uma página hostil
@@ -91,7 +99,7 @@ export class Roteador {
     // do container. GET não muda estado, mas vaza — e vazar também conta.
     if (!hostPermitido(req.headers.host)) {
       responder(res, 403, { erro: 'host não permitido', codigo: 'host_recusado' })
-      return
+      return true
     }
 
     // Guarda de CSRF para tudo que muda estado. O browser sempre manda
@@ -104,7 +112,7 @@ export class Roteador {
       !origemPermitida(req.headers.origin)
     ) {
       responder(res, 403, { erro: 'origem não permitida', codigo: 'origem_recusada' })
-      return
+      return true
     }
 
     for (const rota of this.#rotas) {
@@ -125,10 +133,18 @@ export class Roteador {
       } catch (e) {
         tratarErro(res, e, `${metodo} ${url.pathname}`)
       }
-      return
+      return true
     }
 
-    responder(res, 404, { erro: 'rota inexistente', caminho: url.pathname })
+    // `/api/...` que não casou é erro de cliente e merece JSON. Qualquer outro
+    // caminho é rota da interface: quem responde é o servidor de arquivos, que
+    // sabe devolver o index.html para o roteamento do React.
+    if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+      responder(res, 404, { erro: 'rota inexistente', caminho: url.pathname })
+      return true
+    }
+
+    return false
   }
 }
 

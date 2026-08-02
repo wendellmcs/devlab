@@ -6,6 +6,7 @@ import os from 'node:os'
 import { config } from './config.ts'
 import { carregarConteudo } from './conteudo/carregador.ts'
 import { diagnosticarDaemon, docker } from './docker/cliente.ts'
+import { uiConstruida } from './http/estaticos.ts'
 import { criarProvedor } from './ia/provedor.ts'
 
 export type EstadoVerificacao = 'ok' | 'aviso' | 'falha'
@@ -36,7 +37,7 @@ export async function rodarDoctor(): Promise<RelatorioDoctor> {
     await verificarImagens(),
     await verificarEspaco(),
     await verificarPorta(config.porta, 'agente'),
-    await verificarPorta(5173, 'interface'),
+    verificarInterface(),
     await verificarConteudo(),
     verificarValidador(),
     await verificarIa(),
@@ -257,6 +258,32 @@ async function verificarConteudo(): Promise<Verificacao> {
     titulo: 'Conteúdo declarativo',
     estado: conteudo.licoes.length > 0 ? 'ok' : 'aviso',
     detalhe: `${conteudo.trilhas.length} trilha(s), ${conteudo.licoes.length} lição(ões), ${conteudo.catalogo.length} erro(s) no catálogo`,
+  }
+}
+
+/**
+ * A interface construída, que o agente serve na mesma porta da API.
+ *
+ * Substituiu a antiga checagem da porta 5173: aquela porta só existe quando
+ * alguém está DESENVOLVENDO a UI com o Vite. Em uso normal há um processo e
+ * uma porta, e o que pode faltar é o `dist` — que não é versionado.
+ */
+function verificarInterface(): Verificacao {
+  const base = { id: 'interface', titulo: 'Interface' }
+  if (uiConstruida()) {
+    return {
+      ...base,
+      estado: 'ok',
+      detalhe: `servida pelo agente em http://${config.host}:${String(config.porta)}`,
+    }
+  }
+  return {
+    ...base,
+    estado: 'falha',
+    detalhe: 'packages/ui/dist não existe',
+    correcao:
+      'Construa a interface: npm run build --workspace @devlab/ui (ou ./scripts/setup.sh -y). ' +
+      'Ela não é versionada de propósito — é artefato de build.',
   }
 }
 
