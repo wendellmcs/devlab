@@ -44,7 +44,15 @@
   color: var(--texto-2);
 }
 
+/* 44px de altura é WCAG 2.5.5 (Tamanho do Alvo, AAA), medido em 31px antes
+ * desta regra. `inline-flex` + `min-block-size` cresce a área clicável sem
+ * empurrar o texto para baixo nem esticar o cabeçalho: os botões vizinhos já
+ * tinham 44. A exceção "alvo inline num bloco de texto" não vale aqui — o
+ * breadcrumb é navegação, não frase. */
 .migalhas__link {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 44px;
   color: var(--texto-2);
   text-decoration: none;
   padding: var(--e-1) var(--e-2);
@@ -80,6 +88,10 @@
 .placar {
   display: flex;
   align-items: baseline;
+  /* Mesmo motivo do breadcrumb: era 33px de altura. Ver .migalhas__link. */
+  min-block-size: 44px;
+  align-content: center;
+  flex-wrap: wrap;
   gap: var(--e-1);
   padding: var(--e-1) var(--e-3);
   border: 1px solid var(--borda-media);

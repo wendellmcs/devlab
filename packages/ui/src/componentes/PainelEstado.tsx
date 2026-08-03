@@ -26,7 +26,7 @@ export function PainelEstado({ estado, lab }: Props): ReactElement {
   return (
     <>
       <div className="painel__cabecalho">
-        <h2 className="painel__titulo">Estado do lab</h2>
+        <p className="painel__titulo">Estado do lab</p>
         <div className="barra__espaco" />
         {estado !== null && (
           <span className="etiqueta" title="Lido do container, não simulado">

@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Mesmo regime do agente: roda direto no Node 24, sem passo de build.
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  // O servidor de fixtures importa os montadores de payload do agente. Incluir
+  // a fonte dele aqui é de propósito: se o payload mudar de forma, a auditoria
+  // para de compilar em vez de continuar auditando uma tela que não existe mais.
+  "include": ["src/**/*.ts", "../agent/src/http/payloads.ts"]
+}

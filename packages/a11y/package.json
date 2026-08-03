@@ -1,0 +1,19 @@
+{
+  "name": "@devlab/a11y",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Auditoria de acessibilidade: sobe as telas reais sem Docker e passa o axe-core com o critério AAA de contraste ligado",
+  "scripts": {
+    "tipos": "tsc --noEmit",
+    "auditar": "node src/auditoria.ts",
+    "teclado": "node src/teclado.ts",
+    "fixtures": "node src/servidor.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.0",
+    "axe-core": "4.12.1",
+    "playwright": "1.62.1",
+    "typescript": "5.9.2"
+  }
+}

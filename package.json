@@ -22,6 +22,10 @@
     "teste:integracao": "npm run teste:integracao --workspace @devlab/agent",
     "fumaca": "bash scripts/fumaca.sh",
     "valida": "python3 scripts/valida-conteudo.py",
-    "tipos": "npm run tipos --workspaces --if-present"
+    "tipos": "npm run tipos --workspaces --if-present",
+    "a11y": "npm run auditar --workspace @devlab/a11y && npm run teclado --workspace @devlab/a11y",
+    "a11y:axe": "npm run auditar --workspace @devlab/a11y",
+    "a11y:teclado": "npm run teclado --workspace @devlab/a11y",
+    "a11y:fixtures": "npm run fixtures --workspace @devlab/a11y"
   }
 }

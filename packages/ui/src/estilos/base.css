@@ -91,6 +91,11 @@ body {
   top: var(--e-2);
   left: var(--e-2);
   z-index: 100;
+  /* 44px é WCAG 2.5.5 (AAA). Media 41px — e o skip link é justamente o alvo
+   * de quem só tem teclado, então perder aqui seria perder no pior lugar. */
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 44px;
   padding: var(--e-2) var(--e-3);
   background: var(--sup-2);
   color: var(--texto-1);

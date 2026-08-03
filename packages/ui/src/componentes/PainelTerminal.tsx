@@ -220,7 +220,7 @@ export const PainelTerminal = forwardRef<ControleTerminal, Props>(function Paine
   return (
     <>
       <div className="painel__cabecalho">
-        <h2 className="painel__titulo">Terminal</h2>
+        <p className="painel__titulo">Terminal</p>
         {lab !== null && (
           <span className="etiqueta" title={`container ${lab.containerId.slice(0, 12)}`}>
             {lab.usuario}@lab:{lab.workdir}

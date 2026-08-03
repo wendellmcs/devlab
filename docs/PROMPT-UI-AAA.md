@@ -335,6 +335,10 @@ Nada de autoavaliação subjetiva. Todos precisam passar.
 **Interface e acessibilidade**
 
 1. **axe-core**: 0 violações em todas as telas, nos dois temas. Automatizado.
+   **Feito** — `npm run a11y:axe`, 7 telas × 2 temas, com a regra
+   `color-contrast-enhanced` ligada e um auto-teste que reprova o harness se ela
+   não estiver rodando. Tamanho de alvo (2.5.5) e refluxo (1.4.10) são medidos
+   fora do axe, porque as regras dele param no AA.
 2. **Contraste**: script que extrai todos os pares de token e prova ≥7:1 (texto
    normal) e ≥4.5:1 (texto grande), nos dois temas, **falhando o build**. Inclui
    a paleta ANSI do terminal e o realce de sintaxe.
@@ -384,6 +388,9 @@ Nada de autoavaliação subjetiva. Todos precisam passar.
 7. **Testes automatizados** de acessibilidade no CI, incluindo o verificador de
    contraste que falha o build.
 8. **Roteiro de teste manual** (teclado e leitor de tela) versionado.
+   **Parcial** — `docs/ROTEIRO-TECLADO.md` existe e a metade mecânica dele roda
+   sozinha (`npm run a11y:teclado`). A passagem com leitor de tela real segue
+   pendente e está registrada lá como pendente, não como feita.
 
 ---
 

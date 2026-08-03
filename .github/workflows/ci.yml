@@ -68,6 +68,42 @@ jobs:
       - name: Prova de fumaça (loop central pela API)
         run: npm run fumaca
 
+  acessibilidade:
+    name: axe-core AAA e percurso de teclado
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # Só o Chromium. O gate é WCAG, não compatibilidade entre navegadores —
+      # baixar Firefox e WebKit custaria minutos por execução sem medir nada
+      # que o critério exija.
+      - name: Navegador da auditoria
+        run: npx playwright install --with-deps chromium
+
+      # A auditoria roda sobre o bundle servido, não sobre o dev server: é o
+      # artefato que o aluno recebe que precisa passar.
+      - name: Build da interface
+        run: npm run build
+
+      # axe-core com color-contrast-enhanced (1.4.6, 7:1) explicitamente
+      # ligada — ela vem desligada — sobre 7 telas nos 2 temas. O próprio
+      # script se auto-testa antes com uma amostra a 5,33:1: se a regra não
+      # estiver rodando, ele morre em vez de imprimir um zero que mente.
+      - name: axe-core nas telas reais, nos dois temas
+        run: npm run a11y:axe
+
+      # Percurso central inteiro sem mouse: alcançar, ativar, entrar e sair do
+      # terminal, e não perder o foco no caminho.
+      - name: Percurso só com teclado
+        run: npm run a11y:teclado
+
   instalador:
     name: sintaxe dos scripts de instalação
     runs-on: ubuntu-latest

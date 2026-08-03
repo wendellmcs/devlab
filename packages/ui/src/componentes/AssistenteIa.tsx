@@ -124,7 +124,8 @@ export function AssistenteIa({
             </span>
           </div>
 
-          <Markdown texto={resposta.texto} />
+          {/* A resposta mora debaixo do <h2> da seção: os títulos dela começam em 3. */}
+          <Markdown texto={resposta.texto} nivelBase={3} />
 
           {resposta.podado && (
             <p className="ia__nota ia__nota--forte">
