@@ -1,0 +1,12 @@
+2026-07-28 07:00:01 INFO  servico de telefonia iniciado
+2026-07-28 07:00:04 INFO  perfil interno escutando em 5060/udp
+2026-07-28 07:00:04 INFO  perfil externo escutando em 5080/udp
+2026-07-28 07:14:22 WARN  registro do ramal 1004 expirou
+2026-07-28 08:11:59 INFO  ramal 1001 registrado
+2026-07-28 08:15:47 WARN  destino 9911 devolveu 486 Busy Here
+2026-07-28 09:31:58 WARN  ramal 1004 nao atendeu em 30s
+2026-07-28 11:07:35 ERROR gateway saida-1 sem resposta: 503 Service Unavailable
+2026-07-28 11:07:36 INFO  failover para gateway saida-2
+2026-07-28 12:00:00 INFO  rotacao de log concluida
+2026-07-28 13:22:09 INFO  chamada 1002 -> 1003 estabelecida
+2026-07-28 15:45:10 ERROR falha ao gravar voicemail: No space left on device

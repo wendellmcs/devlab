@@ -1,0 +1,8 @@
+2026-07-28 08:12:03 ramal=1001 destino=1002 status=ATENDIDA duracao=42
+2026-07-28 08:15:47 ramal=1003 destino=9911 status=OCUPADO duracao=0
+2026-07-28 09:02:11 ramal=1002 destino=1005 status=ATENDIDA duracao=317
+2026-07-28 09:31:58 ramal=1001 destino=1004 status=NAO_ATENDIDA duracao=0
+2026-07-28 10:44:20 ramal=1005 destino=1001 status=ATENDIDA duracao=88
+2026-07-28 11:07:35 ramal=1004 destino=9911 status=FALHA duracao=0
+2026-07-28 13:22:09 ramal=1002 destino=1003 status=ATENDIDA duracao=155
+2026-07-28 14:50:41 ramal=1001 destino=1002 status=ATENDIDA duracao=21

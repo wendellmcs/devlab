@@ -2,6 +2,12 @@ node_modules/
 dist/
 .devlab/
 *.log
+# ...menos os do seed da imagem, que são CONTEÚDO e não sujeira de execução.
+# O Dockerfile copia seed/home/aluno/ inteiro para dentro do lab, e as lições
+# 8 e 10 leem ~/logs. Sem esta exceção eles não entram no repositório, a
+# imagem nasce vazia num clone limpo e as duas lições ficam impossíveis —
+# sem nenhum sinal aqui, porque a máquina de quem escreveu tem os arquivos.
+!images/linux-base/seed/**/*.log
 .DS_Store
 .vite/
 *.tsbuildinfo
