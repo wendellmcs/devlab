@@ -8,7 +8,7 @@ import { log } from '../log.ts'
 import { docker, ErroDeLab } from '../docker/cliente.ts'
 import type { Licao } from '../conteudo/schema.ts'
 import { descreverLimites, montarHostConfig } from './limites.ts'
-import type { LabInfo, Recursos, ResultadoExec } from './tipos.ts'
+import type { LabComPrazo, LabInfo, Recursos, ResultadoExec } from './tipos.ts'
 
 const ROTULO_GERENCIADO = 'devlab.gerenciado'
 /** Porta do agente dono do container: é o que separa uma instância da outra. */
@@ -32,6 +32,21 @@ export type OpcoesExec = {
   workdir?: string
   timeoutMs?: number
   env?: string[]
+  /**
+   * Este exec representa uma ação deliberada do ALUNO?
+   *
+   * Padrão `false` — e o padrão é essa direção de propósito. Quase todo exec
+   * daqui é o app se virando sozinho: montar o diretório de trabalho, rodar o
+   * setup da lição, ler a árvore de arquivos para o painel de estado. Enquanto
+   * qualquer exec zerava o relógio de ociosidade, a leitura do painel — que
+   * roda a cada 2,5 s — mantinha todo lab vivo para sempre, o TTL de 45 min
+   * nunca disparava com a tela aberta e o container só morria quando o aluno
+   * saía da lição (quando ele já ia ser destruído de qualquer jeito).
+   *
+   * Com o padrão invertido, esquecer de marcar deixa o lab morrer mais cedo —
+   * barulhento e reversível. O contrário vaza container em silêncio.
+   */
+  atividade?: boolean
 }
 
 export type SessaoTerminal = {
@@ -79,11 +94,11 @@ export class GerenciadorDeLabs {
     this.#coletor = null
   }
 
-  listar(): LabInfo[] {
+  listar(): LabComPrazo[] {
     return [...this.#labs.values()].map((l) => instantaneo(l.info))
   }
 
-  obter(labId: string): LabInfo | undefined {
+  obter(labId: string): LabComPrazo | undefined {
     const interno = this.#labs.get(labId)
     return interno === undefined ? undefined : instantaneo(interno.info)
   }
@@ -94,7 +109,7 @@ export class GerenciadorDeLabs {
 
   // ── ciclo de vida ────────────────────────────────────────────────────────
 
-  async criar(licao: Licao): Promise<LabInfo> {
+  async criar(licao: Licao): Promise<LabComPrazo> {
     await this.#garantirImagem(licao.lab.imagem)
 
     const labId = randomUUID().slice(0, 8)
@@ -110,6 +125,7 @@ export class GerenciadorDeLabs {
       estado: 'subindo',
       criadoEm: Date.now(),
       ultimaAtividade: Date.now(),
+      acoesDoAluno: 0,
       resets: 0,
       limites: descreverLimites(licao.lab),
     }
@@ -143,11 +159,11 @@ export class GerenciadorDeLabs {
    * setup e injeção de falha. O id do lab é preservado para a UI não precisar
    * reconectar tudo.
    */
-  reiniciar(labId: string): Promise<LabInfo> {
+  reiniciar(labId: string): Promise<LabComPrazo> {
     return this.#emFila(labId, () => this.#reiniciarAgora(labId))
   }
 
-  async #reiniciarAgora(labId: string): Promise<LabInfo> {
+  async #reiniciarAgora(labId: string): Promise<LabComPrazo> {
     const interno = this.#obrigatorio(labId)
     const { licao } = interno
 
@@ -167,7 +183,7 @@ export class GerenciadorDeLabs {
     interno.info.containerId = container.id
     interno.info.estado = 'subindo'
     interno.info.resets += 1
-    interno.info.ultimaAtividade = Date.now()
+    marcarAtividade(interno.info)
     delete interno.info.erro
 
     try {
@@ -256,16 +272,22 @@ export class GerenciadorDeLabs {
     }
   }
 
-  registrarAtividade(labId: string): void {
+  /**
+   * O aluno fez alguma coisa: abriu o terminal, digitou, pediu para manter o
+   * lab vivo. Zera o relógio da coleta por ociosidade.
+   */
+  registrarAtividade(labId: string): LabComPrazo | undefined {
     const interno = this.#labs.get(labId)
-    if (interno !== undefined) interno.info.ultimaAtividade = Date.now()
+    if (interno === undefined) return undefined
+    marcarAtividade(interno.info)
+    return instantaneo(interno.info)
   }
 
   // ── execução ─────────────────────────────────────────────────────────────
 
   async exec(labId: string, cmd: string[], opcoes: OpcoesExec = {}): Promise<ResultadoExec> {
     const interno = this.#obrigatorio(labId)
-    interno.info.ultimaAtividade = Date.now()
+    if (opcoes.atividade === true) marcarAtividade(interno.info)
 
     const limiteMs = opcoes.timeoutMs ?? config.timeoutCheckMs
 
@@ -367,7 +389,7 @@ export class GerenciadorDeLabs {
     opcoes: { cols: number; rows: number },
   ): Promise<SessaoTerminal> {
     const interno = this.#obrigatorio(labId)
-    interno.info.ultimaAtividade = Date.now()
+    marcarAtividade(interno.info)
 
     const usuario = interno.info.usuario
     const home = usuario === 'root' ? '/root' : `/home/${usuario}`
@@ -607,8 +629,27 @@ function esperar(ms: number): Promise<void> {
  * já tem na mão mudar sozinho — inclusive o "antes" com que ele fosse comparar
  * o "depois". Quem sai daqui sai como valor, não como janela para o interno.
  */
-function instantaneo(info: LabInfo): LabInfo {
-  return { ...info, limites: { ...info.limites } }
+/** Uma ação do aluno: zera o relógio de ociosidade e entra na contagem. */
+function marcarAtividade(info: LabInfo): void {
+  info.ultimaAtividade = Date.now()
+  info.acoesDoAluno += 1
+}
+
+/**
+ * Cópia defensiva do lab, com o prazo calculado NESTE instante.
+ *
+ * O prazo não é guardado no objeto interno de propósito: um campo "quanto
+ * falta" armazenado nasce errado no milissegundo seguinte, e quem o lesse
+ * depois estaria lendo o passado sem saber.
+ */
+function instantaneo(info: LabInfo): LabComPrazo {
+  const restante = info.ultimaAtividade + config.ttlLabOciosoMs - Date.now()
+  return {
+    ...info,
+    limites: { ...info.limites },
+    ttlMs: config.ttlLabOciosoMs,
+    ociosidadeRestanteMs: Math.max(0, restante),
+  }
 }
 
 function coletor(destino: Buffer[]): Writable {

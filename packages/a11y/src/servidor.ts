@@ -11,7 +11,7 @@ import {
 } from '../../agent/src/http/payloads.ts'
 import type { ProgressoLicao, ResumoProgresso } from '../../agent/src/progresso/store.ts'
 import type { ResultadoVerificacao } from '../../agent/src/verificacao/executor.ts'
-import type { LabInfo } from '../../agent/src/lab/tipos.ts'
+import type { LabComPrazo } from '../../agent/src/lab/tipos.ts'
 import type { EstadoDoLab } from '../../agent/src/estado/extrator.ts'
 import { descreverLimites } from '../../agent/src/lab/limites.ts'
 
@@ -103,7 +103,13 @@ function progressoDe(licaoId: string): ProgressoLicao | null {
   }
 }
 
-function labFalso(licao: Licao): LabInfo {
+const TTL_TOTAL_MS = 45 * 60 * 1000
+/** Sobra do lab "recém-tocado": longe do limiar, nenhum aviso na tela. */
+const TTL_FOLGADO_MS = 40 * 60 * 1000
+/** Sobra que dispara o aviso de 2.2.6 — 4 min e 12 s, com os dois dígitos. */
+const TTL_APERTADO_MS = 4 * 60 * 1000 + 12_000
+
+function labFalso(licao: Licao): LabComPrazo {
   return {
     id: 'lab-auditoria',
     containerId: 'devlab-auditoria-0000',
@@ -114,8 +120,11 @@ function labFalso(licao: Licao): LabInfo {
     estado: 'pronto',
     criadoEm: 1_700_000_000_000,
     ultimaAtividade: 1_700_000_000_000,
+    acoesDoAluno: 0,
     resets: 1,
     limites: descreverLimites(licao.lab),
+    ociosidadeRestanteMs: TTL_FOLGADO_MS,
+    ttlMs: TTL_TOTAL_MS,
   }
 }
 
@@ -123,6 +132,10 @@ const ESTADO_FALSO: EstadoDoLab = {
   raiz: '/home/aluno',
   truncada: true,
   atualizadoEm: 1_700_000_000_000,
+  ttl: { restanteMs: TTL_FOLGADO_MS, totalMs: TTL_TOTAL_MS },
+  // Zero por padrão: sair da lição não deve pedir confirmação a quem não fez
+  // nada. As telas que auditam a confirmação ligam isto pelo controle abaixo.
+  acoesDoAluno: 0,
   recursos: { cpuPercent: 3.7, memoriaUsadaMb: 48, memoriaLimiteMb: 512, pids: 6 },
   arvore: {
     nome: 'aluno',
@@ -287,6 +300,10 @@ export async function subirServidorDeFixtures(porta = 0): Promise<{ url: string;
   const reveladas = new Set<number>()
   let verificacoes = 0
   let doctorQuebrado = false
+  /** Sobra de prazo que a próxima tela vai enxergar. */
+  let restanteMs = TTL_FOLGADO_MS
+  /** O aluno já mexeu no lab? É o que decide se sair pede confirmação. */
+  let acoesDoAluno = 0
 
   const contexto = (licao: Licao) => ({
     reveladas: [...reveladas],
@@ -318,7 +335,9 @@ export async function subirServidorDeFixtures(porta = 0): Promise<{ url: string;
         reveladas.clear()
         verificacoes = 0
         doctorQuebrado = url.searchParams.get('doctor') === 'quebrado'
-        json({ ok: true, doctorQuebrado })
+        restanteMs = url.searchParams.get('ttl') === 'apertado' ? TTL_APERTADO_MS : TTL_FOLGADO_MS
+        acoesDoAluno = url.searchParams.get('trabalhou') === '1' ? 3 : 0
+        json({ ok: true, doctorQuebrado, restanteMs, acoesDoAluno })
         return
       }
 
@@ -431,7 +450,22 @@ export async function subirServidorDeFixtures(porta = 0): Promise<{ url: string;
       }
 
       if (/^\/api\/labs\/[^/]+\/estado$/.test(rota)) {
-        json(ESTADO_FALSO)
+        // O prazo é FIXO entre leituras, de propósito: a auditoria compara
+        // telas entre execuções, e um relógio que anda de verdade produziria
+        // captura diferente a cada vez. A contagem local da interface continua
+        // rodando por cima disso — o que se audita aqui é o DOM do aviso.
+        json({ ...ESTADO_FALSO, ttl: { restanteMs, totalMs: TTL_TOTAL_MS }, acoesDoAluno })
+        return
+      }
+
+      if (/^\/api\/labs\/[^/]+\/renovar$/.test(rota) && metodo === 'POST') {
+        const licao = porId.get(LICAO_AUDITADA)
+        if (licao === undefined) {
+          json({ erro: 'lição de auditoria ausente' }, 500)
+          return
+        }
+        restanteMs = TTL_TOTAL_MS
+        json({ ...labFalso(licao), ociosidadeRestanteMs: TTL_TOTAL_MS })
         return
       }
 

@@ -134,6 +134,30 @@ print('  ✔ recursos reais: {} MB de {} MB · {} processos'.format(
 assert r['memoriaLimiteMb'] == 512, 'o limite de memória não foi aplicado'
 PY
 
+# O relógio da coleta por ociosidade tem de medir o ALUNO. Enquanto qualquer
+# exec contava, a leitura de estado acima — que a interface repete a cada
+# 2,5 s — zerava o relógio, e o TTL de 45 min nunca disparava com a tela
+# aberta. É um defeito invisível: nada quebra, o container só nunca morre.
+echo "== o relógio de ociosidade mede o aluno, não o app =="
+curl -sf "$API/labs/$LAB" > "$DADOS/lab-antes.json"
+curl -sf "$API/labs/$LAB/estado" >/dev/null
+curl -sf "$API/labs/$LAB" > "$DADOS/lab-depois.json"
+curl -sf -X POST "$API/labs/$LAB/renovar" > "$DADOS/lab-renovado.json"
+py - "$DADOS/lab-antes.json" "$DADOS/lab-depois.json" "$DADOS/lab-renovado.json" <<'PY'
+import json, sys
+antes, depois, renovado = (json.load(open(a)) for a in sys.argv[1:4])
+assert antes['ultimaAtividade'] == depois['ultimaAtividade'], \
+    'ler o estado do lab zerou o relógio de ociosidade'
+print('  ✔ ler o estado não conta como atividade (relógio parado em {})'.format(
+    depois['ultimaAtividade']))
+assert depois['ociosidadeRestanteMs'] < depois['ttlMs'], 'o prazo não está andando'
+print('  ✔ o prazo anda: faltam {:.1f} min de {:.0f}'.format(
+    depois['ociosidadeRestanteMs'] / 60000, depois['ttlMs'] / 60000))
+assert renovado['ociosidadeRestanteMs'] == renovado['ttlMs'], 'renovar não devolveu o prazo cheio'
+assert renovado['containerId'] == depois['containerId'], 'renovar recriou o container'
+print('  ✔ manter vivo devolve o prazo cheio sem tocar no container')
+PY
+
 echo "== IA desligada por padrão =="
 curl -sf "$API/ia/estado" > "$DADOS/ia.json"
 py - "$DADOS/ia.json" <<'PY'

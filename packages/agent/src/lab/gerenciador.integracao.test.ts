@@ -209,6 +209,63 @@ describe('GerenciadorDeLabs (integração)', { skip: motivoPular, concurrency: f
     await labs.destruir(info.id)
   })
 
+  /**
+   * O relógio da coleta por ociosidade mede o ALUNO, não o app.
+   *
+   * Este é o teste que faltava quando o TTL de 45 min era decorativo: o painel
+   * de estado lê a árvore de arquivos a cada 2,5 s, e enquanto essa leitura
+   * contava como atividade nenhum lab jamais ficava ocioso com a tela aberta.
+   * O bug não aparecia em lugar nenhum — só num container que nunca morria.
+   */
+  it('ler o estado NÃO conta como atividade; ação do aluno conta', async () => {
+    const info = await labs.criar(licaoDeTeste())
+    const extrator = new ExtratorDeEstado(labs)
+
+    const inicial = labs.obter(info.id)
+    assert.equal(inicial?.acoesDoAluno, 0, 'o setup da lição não é ação do aluno')
+
+    await extrator.coletar(info.id)
+    const depoisDaLeitura = labs.obter(info.id)
+    assert.equal(
+      depoisDaLeitura?.ultimaAtividade,
+      inicial?.ultimaAtividade,
+      'a leitura automática de estado mexeu no relógio de ociosidade',
+    )
+    assert.equal(depoisDaLeitura?.acoesDoAluno, 0)
+
+    // E o prazo anda: quem observa não interfere.
+    assert.ok(
+      (depoisDaLeitura?.ociosidadeRestanteMs ?? 0) < (inicial?.ociosidadeRestanteMs ?? 0),
+      'o prazo deveria estar diminuindo',
+    )
+
+    // Já um exec marcado como ação do aluno zera a contagem.
+    await labs.exec(info.id, ['/bin/bash', '-c', 'true'], { atividade: true })
+    const depoisDaAcao = labs.obter(info.id)
+    assert.ok(
+      (depoisDaAcao?.ultimaAtividade ?? 0) > (inicial?.ultimaAtividade ?? 0),
+      'ação do aluno deveria ter zerado o relógio',
+    )
+    assert.equal(depoisDaAcao?.acoesDoAluno, 1)
+
+    await labs.destruir(info.id)
+  })
+
+  it('renovar devolve o prazo cheio sem tocar no container', async () => {
+    const info = await labs.criar(licaoDeTeste())
+    await labs.exec(info.id, ['/bin/bash', '-c', 'echo oi > /home/aluno/marca.txt'])
+
+    const renovado = labs.registrarAtividade(info.id)
+    assert.equal(renovado?.ociosidadeRestanteMs, renovado?.ttlMs, 'o prazo não voltou ao total')
+    assert.equal(renovado?.containerId, info.containerId, 'renovar recriou o container')
+
+    // O arquivo continua lá: renovar não é reset.
+    const lido = await labs.exec(info.id, ['cat', '/home/aluno/marca.txt'])
+    assert.equal(lido.stdout.trim(), 'oi')
+
+    await labs.destruir(info.id)
+  })
+
   it('abre um terminal com TTY e responde a comando', async () => {
     const info = await labs.criar(licaoDeTeste())
     const sessao = await labs.abrirTerminal(info.id, { cols: 80, rows: 24 })

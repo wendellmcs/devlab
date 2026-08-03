@@ -20,6 +20,19 @@ export type EstadoDoLab = {
   truncada: boolean
   recursos: Recursos | null
   atualizadoEm: number
+  /**
+   * Quanto falta para a coleta por ociosidade. `null` quando o lab sumiu entre
+   * o começo e o fim da coleta.
+   */
+  ttl: { restanteMs: number; totalMs: number } | null
+  /**
+   * Ações deliberadas do aluno neste lab, até agora.
+   *
+   * Viaja aqui porque só o agente sabe: o aluno digita no terminal por
+   * WebSocket, e a tela que precisa dessa informação — a que pergunta se pode
+   * mesmo sair e destruir o container — não tem como contar sozinha.
+   */
+  acoesDoAluno: number | null
 }
 
 const MAX_ENTRADAS = 400
@@ -52,12 +65,26 @@ export class ExtratorDeEstado {
       this.#recursos(labId),
     ])
 
+    // Lido DEPOIS dos execs: o prazo é calculado no instante da resposta, e
+    // entre o começo e o fim desta coleta passam centenas de milissegundos.
+    const depois = this.#labs.obter(labId)
+
     return {
       raiz,
       arvore: arvore.raiz,
       truncada: arvore.truncada,
       recursos,
       atualizadoEm: Date.now(),
+      // O relógio da coleta por ociosidade viaja junto com o estado porque é
+      // esta requisição que a interface repete a cada 2,5 s. Um endpoint
+      // separado só para o prazo dobraria o tráfego para dizer a mesma coisa —
+      // e esta leitura não conta como atividade, então ela pode observar o
+      // relógio andar sem interferir nele.
+      ttl:
+        depois === undefined
+          ? null
+          : { restanteMs: depois.ociosidadeRestanteMs, totalMs: depois.ttlMs },
+      acoesDoAluno: depois?.acoesDoAluno ?? null,
     }
   }
 

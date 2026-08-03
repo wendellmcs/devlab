@@ -142,6 +142,22 @@ export function montarApi(dep: Dependencias): Roteador {
 
   r.post('/api/labs/:labId/reset', ({ params }) => dep.labs.reiniciar(params['labId'] as string))
 
+  /**
+   * "Manter o lab vivo" — o que WCAG 2.2.1 exige oferecer junto com o aviso de
+   * que o tempo vai acabar. Só zera o relógio de ociosidade: não mexe no
+   * container, não interrompe nada, e é a única forma de o aluno que está
+   * LENDO a lição há 40 minutos dizer que continua ali.
+   */
+  r.post('/api/labs/:labId/renovar', ({ params }) => {
+    const labId = params['labId'] as string
+    exigirLab(dep, labId)
+    const renovado = dep.labs.registrarAtividade(labId)
+    if (renovado === undefined) {
+      throw new ErroHttp(404, 'lab_inexistente', `lab '${labId}' não existe ou já foi destruído`)
+    }
+    return renovado
+  })
+
   r.get('/api/labs/:labId/estado', ({ params, query }) => {
     const labId = params['labId'] as string
     exigirLab(dep, labId)

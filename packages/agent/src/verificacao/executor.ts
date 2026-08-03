@@ -53,6 +53,11 @@ export class ExecutorDeChecks {
     const inicio = Date.now()
     const checks: ResultadoCheck[] = []
 
+    // Verificar é ação deliberada: o aluno apertou um botão. Os execs dos
+    // checks em si não contam (ver `OpcoesExec.atividade`) — quem conta é o
+    // pedido, uma vez, e não uma vez por check.
+    this.#labs.registrarAtividade(labId)
+
     // O buffer do terminal é rolante e sobrevive entre tentativas. Sem zerar
     // aqui, um "No such file or directory" de vinte minutos atrás reapareceria
     // como diagnóstico de uma falha que nada tem a ver com ele — e o aluno
