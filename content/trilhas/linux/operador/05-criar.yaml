@@ -7,6 +7,127 @@ capacidade: "Sei montar uma estrutura de pastas e arquivos do zero, num comando 
 xp: 16
 prereqs: [linux-op-04-hierarquia]
 
+ensina:
+  conceitos:
+    - id: tree-desenha-a-arvore
+      titulo: "tree mostra a hierarquia inteira de uma vez, em vez de um nível por comando"
+    - id: chaves-expandem-em-varias-palavras
+      titulo: "{a,b} é expandido pelo SHELL em várias palavras antes de o comando rodar"
+  comandos: [tree]
+
+ensino:
+  gancho: |
+    Chegou um chamado novo e a norma da equipe é abrir a mesma estrutura de
+    pastas para cada um: aberto, fechado, evidências. São seis diretórios e
+    dois arquivos, sempre iguais, várias vezes por dia.
+
+    Dá para fazer em oito comandos. Dá para fazer em dois. A diferença não é
+    preguiça — é uma ideia sobre quem faz o trabalho de repetir.
+
+  objetivos:
+    - verbo: construir
+      texto: "montar uma árvore de diretórios com vários ramos num único comando"
+    - verbo: explicar
+      texto: "dizer quem expande `{a,b}` e em que momento isso acontece"
+    - verbo: executar
+      texto: "conferir o resultado com uma visão da árvore inteira"
+
+  modelo_mental: |
+    De novo o shell agindo **antes** do comando, como no `>` e no `~`.
+
+    Quando você escreve `mkdir -p chamados/{aberto,fechado}`, o `mkdir` nunca vê
+    as chaves. O shell as expande primeiro e monta a linha real:
+
+    ```
+    mkdir -p chamados/aberto chamados/fechado
+    ```
+
+    Só então o `mkdir` é chamado, com dois argumentos. É pura economia de
+    digitação: nada aqui é uma funcionalidade do `mkdir`.
+
+    Esse é o mesmo padrão que vai voltar no globbing (`*.log`) mais adiante.
+    Vale a pena instalar a pergunta agora e usá-la para sempre: **quem está
+    lendo este caractere, o shell ou o comando?**
+
+    Um jeito de responder sem arriscar nada: ponha `echo` na frente. O `echo`
+    mostra a linha exatamente como o shell a montou.
+
+  anatomia:
+    - linha: "mkdir -p ~/chamados/2026/{aberto,fechado}"
+      partes:
+        - trecho: "mkdir"
+          papel: comando
+          explica: "cria diretórios"
+        - trecho: "-p"
+          papel: opcao
+          explica: "cria os níveis que faltarem no caminho"
+        - trecho: "{aberto,fechado}"
+          papel: operador
+          explica: "expansão de chaves, feita pelo SHELL: vira duas palavras antes de o mkdir ser chamado"
+        - trecho: "~/chamados/2026/"
+          papel: argumento
+          explica: "o prefixo que o shell repete em cada palavra gerada pela expansão"
+
+  demonstracao:
+    - comando: "echo chamados/{aberto,fechado}"
+      saida: |-2
+        chamados/aberto chamados/fechado
+      nota: "Antes de criar nada: o `echo` mostra no que a linha se transforma. Uma palavra virou duas, e o prefixo foi repetido em cada uma."
+    - comando: "mkdir -p chamados/2026/{aberto,fechado}"
+      saida: ""
+      nota: "O mkdir recebeu dois caminhos, não uma chave. Com `-p`, os níveis chamados/ e 2026/ vieram junto."
+    - comando: "touch chamados/2026/aberto/CH-1042.txt"
+      saida: ""
+      nota: "Um arquivo vazio para a árvore ter conteúdo. O `touch` não abre editor nem pergunta nada."
+    - comando: "ls chamados/2026"
+      saida: |-2
+        aberto
+        fechado
+      nota: "O `ls` mostra um nível de cada vez. Para ver a estrutura inteira seriam três comandos — ou um."
+    - comando: "tree chamados"
+      saida: |-2
+        chamados
+        └── 2026
+            ├── aberto
+            │   └── CH-1042.txt
+            └── fechado
+
+        4 directories, 1 file
+      nota: "A árvore inteira desenhada, com a contagem no fim. É esta saída que a tarefa vai pedir gravada em arquivo."
+
+  pratica_guiada:
+    - instrucao: "Veja no que a expansão de chaves se transforma, sem criar nada ainda."
+      modelo: "echo backup/{____,____}"
+      resposta: "echo backup/{diario,semanal}"
+    - instrucao: "Agora crie de verdade as duas pastas, com o nível backup/ junto."
+      modelo: "mkdir ____ backup/{diario,semanal}"
+      resposta: "mkdir -p backup/{diario,semanal}"
+    - instrucao: "Ponha um arquivo vazio dentro da pasta diária."
+      modelo: "____ backup/diario/hoje.txt"
+      resposta: "touch backup/diario/hoje.txt"
+    - instrucao: "Confira a estrutura inteira de uma vez, em vez de um ls por nível."
+      modelo: "____ backup"
+      resposta: "tree backup"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "O que `echo log-{1,2}.txt` mostra na tela?"
+      resposta: |
+        `log-1.txt log-2.txt`. O shell repete o prefixo e o sufixo em cada
+        palavra gerada — a expansão acontece antes de o `echo` ser chamado.
+    - tipo: diagnostico
+      pergunta: "Você roda `mkdir -p chamados/{aberto,fechado}` e aparece um diretório chamado literalmente `{aberto,fechado}`. O que aconteceu?"
+      resposta: |
+        A expansão de chaves não aconteceu — em geral porque o comando rodou
+        num shell que não a suporta (`sh` em vez de `bash`), ou porque havia
+        espaço dentro das chaves. Sem a expansão, as chaves viram texto comum.
+    - tipo: transferencia
+      pergunta: "Sem a expansão de chaves, quantos comandos `mkdir` seriam necessários para criar `site/{css,js,img}/2026`? E com ela?"
+      resposta: |
+        Com `-p` e sem chaves, três comandos (um por caminho). Com chaves, um
+        só: `mkdir -p site/{css,js,img}/2026` — o shell gera os três caminhos e
+        entrega os três ao mesmo `mkdir`.
+
 objetivo_md: |
   - `mkdir pasta` cria um diretório. Com `-p`, cria também os pais que faltarem.
   - `touch arquivo` cria um arquivo vazio (ou só atualiza a data, se já existir).
@@ -90,15 +211,19 @@ dicas:
 
 erros_comuns:
   - match: "cannot create directory.*No such file or directory"
-    explica: "Sem `-p`, o `mkdir` não cria os diretórios intermediários."
+    digita: "mkdir chamados/2026/aberto"
+    mensagem: "mkdir: cannot create directory 'chamados/2026/aberto': No such file or directory"
+    causa: "sem `-p` o mkdir não cria os níveis intermediários, e chamados/2026 ainda não existia"
+    conserto: "use a opção que cria a árvore inteira de uma vez"
     categoria: flag_errada
   - match: "Is a directory"
-    explica: "Você tentou tratar um diretório como se fosse arquivo. `mkdir` cria pasta; `touch` cria arquivo."
+    digita: "touch chamados"
+    mensagem: "touch: cannot touch 'chamados': Is a directory"
+    causa: "chamados já existe como diretório, e o touch não transforma pasta em arquivo"
+    conserto: "mkdir cria pasta, touch cria arquivo; confira com `ls -l` o que é o quê antes"
     categoria: conceitual
-
 
 cards_revisao:
   - tree-desenha-a-arvore
-  - mkdir-p-cria-os-pais
-  - touch-cria-arquivo-vazio
   - chaves-expandem-em-varias-palavras
+  - mkdir-p-cria-os-pais

@@ -36,6 +36,20 @@
 
 /* ── painel esquerdo: objetivo ───────────────────────────────────────────── */
 
+/* Rótulo do painel ("Objetivo", "Terminal", "Estado do lab").
+ *
+ * A classe nunca teve regra: a aparência vinha do <h2> que a carregava. Os
+ * três viraram <p> — no painel de objetivo o <h2> aparecia ANTES do <h1> do
+ * título da lição e invertia a hierarquia para quem navega por cabeçalho.
+ * Estes valores são os que o <h2> dava (1.5em do UA, margem zerada e peso 600
+ * de base.css): a troca de elemento não mexe num pixel. */
+.painel__titulo {
+  font-size: 1.5em;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+}
+
 .licao__nivel {
   display: flex;
   align-items: center;

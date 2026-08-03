@@ -7,6 +7,175 @@ capacidade: "Sei onde procurar cada tipo de arquivo num servidor Linux que nunca
 xp: 14
 prereqs: [linux-op-03-caminhos]
 
+ensina:
+  conceitos:
+    - id: etc-guarda-configuracao
+      titulo: "/etc é onde mora a configuração do sistema e dos serviços"
+    - id: var-log-guarda-logs
+      titulo: "/var/log guarda o que os serviços registraram, e é a primeira parada de um diagnóstico"
+    - id: maior-maior-acrescenta
+      titulo: ">> acrescenta ao fim do arquivo em vez de zerá-lo"
+  comandos: []
+
+ensino:
+  gancho: |
+    Você recebe acesso a um servidor de um cliente novo. Ninguém documentou
+    nada. Você precisa achar a configuração do Asterisk e o log de ontem, e a
+    única pessoa que conhecia a máquina saiu da empresa.
+
+    Não é preciso conhecer aquele servidor. O Linux segue um padrão de onde
+    cada coisa mora, e é ele que transforma "servidor que nunca vi" em
+    "servidor que eu sei navegar".
+
+  objetivos:
+    - verbo: identificar
+      texto: "dizer que tipo de arquivo mora em cada diretório de topo"
+    - verbo: escolher
+      texto: "decidir onde procurar config e log num servidor desconhecido"
+    - verbo: explicar
+      texto: "dizer a diferença prática entre `>` e `>>`"
+
+  modelo_mental: |
+    A árvore do Linux é organizada por **função**, não por programa. Não existe
+    uma pasta "Asterisk" com tudo dentro: a configuração dele vai para onde
+    vai configuração, o log dele vai para onde vai log, o executável para onde
+    vão executáveis.
+
+    | Diretório | O que mora ali |
+    |---|---|
+    | `/etc` | configuração do sistema e dos serviços |
+    | `/var/log` | o que os serviços registraram enquanto rodavam |
+    | `/tmp` | rascunho descartável; pode sumir num reinício |
+    | `/home` | as pastas pessoais dos usuários |
+    | `/usr/bin` | os programas que você chama pelo nome |
+
+    Isso é o que faz o conhecimento transferir. Quem entende a lógica chega num
+    servidor desconhecido e já sabe por onde começar; quem decorou o caminho de
+    um serviço específico volta à estaca zero a cada máquina nova.
+
+    E o par que aparece o tempo todo aqui: `>` **zera** o arquivo antes de
+    escrever, `>>` **acrescenta** ao fim. Montar uma lista linha a linha exige
+    o segundo — com o primeiro você fica só com a última.
+
+  anatomia:
+    - linha: "echo /var/log >> fhs.txt"
+      partes:
+        - trecho: "echo"
+          papel: comando
+          explica: "devolve o texto recebido pelo canal de saída"
+        - trecho: "/var/log"
+          papel: argumento
+          explica: "o texto a devolver; aqui é o caminho que você quer registrar"
+        - trecho: ">>"
+          papel: operador
+          explica: "instrução do shell: abre o arquivo no fim e acrescenta, em vez de zerar"
+        - trecho: "fhs.txt"
+          papel: argumento
+          explica: "o arquivo de destino; é criado se ainda não existir"
+
+  demonstracao:
+    - comando: "ls /"
+      saida: |-2
+        bin
+        boot
+        dev
+        etc
+        home
+        lib
+        lib64
+        media
+        mnt
+        opt
+        proc
+        root
+        run
+        sbin
+        srv
+        sys
+        tmp
+        usr
+        var
+      nota: "A raiz do sistema. Cada nome aqui é uma categoria de função, e o padrão se repete em qualquer distribuição."
+    - comando: "ls /etc"
+      saida: |-2
+        alternatives
+        apparmor.d
+        apt
+        bash.bashrc
+        bash_completion
+        bindresvport.blacklist
+        ca-certificates
+        ca-certificates.conf
+        cloud
+        cron.d
+        cron.daily
+        cron.weekly
+        debconf.conf
+        debian_version
+        default
+        devlab-imagem
+        dpkg
+        e2scrub.conf
+        environment
+        fstab
+        gai.conf
+        gnutls
+        groff
+        group
+        ... (mais 66 linha(s))
+      nota: "Configuração. Num servidor de telefonia é aqui que ficaria /etc/asterisk — e é aqui que você olha primeiro quando o serviço sobe com o comportamento errado."
+    - comando: "ls /var/log"
+      saida: |-2
+        alternatives.log
+        apt
+        bootstrap.log
+        btmp
+        dpkg.log
+        faillog
+        lastlog
+        wtmp
+      nota: "O que os serviços registraram. Primeira parada de qualquer diagnóstico: o serviço quase sempre já escreveu o motivo da falha aqui."
+    - comando: "echo /etc > fhs.txt; cat fhs.txt"
+      saida: |-2
+        /etc
+      nota: "Primeira linha gravada. O `>` criou o arquivo do zero."
+    - comando: "echo /var/log >> fhs.txt; cat fhs.txt"
+      saida: |-2
+        /etc
+        /var/log
+      nota: "Com `>>` a segunda linha entrou embaixo da primeira. As duas convivem."
+    - comando: "echo /tmp > fhs.txt; cat fhs.txt"
+      saida: |-2
+        /tmp
+      nota: "O erro que a tarefa vai cobrar: um `>` no lugar de `>>` apagou as duas linhas anteriores. Sobrou só a última."
+
+  pratica_guiada:
+    - instrucao: "Veja o que existe na raiz do sistema."
+      modelo: "ls ____"
+      resposta: "ls /"
+    - instrucao: "Espie o diretório onde mora a configuração dos serviços."
+      modelo: "ls ____"
+      resposta: "ls /etc"
+    - instrucao: "Comece um arquivo lista.txt com a linha /etc, zerando o que houver."
+      modelo: "echo /etc ____ lista.txt"
+      resposta: "echo /etc > lista.txt"
+    - instrucao: "Acrescente /var/log embaixo, sem perder a linha anterior."
+      modelo: "echo /var/log ____ lista.txt"
+      resposta: "echo /var/log >> lista.txt"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você roda `echo a > x.txt`, depois `echo b >> x.txt`, depois `echo c > x.txt`. O que sobra em x.txt?"
+      resposta: |
+        Só `c`. O terceiro comando usa `>`, que zera o arquivo antes de
+        escrever — levando junto o `a` e o `b`.
+    - tipo: transferencia
+      pergunta: "Num servidor que você nunca viu, o serviço de telefonia não sobe. Sem saber nada da máquina, quais dois diretórios você abre primeiro, e por quê?"
+      resposta: |
+        `/var/log`, para ler o que o serviço registrou ao tentar subir, e
+        `/etc`, para conferir a configuração que ele leu. O log diz o sintoma;
+        a configuração costuma ter a causa.
+
 objetivo_md: |
   No Linux **tudo é arquivo** — e tudo pendura de uma única raiz, `/`.
   Saber onde as coisas moram é o que separa "procurar" de "ir direto".
@@ -20,8 +189,9 @@ objetivo_md: |
   | `/usr` | programas e bibliotecas instalados |
   | `/bin`, `/usr/bin` | os executáveis dos comandos |
 
-  Explore de verdade antes de responder: `ls /`, `ls /etc | head`, `ls /var/log`.
-  A página de manual `man hier` descreve essa hierarquia inteira.
+  Explore de verdade antes de responder: `ls /`, `ls /etc`, `ls /var/log`.
+  Essa organização tem nome — FHS, *Filesystem Hierarchy Standard* — e é a mesma
+  em qualquer distribuição, o que é justamente o que a torna útil.
 
   ### Sua tarefa
 
@@ -49,24 +219,26 @@ verificar:
       for i in 0 1 2; do
         if [ "$(normaliza "${LINHAS[$i]:-}")" != "${ESPERADO[$i]}" ]; then
           echo "a linha $((i + 1)) nao confere"
-          echo 'DEVLAB_JSON:{"mensagem":"uma das tres linhas nao bate com a hierarquia padrao","dica_diagnostica":"revise com man hier, e confira a ordem: 1 configuracao, 2 logs, 3 temporarios. Escreva o caminho absoluto, comecando com barra."}'
+          echo 'DEVLAB_JSON:{"mensagem":"uma das tres linhas nao bate com a hierarquia padrao","dica_diagnostica":"confira a ordem: 1 configuracao, 2 logs, 3 temporarios. Escreva o caminho absoluto, comecando com barra."}'
           exit 1
         fi
       done
       exit 0
 
 dicas:
-  - "Você não precisa decorar: `ls /` mostra todos os candidatos, e `man hier` descreve o que cada um guarda. O terceiro é onde qualquer programa joga arquivo descartável."
+  - "Você não precisa decorar: `ls /` mostra todos os candidatos, e a tabela do modelo mental diz o que cada um guarda. O terceiro é onde qualquer programa joga arquivo descartável."
   - "A forma é: `echo /____ > fhs.txt` para a primeira linha e depois `echo /____ >> fhs.txt` para as outras duas. Note a diferença entre `>` e `>>`."
   - "echo /etc > fhs.txt ; echo /var/log >> fhs.txt ; echo /tmp >> fhs.txt"
 
 erros_comuns:
   - match: "Permission denied"
-    explica: "Boa parte de `/etc` e `/var` é legível, mas alguns diretórios do sistema só abrem para o root. Isso é esperado — para esta tarefa você só precisa dos nomes."
+    digita: "ls /root"
+    mensagem: "ls: cannot open directory '/root': Permission denied"
+    causa: "alguns diretórios do sistema só abrem para o root, e você está como aluno — isso é o controle de acesso funcionando, não um defeito"
+    conserto: "para esta tarefa basta conhecer os nomes; não é preciso entrar em nada restrito"
     categoria: permissao
 
 cards_revisao:
   - etc-guarda-configuracao
   - var-log-guarda-logs
-  - tmp-e-descartavel
   - maior-maior-acrescenta

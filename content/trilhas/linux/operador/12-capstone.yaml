@@ -38,6 +38,65 @@ lab:
     echo 'rascunho descartavel gerado pela ferramenta de captura' > "$BASE/rascunho.tmp"
     chown -R aluno:aluno "$BASE"
 
+ensina:
+  conceitos: []
+  comandos: []
+
+ensino:
+  gancho: |
+    Chegou o chamado 1042 e a pasta veio como sempre vem: capturas soltas na
+    raiz, um rascunho de ferramenta no meio, e nenhuma organização.
+
+    O que você entrega a partir daqui não é um comando — é uma pasta que outra
+    pessoa consegue abrir e entender. Todo o resto do nível foi para isto.
+
+  objetivos:
+    - verbo: construir
+      texto: "organizar uma pasta de chamado real de ponta a ponta, sem passo a passo"
+    - verbo: escolher
+      texto: "escolher entre copiar e mover conforme o que precisa sobreviver na origem"
+    - verbo: diagnosticar
+      texto: "conferir o estado antes e depois de cada passo, sem confiar na memória"
+
+  modelo_mental: |
+    Nada de novo aqui. O que muda é que ninguém vai dizer qual comando usar em
+    cada passo — e é exatamente isso que o chamado real faz com você.
+
+    O método que atravessa todos os onze temas anteriores é este:
+
+    1. **Olhe antes.** `ls`, `ls -R`, `wc -l`. Você não pode decidir o que fazer
+       com o que não viu.
+    2. **Escolha pela consequência.** Precisa sobrar na origem? `cp`. Não
+       precisa? `mv`. Vai apagar? Liste primeiro.
+    3. **Confira depois.** Todo comando que muda estado merece um `ls` em
+       seguida. O silêncio do shell é ambíguo entre "deu certo" e "não fez nada".
+
+    Uma armadilha desta tarefa vale ser dita em voz alta: depois de mover os
+    `.log` para dentro de `evidencias/`, o padrão `*.log` na raiz deixa de casar
+    com qualquer coisa. A ordem dos passos muda o que os padrões enxergam.
+
+  demonstracao:
+    - comando: "ls chamado-1042"
+      saida: |-2
+        captura-01.log
+        captura-02.log
+        notas.txt
+        rascunho.tmp
+      nota: "Reconhecimento, sempre primeiro. Quatro arquivos e nenhuma pasta: dá para ver de uma vez o que precisa sair da raiz."
+    - comando: "file chamado-1042/*"
+      saida: |-2
+        chamado-1042/captura-01.log: ASCII text
+        chamado-1042/captura-02.log: ASCII text
+        chamado-1042/notas.txt:      ASCII text
+        chamado-1042/rascunho.tmp:   ASCII text
+      nota: "O que é cada coisa. Texto em todos — nada aqui vai travar o terminal se for despejado na tela."
+    - comando: "wc -l chamado-1042/*.log"
+      saida: |-2
+          5 chamado-1042/captura-01.log
+          3 chamado-1042/captura-02.log
+          8 total
+      nota: "O total já aparece na última linha. Anote esse número: é com ele que você vai conferir o resultado no fim, em vez de confiar que deu certo."
+
 objetivo_md: |
   Chegou o chamado **1042**. A pasta `chamado-1042/` veio como sempre vem: tudo
   jogado na raiz, com sobra de ferramenta no meio.
@@ -152,10 +211,16 @@ solucao_referencia: |
 
 erros_comuns:
   - match: "Directory not empty"
-    explica: "`rmdir` só remove diretório vazio. Aqui não é preciso remover diretório nenhum — só o arquivo `.tmp`."
+    digita: "rmdir chamado-1042/evidencias"
+    mensagem: "rmdir: failed to remove 'chamado-1042/evidencias': Directory not empty"
+    causa: "o rmdir só apaga diretório vazio — e aqui não é preciso apagar diretório nenhum, só o arquivo .tmp"
+    conserto: "apague o arquivo pelo nome com rm, sem mexer nas pastas"
     categoria: flag_errada
   - match: "cannot stat|No such file or directory"
-    explica: "Algum caminho não existe. Rode `find ~/chamado-1042` para ver o estado real antes de repetir o comando."
+    digita: "mv chamado-1042/*.log chamado-1042/evidencias/"
+    mensagem: "mv: cannot stat 'chamado-1042/*.log': No such file or directory"
+    causa: "os .log já foram movidos numa tentativa anterior, então o padrão não casa mais com nada na raiz e o bash entrega o texto literal"
+    conserto: "confira o estado real com `ls -R ~/chamado-1042` antes de repetir o comando"
     categoria: sintaxe
 
 cards_revisao:

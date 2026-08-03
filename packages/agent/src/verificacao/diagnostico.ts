@@ -91,16 +91,19 @@ export function classificarErros(
     const chave = `licao:${erro.match}`
     if (jaVistos.has(chave)) continue
     jaVistos.add(chave)
+    // Os quatro campos do bloco 6 chegam inteiros ao aluno. Antes só havia
+    // `explica`, e o app dizia o que o erro significa sem dizer como sair
+    // dele — enquanto a lição, logo acima, trazia o conserto escrito.
     detectados.push({
       origem: 'licao',
       id: undefined,
       titulo: 'Erro comum nesta lição',
       categoria: erro.categoria,
       trecho,
-      significa: erro.explica,
+      significa: erro.causa,
       porque: undefined,
-      investigar: undefined,
-      corrigir: undefined,
+      investigar: `O comando que costuma produzir isto é: ${erro.digita}`,
+      corrigir: erro.conserto,
     })
   }
 

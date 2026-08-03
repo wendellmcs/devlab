@@ -64,8 +64,10 @@ bruto = json.dumps(d, ensure_ascii=False)
 # A dica 3 desta lição é a linha de comando completa; ela não pode trafegar.
 assert 'pwd > onde-estou.txt' not in bruto, 'a dica 3 vazou no payload'
 assert d['dicas']['reveladas'] == [], 'veio dica revelada sem ninguém pedir'
-assert d['dicas']['total'] == 3 and d['dicas']['custos'] == [1, 3, 5]
-print('  ✔ 3 dicas anunciadas, 0 reveladas, custos {} XP'.format(d['dicas']['custos']))
+# A dica 1 é gratuita: é empurrão conceitual, não comando. Só as duas
+# seguintes cobram — nelas já vem a forma do comando e a solução.
+assert d['dicas']['total'] == 3 and d['dicas']['custos'] == [0, 3, 5], d['dicas']['custos']
+print('  ✔ 3 dicas anunciadas, 0 reveladas, custos {} XP (a primeira é grátis)'.format(d['dicas']['custos']))
 print('  ✔ o enunciado trafega; o comando da solução não')
 PY
 

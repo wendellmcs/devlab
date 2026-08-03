@@ -7,6 +7,137 @@ capacidade: "Sei chegar a qualquer lugar do sistema de arquivos, partindo da rai
 xp: 16
 prereqs: [linux-op-02-listar]
 
+ensina:
+  conceitos:
+    - id: caminho-absoluto-comeca-na-raiz
+      titulo: "caminho começado por / independe de onde você está; qualquer outro é relativo"
+    - id: ponto-ponto-sobe-um-nivel
+      titulo: ".. é o diretório de cima, e pode aparecer no meio de um caminho"
+    - id: mkdir-p-cria-os-pais
+      titulo: "mkdir -p cria a árvore inteira de uma vez, e não reclama do que já existe"
+  comandos: [cd, mkdir, touch]
+
+ensino:
+  gancho: |
+    O chamado diz: "o log está em `logs/asterisk/full`". Você roda `cat
+    logs/asterisk/full` e recebe `No such file or directory`. O arquivo existe —
+    só que esse caminho é relativo, e você não está no diretório de onde ele
+    faria sentido.
+
+    Metade dos "arquivo não encontrado" de quem está começando é isto: o
+    caminho estava certo, o ponto de partida é que era outro.
+
+  objetivos:
+    - verbo: comparar
+      texto: "distinguir um caminho absoluto de um relativo só de olhar"
+    - verbo: executar
+      texto: "chegar a qualquer diretório partindo da raiz ou de onde você está"
+    - verbo: construir
+      texto: "criar uma árvore de diretórios com vários níveis de uma vez"
+
+  modelo_mental: |
+    Pense num endereço. "Rua das Flores, 100" só funciona se quem ouve souber
+    de que cidade você fala. "Brasil, São Paulo, Rua das Flores, 100" funciona
+    de qualquer lugar do mundo.
+
+    Caminho no Linux é a mesma coisa:
+
+    - Começa com `/` → **absoluto**. Parte da raiz do sistema e chega ao mesmo
+      lugar não importa onde você esteja. É o endereço completo.
+    - Não começa com `/` → **relativo**. Parte de onde o shell está agora,
+      aquilo que o `pwd` responde. É "Rua das Flores, 100".
+
+    Três atalhos que o shell entende dentro de um caminho:
+
+    | Atalho | Significa |
+    |---|---|
+    | `.` | este diretório mesmo |
+    | `..` | o diretório de cima |
+    | `~` | a sua pasta pessoal |
+
+    O `..` não precisa ficar no começo: `../julho/ata.txt` significa "sobe um
+    nível, entra em julho, pega ata.txt". Ele é só mais um pedaço do caminho.
+
+  anatomia:
+    - linha: "mkdir -p ~/documentos/2026/agosto"
+      partes:
+        - trecho: "mkdir"
+          papel: comando
+          explica: "cria diretório"
+        - trecho: "-p"
+          papel: opcao
+          explica: "cria também os níveis intermediários que faltarem, e fica quieto se já existirem"
+        - trecho: "~/documentos/2026/agosto"
+          papel: argumento
+          explica: "o caminho a criar; sem -p, o mkdir exigiria que documentos/ e 2026/ já existissem"
+
+  demonstracao:
+    - comando: "pwd"
+      saida: |-2
+        /home/aluno
+      nota: "O ponto de partida de todo caminho relativo. Antes de discutir caminho, saiba onde você está."
+    - comando: "mkdir documentos/2026/agosto"
+      saida: |-2
+        mkdir: cannot create directory ‘documentos/2026/agosto’: No such file or directory
+      nota: "Falha de propósito: o mkdir sem `-p` cria só o ÚLTIMO nível e exige que os de cima já existam."
+    - comando: "mkdir -p documentos/2026/agosto"
+      saida: ""
+      nota: "Com `-p` ele cria os três de uma vez, em silêncio. Silêncio no shell quase sempre quer dizer que deu certo."
+    - comando: "touch documentos/2026/agosto/ata.txt"
+      saida: ""
+      nota: "`touch` cria um arquivo vazio quando o nome não existe. Aqui o caminho é relativo: parte de /home/aluno."
+    - comando: "cd documentos/2026/agosto"
+      saida: ""
+      nota: "`cd` muda o diretório atual do shell — e com isso muda o significado de todo caminho relativo daqui para a frente."
+    - comando: "pwd"
+      saida: |-2
+        /home/aluno/documentos/2026/agosto
+      nota: "Confirmação. O mesmo `ls ata.txt` que funcionava lá em cima agora se resolve a partir deste ponto."
+    - comando: "ls .."
+      saida: |-2
+        agosto
+      nota: "`..` é o diretório de cima — 2026/, que contém agosto/. Não foi preciso digitar o caminho inteiro."
+    - comando: "mkdir ../julho"
+      saida: ""
+      nota: "O `..` também vale na criação: isto cria julho/ ao lado de agosto/, sem sair daqui."
+    - comando: "ls /home/aluno/documentos/2026"
+      saida: |-2
+        agosto
+        julho
+      nota: "O mesmo lugar, agora pelo caminho absoluto. Ele começa em `/` e chega igual de qualquer diretório."
+
+  pratica_guiada:
+    - instrucao: "Confirme de onde os caminhos relativos vão partir."
+      modelo: "____"
+      resposta: "pwd"
+    - instrucao: "Crie de uma vez a árvore relatorios/2026/janeiro, que não existe em nível nenhum."
+      modelo: "mkdir ____ ~/relatorios/2026/janeiro"
+      resposta: "mkdir -p ~/relatorios/2026/janeiro"
+    - instrucao: "Entre na pasta de janeiro usando um caminho relativo."
+      modelo: "cd ____"
+      resposta: "cd ~/relatorios/2026/janeiro"
+    - instrucao: "Sem sair de janeiro, crie a pasta irmã fevereiro."
+      modelo: "mkdir ____/fevereiro"
+      resposta: "mkdir ../fevereiro"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você está em `/home/aluno/documentos/2026/agosto` e roda `ls ../..`. O que aparece?"
+      resposta: |
+        O conteúdo de `/home/aluno/documentos` — cada `..` sobe um nível: o
+        primeiro leva a `2026`, o segundo a `documentos`.
+    - tipo: diagnostico
+      pergunta: "O chamado diz que o log está em `logs/asterisk/full`. Você roda `ls logs/asterisk/full` e recebe `No such file or directory`. Antes de concluir que o arquivo sumiu, o que você confere?"
+      resposta: |
+        Onde você está, com `pwd`. O caminho é relativo, então ele só resolve a
+        partir do diretório atual. Do lugar errado, um caminho correto falha.
+    - tipo: transferencia
+      pergunta: "Você está em `/var/log` e quer listar `/etc` com o menor caminho possível. Absoluto ou relativo?"
+      resposta: |
+        Absoluto: `ls /etc`. O relativo seria `ls ../../etc` — mais longo, mais
+        fácil de errar, e depende de onde você está. Quando o destino está longe
+        na árvore, o absoluto é mais curto e mais seguro.
+
 objetivo_md: |
   Existem dois jeitos de nomear um lugar:
 
@@ -93,15 +224,19 @@ dicas:
 
 erros_comuns:
   - match: "cannot create directory.*No such file or directory"
-    explica: "O `mkdir` sem `-p` só cria o último nível: ele exige que os diretórios acima já existam."
+    digita: "mkdir documentos/2026/agosto"
+    mensagem: "mkdir: cannot create directory 'documentos/2026/agosto': No such file or directory"
+    causa: "o mkdir sem `-p` cria apenas o último nível e exige que todos os de cima já existam"
+    conserto: "acrescente a opção que cria os níveis intermediários junto"
     categoria: flag_errada
   - match: "File exists"
-    explica: "O diretório já existe. Isso não é um problema — `mkdir -p` inclusive não reclama nesse caso."
+    digita: "mkdir documentos"
+    mensagem: "mkdir: cannot create directory 'documentos': File exists"
+    causa: "o diretório já está lá; o mkdir sem `-p` trata isso como erro"
+    conserto: "com `-p` o mkdir aceita o que já existe em silêncio — é seguro repetir"
     categoria: conceitual
 
-
 cards_revisao:
-  - ponto-ponto-sobe-um-nivel
   - caminho-absoluto-comeca-na-raiz
-  - til-e-a-pasta-pessoal
+  - ponto-ponto-sobe-um-nivel
   - mkdir-p-cria-os-pais

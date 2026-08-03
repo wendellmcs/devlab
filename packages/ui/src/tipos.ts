@@ -40,6 +40,51 @@ export type Trilha = {
   licoes: ResumoLicao[]
 }
 
+// ── E-G-P: os blocos que acontecem ANTES da tarefa avaliada ────────────────
+
+export type Objetivo = { verbo: string; texto: string }
+
+export type ParteDeComando = {
+  trecho: string
+  papel: 'comando' | 'opcao' | 'argumento' | 'operador'
+  explica: string
+}
+
+export type Anatomia = { linha: string; partes: ParteDeComando[] }
+
+/** Transcrição real de terminal, anotada linha a linha. */
+export type PassoDemonstrado = { comando: string; saida: string; nota: string }
+
+/** `modelo` é o comando com lacuna; ausente, o aluno monta do zero. */
+export type PassoGuiado = { instrucao: string; modelo?: string; resposta: string }
+
+export type PerguntaDeCompreensao = {
+  tipo: 'predicao' | 'diagnostico' | 'transferencia'
+  pergunta: string
+  resposta: string
+}
+
+export type Ensino = {
+  gancho: string
+  objetivos: Objetivo[]
+  modelo_mental: string
+  anatomia: Anatomia[]
+  demonstracao: PassoDemonstrado[]
+  pratica_guiada: PassoGuiado[]
+  compreensao: PerguntaDeCompreensao[]
+}
+
+export type Conceito = { id: string; titulo: string }
+
+/** Bloco 6, no formato fixo de quatro campos. Sem a regex do classificador. */
+export type ErroComum = {
+  digita: string
+  mensagem: string
+  causa: string
+  conserto: string
+  categoria: CategoriaDeErro
+}
+
 export type Licao = {
   id: string
   trilha: string
@@ -47,6 +92,9 @@ export type Licao = {
   ordem: number
   titulo: string
   capacidade: string
+  ensino: Ensino
+  conceitos: Conceito[]
+  erros_comuns: ErroComum[]
   objetivo_md: string
   xp: number
   capstone: boolean

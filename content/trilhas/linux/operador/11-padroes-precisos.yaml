@@ -20,6 +20,133 @@ lab:
     echo 'porta=modelo' > "$BASE/porta-x.conf"
     chown aluno:aluno "$BASE"/porta-*.conf
 
+ensina:
+  conceitos:
+    - id: interrogacao-casa-um-caractere
+      titulo: "? casa exatamente um caractere — nem zero, nem dois"
+    - id: colchetes-listam-caracteres-aceitos
+      titulo: "[...] casa um caractere, escolhido de um conjunto que você define"
+  comandos: []
+
+ensino:
+  gancho: |
+    A pasta de configuração tem `porta-1.conf` até `porta-9.conf`, mais
+    `porta-10.conf` e um `porta-x.conf` que é modelo, não configuração real.
+    Você precisa dos de um dígito, sem levar o `porta-10` nem o modelo.
+
+    `porta-*.conf` pega os doze. E aí você não copiou os arquivos que queria:
+    copiou todos, e vai descobrir isso quando o serviço subir com a
+    configuração errada.
+
+  objetivos:
+    - verbo: comparar
+      texto: "escolher entre `*`, `?` e `[...]` conforme a precisão que o caso exige"
+    - verbo: construir
+      texto: "montar um padrão que pega exatamente os arquivos pretendidos"
+    - verbo: prever
+      texto: "prever o que um padrão vai casar antes de rodar o comando"
+
+  modelo_mental: |
+    Nome de arquivo em servidor **carrega informação**: número de porta, data,
+    número do chamado, ramal. Um padrão grosseiro ignora essa informação; um
+    padrão preciso a usa.
+
+    Os três curingas respondem a perguntas diferentes:
+
+    | Curinga | Casa | Serve para |
+    |---|---|---|
+    | `*` | qualquer sequência, inclusive vazia | "todos os .log" |
+    | `?` | **exatamente um** caractere, qualquer um | "os de sufixo de um caractere só" |
+    | `[0-9]` | **um** caractere, do conjunto listado | "os de sufixo numérico" |
+
+    A diferença entre `?` e `*` é de **quantidade**: `porta-?.conf` não casa
+    com `porta-10.conf`, porque `10` são dois caracteres e o `?` aceita um.
+
+    A diferença entre `?` e `[0-9]` é de **conjunto**: `porta-?.conf` casa com
+    `porta-x.conf` (o `x` é um caractere, e ao `?` tanto faz qual). Já
+    `porta-[0-9].conf` recusa, porque `x` não está no conjunto.
+
+    Quem expande continua sendo o shell, e a ferramenta de conferir continua
+    sendo a mesma: `echo` na frente, antes de passar o padrão a um comando que
+    copia ou apaga.
+
+  anatomia:
+    - linha: "cp ~/configs/porta-[0-9].conf ~/so-digitos/"
+      partes:
+        - trecho: "cp"
+          papel: comando
+          explica: "recebe a lista já expandida; nunca vê os colchetes"
+        - trecho: "porta-"
+          papel: argumento
+          explica: "parte literal do nome: tem de casar caractere por caractere"
+        - trecho: "[0-9]"
+          papel: operador
+          explica: "classe de caracteres, lida pelo shell: UM caractere, entre 0 e 9"
+        - trecho: ".conf"
+          papel: argumento
+          explica: "sufixo literal; é ele que exclui arquivos com outra extensão"
+
+  demonstracao:
+    - comando: "ls configs"
+      saida: |-2
+        porta-1.conf
+        porta-10.conf
+        porta-2.conf
+        porta-3.conf
+        porta-x.conf
+        ramais.txt
+        rede.conf
+      nota: "O terreno. Repare nos três tipos de sufixo: um dígito, dois dígitos e uma letra. É essa diferença que o padrão precisa enxergar."
+    - comando: "echo configs/porta-*.conf"
+      saida: |-2
+        configs/porta-1.conf configs/porta-10.conf configs/porta-2.conf configs/porta-3.conf configs/porta-x.conf
+      nota: "O `*` pega tudo, inclusive o porta-10 e o porta-x. Grosseiro demais para este caso."
+    - comando: "echo configs/porta-?.conf"
+      saida: |-2
+        configs/porta-1.conf configs/porta-2.conf configs/porta-3.conf configs/porta-x.conf
+      nota: "O `?` exige exatamente um caractere: o porta-10 ficou de fora. Mas o porta-x entrou, porque ao `?` tanto faz QUAL caractere é."
+    - comando: "echo configs/porta-[0-9].conf"
+      saida: |-2
+        configs/porta-1.conf configs/porta-2.conf configs/porta-3.conf
+      nota: "A classe exige um caractere E que ele seja dígito: sai o porta-10 (dois caracteres) e sai o porta-x (não é dígito). Exatamente os três pretendidos."
+    - comando: "echo configs/porta-[13].conf"
+      saida: |-2
+        configs/porta-1.conf configs/porta-3.conf
+      nota: "A classe não precisa ser um intervalo: dentro dos colchetes você lista os caracteres aceitos, um a um."
+
+  pratica_guiada:
+    - instrucao: "Veja no que expande o padrão mais amplo, sem copiar nada."
+      modelo: "echo configs/porta-____.conf"
+      resposta: "echo configs/porta-*.conf"
+    - instrucao: "Agora restrinja a exatamente um caractere de sufixo, ainda só com echo."
+      modelo: "echo configs/porta-____.conf"
+      resposta: "echo configs/porta-?.conf"
+    - instrucao: "Restrinja mais: um caractere E que seja dígito."
+      modelo: "echo configs/porta-____.conf"
+      resposta: "echo configs/porta-[0-9].conf"
+    - instrucao: "Confirmado o padrão, crie a pasta de destino antes de copiar."
+      modelo: "mkdir -p ____"
+      resposta: "mkdir -p ~/so-digitos"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "A pasta tem `ramal-7.conf`, `ramal-42.conf` e `ramal-a.conf`. O que `ramal-?.conf` casa?"
+      resposta: |
+        `ramal-7.conf` e `ramal-a.conf`. O `?` casa exatamente um caractere,
+        qualquer um — então o `42` fica de fora por ter dois, e a letra `a`
+        entra por ter um.
+    - tipo: diagnostico
+      pergunta: "Você roda `cp configs/porta-[0-9].conf destino/` e recebe `No such file or directory` falando de `porta-[0-9].conf`. O que isso diz?"
+      resposta: |
+        Que o padrão não casou com nenhum arquivo. O bash, não achando
+        correspondência, entregou o texto literal ao `cp` — que foi procurar um
+        arquivo com colchetes no nome. Confira com `echo` e com `ls configs`.
+    - tipo: transferencia
+      pergunta: "Você precisa dos logs de outubro a dezembro, nomeados `captura-2026-10.log` até `captura-2026-12.log`, sem pegar os de janeiro a setembro. Que padrão usa?"
+      resposta: |
+        `captura-2026-1[0-2].log`. A parte fixa vai até o `1`, e a classe
+        resolve só o último dígito — aceitando 0, 1 e 2 e recusando o resto.
+
 objetivo_md: |
   O `*` resolve o caso fácil. Quando o nome do arquivo carrega informação —
   e num servidor ele quase sempre carrega — é preciso ser mais exato.
@@ -122,10 +249,16 @@ dicas:
 
 erros_comuns:
   - match: "No such file or directory"
-    explica: "Se o padrão não casa com nada, o bash entrega o texto literal ao comando. Confirme com `echo <padrão>` no que ele expande antes de usar."
+    digita: "cp configs/porta-[5-9].conf ~/destino/"
+    mensagem: "cp: cannot stat 'configs/porta-[5-9].conf': No such file or directory"
+    causa: "nenhum arquivo casou com o padrão, então o bash entregou o texto literal e o cp foi procurar um arquivo com colchetes no nome"
+    conserto: "rode `echo configs/porta-[5-9].conf` primeiro e veja se ele expande em alguma coisa"
     categoria: conceitual
   - match: "omitting directory"
-    explica: "O padrão pegou um diretório junto. Restrinja o padrão em vez de acrescentar `-r`."
+    digita: "cp configs/porta-* ~/destino/"
+    mensagem: "cp: -r not specified; omitting directory 'configs/porta-antigas'"
+    causa: "o `*` casou também com um diretório, e o cp sem -r recusa diretório"
+    conserto: "aperte o padrão para casar só o que interessa, em vez de acrescentar -r"
     categoria: flag_errada
 
 cards_revisao:

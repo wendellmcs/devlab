@@ -1,0 +1,352 @@
+/*
+ * Blocos de ensino (E-G-P).
+ *
+ * Regra que vale para o arquivo inteiro: nenhum valor de cor literal. Tudo sai
+ * de estilos/tokens.css, que é gerado de design/tokens.ts e testado a 7:1. O
+ * texto usa `--texto-1` e `--texto-2`; `--texto-lg` é só para texto grande.
+ *
+ * A hierarquia entre os blocos vem de peso, borda e espaço — não de cor
+ * (decisão 3). Isso é o que permite sete seções seguidas continuarem
+ * distinguíveis sem virar semáforo.
+ */
+
+.ensino {
+  margin: var(--e-6) 0;
+}
+
+.ensino:first-of-type {
+  margin-block-start: var(--e-4);
+}
+
+.ensino__titulo {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+  font-size: var(--t-md);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--e-3);
+  padding-block-end: var(--e-2);
+  border-block-end: 1px solid var(--borda-sutil);
+}
+
+/* ── 1. gancho ───────────────────────────────────────────────────────────── */
+
+/* O cenário concreto é a porta de entrada: destacado da esquerda como a
+   capacidade, para o olho reconhecer "isto é contexto, não tarefa". */
+.ensino--gancho {
+  padding: var(--e-3) var(--e-4);
+  background: var(--sup-1);
+  border-inline-start: 3px solid var(--ambar);
+  border-radius: 0 var(--raio) var(--raio) 0;
+}
+
+.ensino--gancho .ensino__titulo {
+  border-block-end: none;
+  padding-block-end: 0;
+  font-size: var(--t-sm);
+  color: var(--texto-2);
+  text-transform: none;
+}
+
+/* ── 2. objetivos ────────────────────────────────────────────────────────── */
+
+.objetivos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--e-2);
+}
+
+.objetivo {
+  display: flex;
+  gap: var(--e-3);
+  align-items: baseline;
+}
+
+/* O verbo de Bloom fica visível de propósito: é o que torna o objetivo
+   verificável, e mostrar isso ensina o aluno a cobrar objetivo verificável. */
+.objetivo__verbo {
+  flex: 0 0 auto;
+  min-inline-size: 8.5ch;
+  font-size: var(--t-xs);
+  font-weight: 700;
+  color: var(--azul);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* ── 3. modelo mental ────────────────────────────────────────────────────── */
+
+.ensino--modelo {
+  padding: var(--e-4);
+  background: var(--sup-2);
+  border: 1px solid var(--borda-sutil);
+  border-radius: var(--raio-g);
+}
+
+/* ── 4. anatomia ─────────────────────────────────────────────────────────── */
+
+.anatomia__linha {
+  margin: 0 0 var(--e-3);
+  padding: var(--e-3);
+  background: var(--sup-2);
+  border: 1px solid var(--borda-sutil);
+  border-radius: var(--raio);
+  font-family: var(--fonte-mono);
+  font-size: var(--t-sm);
+  overflow-x: auto;
+}
+
+.anatomia {
+  margin: 0;
+  display: grid;
+  gap: var(--e-2);
+}
+
+.anatomia__parte {
+  display: grid;
+  grid-template-columns: minmax(6ch, 22ch) 1fr;
+  gap: var(--e-3);
+  align-items: baseline;
+  padding-block: var(--e-1);
+}
+
+.anatomia__parte dt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
+.anatomia__parte dt code {
+  font-family: var(--fonte-mono);
+  font-size: var(--t-sm);
+  color: var(--texto-1);
+  overflow-wrap: anywhere;
+}
+
+.anatomia__papel {
+  font-size: var(--t-xs);
+  color: var(--texto-2);
+}
+
+.anatomia__parte dd {
+  margin: 0;
+  color: var(--texto-1);
+}
+
+/* ── 5. demonstração comentada ───────────────────────────────────────────── */
+
+.demo {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--e-4);
+}
+
+.demo__passo {
+  border-inline-start: 2px solid var(--borda-media);
+  padding-inline-start: var(--e-3);
+}
+
+/* Comando clicável: insere no terminal, não executa — quem aperta Enter é o
+   aluno. Mesmo contrato do bloco de código do markdown. */
+.demo__comando,
+.guiada__modelo,
+.guiada__resposta,
+.erro-antecipado__comando {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  inline-size: 100%;
+  min-block-size: 44px;
+  padding: var(--e-2) var(--e-3);
+  background: var(--sup-2);
+  border: 1px solid var(--borda-media);
+  border-radius: var(--raio);
+  color: var(--texto-1);
+  font-family: var(--fonte-mono);
+  font-size: var(--t-sm);
+  text-align: start;
+  cursor: pointer;
+  overflow-x: auto;
+}
+
+.demo__comando:hover,
+.guiada__modelo:hover,
+.guiada__resposta:hover,
+.erro-antecipado__comando:hover {
+  background: var(--sup-3);
+  border-color: var(--borda-forte);
+}
+
+.demo__prompt {
+  color: var(--verde);
+  font-weight: 700;
+}
+
+.demo__saida {
+  margin: var(--e-2) 0 0;
+  padding: var(--e-3);
+  background: var(--sup-1);
+  border-radius: var(--raio);
+  font-family: var(--fonte-mono);
+  font-size: var(--t-sm);
+  line-height: 1.45;
+  color: var(--texto-1);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* A anotação é o que faz a demonstração ensinar em vez de só existir. */
+.demo__nota {
+  margin: var(--e-2) 0 0;
+  color: var(--texto-1);
+  font-size: var(--t-sm);
+}
+
+/* ── 6. erros comuns, em quatro campos fixos ─────────────────────────────── */
+
+.erros-antecipados {
+  display: grid;
+  gap: var(--e-3);
+}
+
+.erro-antecipado {
+  display: grid;
+  gap: var(--e-2);
+  padding: var(--e-3);
+  background: var(--sup-1);
+  border: 1px solid var(--borda-sutil);
+  border-inline-start: 3px solid var(--vermelho);
+  border-radius: 0 var(--raio) var(--raio) 0;
+}
+
+.erro-antecipado__linha {
+  display: grid;
+  grid-template-columns: 10ch 1fr;
+  gap: var(--e-3);
+  align-items: baseline;
+}
+
+.erro-antecipado__rotulo {
+  font-size: var(--t-xs);
+  font-weight: 700;
+  color: var(--texto-2);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* A mensagem vai literal, como a ferramenta a emite. Parafrasear aqui
+   quebraria a única coisa que o aluno consegue procurar depois. */
+.erro-antecipado__mensagem {
+  margin: 0;
+  font-family: var(--fonte-mono);
+  font-size: var(--t-sm);
+  color: var(--texto-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── 7. prática guiada ───────────────────────────────────────────────────── */
+
+.guiada {
+  margin: 0;
+  padding-inline-start: var(--e-5);
+  display: grid;
+  gap: var(--e-4);
+}
+
+.guiada__passo {
+  padding-inline-start: var(--e-2);
+}
+
+.guiada__instrucao {
+  margin: 0 0 var(--e-2);
+}
+
+/* ── 9. verificação de compreensão ───────────────────────────────────────── */
+
+.compreensao {
+  display: grid;
+  gap: var(--e-4);
+}
+
+.pergunta {
+  padding: var(--e-3);
+  background: var(--sup-1);
+  border: 1px solid var(--borda-sutil);
+  border-radius: var(--raio);
+}
+
+.pergunta__tipo {
+  font-size: var(--t-xs);
+  font-weight: 700;
+  color: var(--roxo);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-block-end: var(--e-1);
+}
+
+.pergunta__texto {
+  margin: 0 0 var(--e-2);
+}
+
+/* ── resposta escondida até o aluno tentar ───────────────────────────────── */
+
+.revelavel > summary {
+  display: flex;
+  align-items: center;
+  min-block-size: 44px;
+  padding: var(--e-2) 0;
+  color: var(--azul);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.revelavel > summary:focus-visible {
+  border-radius: var(--raio);
+}
+
+/* ── 8. tarefa avaliada ──────────────────────────────────────────────────── */
+
+/* O único bloco com moldura fechada: é a fronteira entre treinar e valer XP. */
+.ensino--tarefa {
+  padding: var(--e-4);
+  background: var(--sup-1);
+  border: 1px solid var(--borda-media);
+  border-radius: var(--raio-g);
+}
+
+/* Filho de grid tem `min-width: auto`, o que o faz crescer até caber o
+ * conteúdo — e aí quem rola é o PAINEL, na horizontal, em vez do bloco de
+ * código. É WCAG 1.4.10 (Refluxo). O `0` devolve a rolagem a quem deveria
+ * tê-la: o próprio bloco, que já tem overflow-x: auto. */
+.demo__passo,
+.guiada__passo,
+.erro-antecipado,
+.pergunta,
+.objetivo,
+.anatomia__parte {
+  min-inline-size: 0;
+}
+
+/* Código dentro de frase curta: mesma família do bloco, sem a moldura dele. */
+.demo__nota code,
+.guiada__instrucao code,
+.pergunta__texto code,
+.objetivo code,
+.anatomia__parte dd code,
+.erro-antecipado__linha code {
+  font-family: var(--fonte-mono);
+  font-size: 0.92em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--sup-3);
+  overflow-wrap: anywhere;
+}

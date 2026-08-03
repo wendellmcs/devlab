@@ -27,6 +27,148 @@ lab:
 
     chown -R aluno:aluno /home/aluno/temporarios /home/aluno/cache /home/aluno/vazio
 
+ensina:
+  conceitos:
+    - id: rm-e-permanente
+      titulo: "no shell não existe lixeira: o rm desfaz o vínculo e o dado deixa de ser alcançável"
+    - id: rm-r-desce-na-arvore
+      titulo: "rm -r apaga o diretório E tudo que houver dentro, sem perguntar"
+    - id: rmdir-so-diretorio-vazio
+      titulo: "rmdir recusa diretório com conteúdo — e essa recusa é a rede de proteção"
+  comandos: [rm, rmdir]
+
+ensino:
+  gancho: |
+    Você limpa arquivos temporários num servidor para liberar disco. Digita o
+    comando, aperta Enter, e a máquina responde com silêncio. Uma hora depois
+    alguém pergunta pelo relatório do mês.
+
+    Não há Ctrl+Z, não há lixeira, não há "restaurar". No shell, apagar é
+    definitivo — e é por isso que esta é a única lição do nível cujo objetivo
+    principal é você ficar mais devagar.
+
+  objetivos:
+    - verbo: comparar
+      texto: "escolher entre rm, rmdir e rm -r conforme o que se quer apagar"
+    - verbo: prever
+      texto: "dizer o que exatamente vai sumir antes de apertar Enter"
+    - verbo: diagnosticar
+      texto: "entender por que o rmdir recusou um diretório"
+
+  modelo_mental: |
+    O `rm` não "esvazia" o arquivo nem o manda para lugar nenhum. Ele remove a
+    **entrada no diretório** — o vínculo entre um nome e os dados no disco.
+    Quando o último vínculo some, o sistema marca aquele espaço como livre.
+
+    Os bytes ainda estão lá por um tempo, mas você não tem mais nome nenhum
+    para chegar até eles. Do seu ponto de vista, acabou.
+
+    Três ferramentas, três níveis de risco:
+
+    | Comando | Apaga | Recusa quando |
+    |---|---|---|
+    | `rm arquivo` | um arquivo | o alvo é diretório |
+    | `rmdir pasta` | um diretório | a pasta tem qualquer coisa dentro |
+    | `rm -r pasta` | a pasta e tudo dentro | quase nunca recusa |
+
+    A recusa do `rmdir` não é limitação: é **rede de proteção**. Ele só apaga
+    aquilo cujo conteúdo você já conhece — porque não há conteúdo. Quando você
+    troca `rmdir` por `rm -r` para "resolver" a recusa, você está desligando a
+    rede. Faça isso sabendo o que vai junto: `ls` na pasta antes custa um
+    segundo.
+
+  anatomia:
+    - linha: "rm -r ~/cache"
+      partes:
+        - trecho: "rm"
+          papel: comando
+          explica: "remove entradas de diretório; sem opção, só aceita arquivos"
+        - trecho: "-r"
+          papel: opcao
+          explica: "recursivo: desce na árvore e remove o conteúdo antes do próprio diretório"
+        - trecho: "~/cache"
+          papel: argumento
+          explica: "o alvo; com -r, tudo abaixo dele vai junto e sem confirmação"
+
+  demonstracao:
+    - comando: "ls temporarios"
+      saida: |-2
+        relatorio.txt
+        tmp-1.txt
+        tmp-2.txt
+        tmp-3.txt
+      nota: "Olhe antes de apagar. Repare que há um relatorio.txt no meio dos tmp — apagar a pasta inteira levaria ele junto."
+    - comando: "rm temporarios/tmp-1.txt"
+      saida: ""
+      nota: "Silêncio. O `rm` não confirma, não pergunta e não avisa: ele apenas fez."
+    - comando: "ls temporarios"
+      saida: |-2
+        relatorio.txt
+        tmp-2.txt
+        tmp-3.txt
+      nota: "Um a menos, e o relatório intacto. Apagar por nome é a operação mais previsível das três."
+    - comando: "rm temporarios"
+      saida: |-2
+        rm: cannot remove 'temporarios': Is a directory
+      nota: "Recusado: `rm` sem opção não apaga diretório. A recusa é intencional."
+    - comando: "rmdir vazio"
+      saida: ""
+      nota: "O `rmdir` aceitou porque a pasta estava vazia — não havia nada a perder sem você saber."
+    - comando: "rmdir cache"
+      saida: |-2
+        rmdir: failed to remove 'cache': Directory not empty
+      nota: "Aqui ele recusa: cache/ tem conteúdo. Esta mensagem é a rede de proteção avisando que existe algo que você talvez não tenha visto."
+    - comando: "ls -R cache"
+      saida: |-2
+        cache:
+        indice.db
+        miniaturas
+        sessoes
+
+        cache/miniaturas:
+        thumb-1.dat
+
+        cache/sessoes:
+        s-4471.dat
+      nota: "Antes de forçar, veja o que há dentro. Um segundo aqui é o que separa uma limpeza de um incidente."
+    - comando: "rm -r cache"
+      saida: ""
+      nota: "Agora sim, sabendo o que ia junto. O `-r` desce na árvore e não pergunta nada."
+
+  pratica_guiada:
+    - instrucao: "Antes de apagar qualquer coisa, veja o que há em temporarios/."
+      modelo: "ls ____"
+      resposta: "ls ~/temporarios"
+    - instrucao: "Apague apenas o tmp-2.txt, pelo nome."
+      modelo: "____ ~/temporarios/tmp-2.txt"
+      resposta: "rm ~/temporarios/tmp-2.txt"
+    - instrucao: "Confirme que o relatorio.txt continua lá."
+      modelo: "ls ____"
+      resposta: "ls ~/temporarios"
+    - instrucao: "Antes de remover cache/ inteira, veja tudo que iria junto."
+      modelo: "ls ____ ~/cache"
+      resposta: "ls -R ~/cache"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "A pasta `sobras/` tem três arquivos. O que acontece se você rodar `rmdir sobras`?"
+      resposta: |
+        Nada é apagado, e sai `rmdir: failed to remove 'sobras': Directory not
+        empty`. O `rmdir` recusa diretório com conteúdo — e essa recusa é a
+        proteção contra apagar o que você não viu.
+    - tipo: diagnostico
+      pergunta: "Você quis limpar temporários e apagou um relatório junto. O que dá para recuperar, e o que faltou fazer antes?"
+      resposta: |
+        Nada dá para recuperar: no shell não existe lixeira, e o `rm` desfaz o
+        vínculo do nome com os dados. O que faltou foi um `ls` na pasta antes —
+        um segundo de leitura no lugar de uma restauração de backup.
+    - tipo: transferencia
+      pergunta: "Você precisa apagar uma pasta `antigos/` que talvez tenha conteúdo. Qual sequência é a segura?"
+      resposta: |
+        Primeiro `ls -R antigos` para ver tudo que há dentro. Depois, se puder
+        perder aquilo, `rm -r antigos`. Começar pelo `rm -r` funciona igual e
+        deixa você sem a informação que decidiria se devia ou não.
+
 objetivo_md: |
   **`rm` é permanente.** Não há lixeira, não há desfazer. É por isso que este
   lab existe: aqui você pode errar à vontade e resetar.
@@ -107,17 +249,25 @@ dicas:
 
 erros_comuns:
   - match: "cannot remove.*Is a directory"
-    explica: "O `rm` sem opção não apaga diretórios. Use `rmdir` se estiver vazio, ou `rm -r` se quiser levar o conteúdo junto."
+    digita: "rm temporarios"
+    mensagem: "rm: cannot remove 'temporarios': Is a directory"
+    causa: "o rm sem opção só remove arquivos; apagar diretório é uma decisão diferente e ele obriga você a declará-la"
+    conserto: "use rmdir se a pasta estiver vazia, ou rm -r se quiser levar o conteúdo junto — depois de olhar o que há dentro"
     categoria: flag_errada
   - match: "Directory not empty"
-    explica: "`rmdir` só apaga diretório vazio. Ou esvazie antes, ou use `rm -r` sabendo o que vai junto."
+    digita: "rmdir cache"
+    mensagem: "rmdir: failed to remove 'cache': Directory not empty"
+    causa: "o rmdir só apaga diretório vazio, justamente para não levar embora conteúdo que você não viu"
+    conserto: "liste o conteúdo com `ls -R cache` e, se puder perder tudo aquilo, use rm -r"
     categoria: conceitual
   - match: "No such file or directory"
-    explica: "O caminho não existe — pode ser erro de digitação, ou o arquivo já foi apagado numa tentativa anterior."
+    digita: "rm temporarios/tmp-1.txt"
+    mensagem: "rm: cannot remove 'temporarios/tmp-1.txt': No such file or directory"
+    causa: "o caminho não existe — ou está digitado errado, ou o arquivo já foi apagado numa tentativa anterior"
+    conserto: "confira o estado real com `ls temporarios` antes de repetir o comando"
     categoria: sintaxe
 
 cards_revisao:
   - rm-e-permanente
   - rm-r-desce-na-arvore
   - rmdir-so-diretorio-vazio
-  - rm-r-apaga-conteudo-junto

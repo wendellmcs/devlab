@@ -7,6 +7,137 @@ capacidade: "Sei executar um comando, ler a saída dele e gravar essa saída em 
 xp: 10
 prereqs: []
 
+ensina:
+  conceitos:
+    - id: echo-escreve-na-saida
+      titulo: "echo devolve pela saída o texto que recebeu"
+    - id: pwd-diretorio-atual
+      titulo: "pwd responde em que diretório o shell está agora"
+    - id: redirecionamento-maior-sobrescreve
+      titulo: "> troca o destino da saída, e sobrescreve o arquivo inteiro"
+  # `cat` entra aqui, e não na lição 8, porque é impossível DEMONSTRAR que o
+  # `>` gravou sem mostrar o arquivo depois. A lição 8 aprofunda o cat (emendar
+  # vários arquivos); apresentá-lo é responsabilidade desta.
+  comandos: [echo, pwd, cat]
+
+ensino:
+  gancho: |
+    Você entra por SSH num servidor de telefonia que nunca viu, às 3 da manhã,
+    porque o cliente diz que "o telefone não toca". A tela mostra um cursor
+    piscando e mais nada. Não há menu, não há botão, não há onde clicar.
+
+    Tudo o que você vai fazer nas próximas semanas — ler log, achar config,
+    conferir ramal — começa em saber o que digitar nessa linha e o que fazer
+    com a resposta que vem.
+
+  objetivos:
+    - verbo: identificar
+      texto: "separar comando, opção e argumento em qualquer linha do shell"
+    - verbo: executar
+      texto: "rodar um comando e ler a saída que ele devolve"
+    - verbo: explicar
+      texto: "dizer para onde vai a saída de um comando quando você usa `>`"
+
+  modelo_mental: |
+    O shell é um **intermediário**, não o programa. Quando você aperta Enter,
+    ele parte a linha em pedaços separados por espaço, entende o primeiro
+    pedaço como o nome de um programa, procura esse programa no disco, e o
+    executa entregando os outros pedaços como argumentos.
+
+    Todo programa nasce com três canais ligados:
+
+    | Canal | Nome | Para onde vai por padrão |
+    |---|---|---|
+    | 0 | entrada | o que você digita |
+    | 1 | saída | a tela |
+    | 2 | erros | a tela |
+
+    O `>` **não é parte do comando**. É instrução para o **shell** trocar o fio
+    do canal 1 antes de o programa começar: em vez da tela, um arquivo. O
+    `echo` nem fica sabendo — ele escreve no canal 1 como sempre, e não faz
+    ideia de onde aquilo foi parar.
+
+    É por isso que `>` funciona igual com qualquer comando: quem faz o desvio é
+    o shell, não o programa.
+
+  anatomia:
+    - linha: "echo -n 'bom dia' > saudacao.txt"
+      partes:
+        - trecho: "echo"
+          papel: comando
+          explica: "o programa a executar; o shell procura por este nome"
+        - trecho: "-n"
+          papel: opcao
+          explica: "modifica o comportamento — aqui, não quebrar linha ao final"
+        - trecho: "'bom dia'"
+          papel: argumento
+          explica: "o dado sobre o qual o comando age; as aspas o mantêm inteiro apesar do espaço"
+        - trecho: ">"
+          papel: operador
+          explica: "lido pelo SHELL, não pelo echo: manda o canal 1 para um arquivo"
+        - trecho: "saudacao.txt"
+          papel: argumento
+          explica: "destino do desvio; o shell cria o arquivo, ou zera o que já existia"
+
+  demonstracao:
+    - comando: "echo alo"
+      saida: |-2
+        alo
+      nota: "O caso mais simples: um comando, um argumento. A resposta sai no canal 1, que hoje é a tela."
+    - comando: "pwd"
+      saida: |-2
+        /home/aluno
+      nota: "Nenhum argumento. O pwd responde o diretório em que o shell está — é daqui que todo caminho relativo vai contar."
+    - comando: "echo alo > primeiro.txt"
+      saida: ""
+      nota: "A tela não mostra nada, e é esse o ponto: a saída foi para o arquivo. Terminal em silêncio aqui é sinal de sucesso, não de falha."
+    - comando: "cat primeiro.txt"
+      saida: |-2
+        alo
+      nota: "A prova de que o texto chegou ao disco. `cat` despeja o conteúdo do arquivo no canal 1."
+    - comando: "echo tchau > primeiro.txt; cat primeiro.txt"
+      saida: |-2
+        tchau
+      nota: "Repare no que sumiu: `>` SOBRESCREVE. O `alo` não está mais lá — o shell zerou o arquivo antes de o echo escrever."
+    - comando: "echo denovo >> primeiro.txt; cat primeiro.txt"
+      saida: |-2
+        tchau
+        denovo
+      nota: "Com `>>` o shell acrescenta ao fim em vez de zerar. Um caractere de diferença entre acrescentar e destruir."
+
+  pratica_guiada:
+    - instrucao: "Peça ao shell que escreva o seu nome na tela."
+      modelo: "echo ____"
+      resposta: "echo Wendell"
+    - instrucao: "Descubra em que diretório você está."
+      modelo: "____"
+      resposta: "pwd"
+    - instrucao: "Grave essa resposta num arquivo chamado teste.txt, em vez de mostrá-la."
+      modelo: "pwd ____ teste.txt"
+      resposta: "pwd > teste.txt"
+    - instrucao: "Confirme que o arquivo ficou com o conteúdo certo."
+      modelo: "cat ____"
+      resposta: "cat teste.txt"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você roda `echo um > a.txt` e depois `echo dois > a.txt`. O que `cat a.txt` mostra?"
+      resposta: |
+        Só `dois`. O segundo `>` zerou o arquivo antes de o `echo` escrever.
+        Para ficar com as duas linhas seria `>>` no segundo comando.
+    - tipo: diagnostico
+      pergunta: "Você digita `eco alo` e o shell responde `eco: command not found`. O que aconteceu, exatamente?"
+      resposta: |
+        O shell pegou o primeiro pedaço da linha (`eco`), procurou um programa
+        com esse nome e não achou. Não é o `echo` reclamando do argumento — o
+        `echo` nem chegou a rodar. O comando é `echo`.
+    - tipo: transferencia
+      pergunta: "Sem ter visto o comando `date`, como você gravaria a data atual num arquivo `hoje.txt`?"
+      resposta: |
+        `date > hoje.txt`. O `>` é do shell e vale para qualquer programa que
+        escreva no canal 1 — não é preciso saber nada sobre o `date` além do
+        nome dele.
+
 objetivo_md: |
   O terminal ao lado é um **bash de verdade**, dentro de um container só seu.
   Nada do que você fizer aqui sai daqui — e o botão **Resetar lab** recria tudo
@@ -69,10 +200,16 @@ dicas:
 
 erros_comuns:
   - match: "command not found"
-    explica: "O shell não achou esse programa. Quase sempre é erro de digitação no nome do comando, ou o comando não existe nesta imagem."
+    digita: "eco alo"
+    mensagem: "bash: eco: command not found"
+    causa: "o shell leu o primeiro pedaço da linha como nome de programa, procurou por ele e não achou — o programa nem chegou a rodar"
+    conserto: "confira a grafia do nome do comando; o certo é `echo`"
     categoria: ferramenta_errada
   - match: "No such file or directory"
-    explica: "O `>` cria o arquivo, mas não cria o diretório onde ele deveria ficar. Confirme com `pwd` em que pasta você está."
+    digita: "echo alo > pasta-que-nao-existe/arquivo.txt"
+    mensagem: "bash: pasta-que-nao-existe/arquivo.txt: No such file or directory"
+    causa: "o `>` cria o ARQUIVO, nunca o diretório que o contém; o shell tentou abrir o destino e o caminho não existe"
+    conserto: "confirme onde você está com `pwd` e grave num caminho que exista"
     categoria: conceitual
 
 cards_revisao:

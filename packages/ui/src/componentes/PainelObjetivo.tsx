@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+import { useEffect, useRef, type ReactElement } from 'react'
 
 import type {
   ErroDetectado,
@@ -9,6 +9,7 @@ import type {
   ResultadoVerificacao,
 } from '../tipos.ts'
 import { AssistenteIa } from './AssistenteIa.tsx'
+import { Compreensao, Ensino } from './Ensino.tsx'
 import { Markdown } from './Markdown.tsx'
 
 type Props = {
@@ -56,7 +57,14 @@ export function PainelObjetivo({
   return (
     <>
       <div className="painel__cabecalho">
-        <h2 className="painel__titulo">Objetivo</h2>
+        {/*
+          Rótulo do painel, não título de seção. Era um <h2> e vinha ANTES do
+          <h1> do título da lição — quem navega por cabeçalho ouvia "Objetivo,
+          nível 2" e só depois o nome da lição, no nível 1. O <section> que
+          envolve o painel já tem aria-label, então o landmark continua
+          nomeado; o que sai é a hierarquia invertida.
+        */}
+        <p className="painel__titulo">Objetivo</p>
         {concluida && <span className="etiqueta etiqueta--ok">✓ concluída</span>}
         <div className="barra__espaco" />
         <span className="etiqueta">{licao.xp} XP</span>
@@ -80,7 +88,23 @@ export function PainelObjetivo({
           {verificacao !== null && <BlocoResultado resultado={verificacao} />}
         </div>
 
-        <Markdown texto={licao.objetivo_md} aoClicarCodigo={aoInserirComando} />
+        {/*
+          Blocos 1 a 7 do E-G-P vêm ANTES da tarefa avaliada, nesta ordem e por
+          este motivo: até aqui a lição abria pedindo `objetivo_md` — ou seja,
+          mandava fazer sem nunca ter ensinado. Quem já sabia passava, quem não
+          sabia pagava dica. O bloco de ensino é o que torna isto um curso em
+          vez de uma prova.
+        */}
+        <Ensino licao={licao} aoInserirComando={aoInserirComando} />
+
+        {/* 8 — prática independente: a tarefa que vale XP. */}
+        <section className="ensino ensino--tarefa" aria-labelledby="bloco-tarefa">
+          <h2 className="ensino__titulo" id="bloco-tarefa">
+            Sua vez, sozinho
+            <span className="etiqueta etiqueta--acento">vale {licao.xp} XP</span>
+          </h2>
+          <Markdown texto={licao.objetivo_md} nivelBase={3} aoClicarCodigo={aoInserirComando} />
+        </section>
 
         <button
           type="button"
@@ -133,6 +157,9 @@ export function PainelObjetivo({
             })}
           </ul>
         </section>
+
+        {/* 9 — verificação de compreensão: depois de fazer, não antes. */}
+        <Compreensao licao={licao} />
 
         {licao.dicas.total > 0 && (
           <EscadaDeDicas licao={licao} aoRevelarDica={aoRevelarDica} />
@@ -192,11 +219,33 @@ function EscadaDeDicas({
   const reveladas = new Map(licao.dicas.reveladas.map((d) => [d.nivel, d.texto]))
   const niveis = Array.from({ length: licao.dicas.total }, (_, i) => i + 1)
 
+  /**
+   * Foco na dica recém-aberta.
+   *
+   * Revelar uma dica troca o <button> por um <div> com o texto. O elemento que
+   * tinha o foco deixa de existir, e o browser devolve o foco ao <body> — quem
+   * está no teclado é jogado para o topo do documento e precisa tabular a tela
+   * inteira de volta, sem que nada anuncie o texto que ele acabou de PAGAR
+   * para ver. É WCAG 2.4.3 (Ordem do Foco) e 3.2.2 (Em Entrada).
+   *
+   * A dica recebe `tabindex="-1"`: entra por script, não na ordem de tabulação.
+   */
+  const ultimoAberto = useRef(0)
+  const abertos = licao.dicas.reveladas.length
+  const alvo = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (abertos > ultimoAberto.current) alvo.current?.focus()
+    ultimoAberto.current = abertos
+  }, [abertos])
+
+  const maiorAberto = licao.dicas.reveladas.reduce((m, d) => Math.max(m, d.nivel), 0)
+
   return (
     <section className="secao" aria-labelledby="titulo-dicas">
       <h2 className="secao__titulo" id="titulo-dicas">
         Dicas
-        <span className="etiqueta">custam XP</span>
+        <span className="etiqueta">a primeira é grátis</span>
       </h2>
       <div className="dicas">
         {niveis.map((nivel) => {
@@ -206,10 +255,19 @@ function EscadaDeDicas({
 
           if (texto !== undefined) {
             return (
-              <div className="dica" key={nivel}>
+              <div
+                className="dica"
+                key={nivel}
+                ref={nivel === maiorAberto ? alvo : undefined}
+                tabIndex={-1}
+              >
                 <div className="dica__cabecalho">
                   <span>Dica {nivel}</span>
-                  <span className="etiqueta etiqueta--aviso">−{custo} XP</span>
+                  {custo > 0 ? (
+                    <span className="etiqueta etiqueta--aviso">−{custo} XP</span>
+                  ) : (
+                    <span className="etiqueta etiqueta--ok">grátis</span>
+                  )}
                 </div>
                 <div>{texto}</div>
               </div>
@@ -230,7 +288,8 @@ function EscadaDeDicas({
                 {nivel === 3 && 'Dica 3 — a solução'}
                 {!anteriorAberta && ' (abra a anterior primeiro)'}
               </span>
-              <span className="dica__custo">−{custo} XP</span>
+              {/* Explicação conceitual não se paga; comando pronto, sim. */}
+              <span className="dica__custo">{custo > 0 ? `−${custo} XP` : 'grátis'}</span>
             </button>
           )
         })}

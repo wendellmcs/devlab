@@ -71,7 +71,10 @@ describe('classificarErros', () => {
   const errosDaLicao: ErroComumLicao[] = [
     {
       match: 'command not found',
-      explica: 'confira a grafia do comando desta lição',
+      digita: 'lss ~/logs',
+      mensagem: 'bash: lss: command not found',
+      causa: 'o shell procurou um executável chamado `lss` no PATH e não achou',
+      conserto: 'ls ~/logs',
       categoria: 'sintaxe',
     },
   ]
@@ -115,7 +118,14 @@ describe('classificarErros', () => {
 
   it('sobrevive a uma regex inválida no conteúdo', () => {
     const quebrado: ErroComumLicao[] = [
-      { match: '([', explica: 'regex ruim', categoria: 'conceitual' },
+      {
+        match: '([',
+        digita: 'qualquer coisa',
+        mensagem: 'regex ruim',
+        causa: 'regex ruim',
+        conserto: 'regex ruim',
+        categoria: 'conceitual',
+      },
     ]
     assert.deepEqual(classificarErros('qualquer coisa', quebrado, [], 'linux'), [])
   })

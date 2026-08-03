@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import { ENSINO_MINIMO } from './ensino-minimo.ts'
 import { LicaoSchema } from './schema.ts'
 
 const MINIMA = {
@@ -13,6 +14,7 @@ const MINIMA = {
   objetivo_md: 'faça algo',
   verificar: [{ descricao: 'existe', script: 'exit 0' }],
   xp: 10,
+  ensino: ENSINO_MINIMO,
 }
 
 describe('LicaoSchema', () => {

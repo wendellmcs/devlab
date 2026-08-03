@@ -2,7 +2,6 @@ import { config } from '../config.ts'
 import { rodarDoctor } from '../doctor.ts'
 import type { IndiceDeConteudo } from '../conteudo/carregador.ts'
 import type { Licao } from '../conteudo/schema.ts'
-import { descreverLimites } from '../lab/limites.ts'
 import type { GerenciadorDeLabs } from '../lab/gerenciador.ts'
 import type { LabInfo } from '../lab/tipos.ts'
 import type { ExecutorDeChecks, ResultadoVerificacao } from '../verificacao/executor.ts'
@@ -11,6 +10,11 @@ import type { ArmazemDeProgresso } from '../progresso/store.ts'
 import { CUSTO_DE_DICA, licaoDesbloqueada } from '../progresso/regras.ts'
 import type { ServicoDeIa } from '../ia/servico.ts'
 import { MOMENTOS, type Momento } from '../ia/tipos.ts'
+import {
+  montarPayloadDeLicao,
+  montarPayloadDeTrilha,
+  type ContextoDeProgresso,
+} from './payloads.ts'
 import { ErroHttp, Roteador } from './roteador.ts'
 
 /** Teto de containers vivos ao mesmo tempo. */
@@ -56,26 +60,16 @@ export function montarApi(dep: Dependencias): Roteador {
 
   r.get('/api/trilhas', () => {
     const concluidas = dep.progresso.concluidas()
-    return dep.indice.trilhas.map((trilha) => ({
-      ...trilha,
-      licoes: dep.indice.licoesDaTrilha(trilha.id).map((licao) => ({
-        id: licao.id,
-        titulo: licao.titulo,
-        nivel: licao.nivel,
-        ordem: licao.ordem,
-        xp: licao.xp,
-        capstone: licao.capstone,
-        capacidade: licao.capacidade,
-        prereqs: licao.prereqs,
-        desbloqueada: licaoDesbloqueada(licao.prereqs, concluidas),
-        progresso: dep.progresso.progresso(licao.id),
-      })),
-    }))
+    return dep.indice.trilhas.map((trilha) =>
+      montarPayloadDeTrilha(trilha, dep.indice.licoesDaTrilha(trilha.id), concluidas, (id) =>
+        dep.progresso.progresso(id),
+      ),
+    )
   })
 
   r.get('/api/licoes/:id', ({ params }) => {
     const licao = exigirLicao(dep, params['id'] as string)
-    return montarPayloadDeLicao(dep, licao)
+    return montarPayloadDeLicao(licao, contextoDe(dep, licao))
   })
 
   r.post('/api/licoes/:id/dica', ({ params, corpo }) => {
@@ -95,7 +89,7 @@ export function montarApi(dep: Dependencias): Roteador {
       nivel,
       texto: licao.dicas[nivel - 1],
       custoXp: Math.round(licao.xp * (CUSTO_DE_DICA[nivel] ?? 0)),
-      licao: montarPayloadDeLicao(dep, licao),
+      licao: montarPayloadDeLicao(licao, contextoDe(dep, licao)),
     }
   })
 
@@ -141,7 +135,7 @@ export function montarApi(dep: Dependencias): Roteador {
 
     dep.progresso.iniciar(licao.id, licao.trilha)
     const info = await dep.labs.criar(licao)
-    return { lab: info, licao: montarPayloadDeLicao(dep, licao) }
+    return { lab: info, licao: montarPayloadDeLicao(licao, contextoDe(dep, licao)) }
   })
 
   r.get('/api/labs/:labId', ({ params }) => exigirLab(dep, params['labId'] as string))
@@ -242,7 +236,7 @@ export function montarApi(dep: Dependencias): Roteador {
     return {
       ...resposta,
       custoXp: Math.round(licao.xp * (CUSTO_DE_DICA[3] ?? 0)),
-      licao: montarPayloadDeLicao(dep, licao),
+      licao: montarPayloadDeLicao(licao, contextoDe(dep, licao)),
     }
   })
 
@@ -265,44 +259,11 @@ function exigirLab(dep: Dependencias, labId: string): LabInfo {
   return info
 }
 
-/**
- * Payload da lição para o browser.
- *
- * As dicas ainda não reveladas NÃO são enviadas: se fossem, o custo de XP
- * viraria encenação — bastaria abrir o DevTools.
- */
-function montarPayloadDeLicao(dep: Dependencias, licao: Licao): unknown {
-  const reveladas = dep.progresso.dicasReveladas(licao.id)
-  const concluidas = dep.progresso.concluidas()
-
+/** As três leituras de progresso que a montagem do payload precisa. */
+function contextoDe(dep: Dependencias, licao: Licao): ContextoDeProgresso {
   return {
-    id: licao.id,
-    trilha: licao.trilha,
-    nivel: licao.nivel,
-    ordem: licao.ordem,
-    titulo: licao.titulo,
-    capacidade: licao.capacidade,
-    objetivo_md: licao.objetivo_md,
-    xp: licao.xp,
-    capstone: licao.capstone,
-    prereqs: licao.prereqs,
-    desbloqueada: licaoDesbloqueada(licao.prereqs, concluidas),
-    cards_revisao: licao.cards_revisao,
-    lab: {
-      imagem: licao.lab.imagem,
-      usuario: licao.lab.usuario,
-      workdir: licao.lab.workdir,
-      limites: descreverLimites(licao.lab),
-      quebraConserta: licao.lab.break !== undefined,
-    },
-    checks: licao.verificar.map((c, indice) => ({ indice, descricao: c.descricao })),
-    dicas: {
-      total: licao.dicas.length,
-      custos: licao.dicas.map((_, i) => Math.round(licao.xp * (CUSTO_DE_DICA[i + 1] ?? 0))),
-      reveladas: reveladas
-        .filter((n) => n >= 1 && n <= licao.dicas.length)
-        .map((n) => ({ nivel: n, texto: licao.dicas[n - 1] as string })),
-    },
+    reveladas: dep.progresso.dicasReveladas(licao.id),
+    concluidas: dep.progresso.concluidas(),
     progresso: dep.progresso.progresso(licao.id),
   }
 }

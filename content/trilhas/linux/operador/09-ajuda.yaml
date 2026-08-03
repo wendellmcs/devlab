@@ -7,6 +7,172 @@ capacidade: "Sei descobrir sozinho a opção que preciso, sem sair do terminal."
 xp: 18
 prereqs: [linux-op-08-ler-arquivos]
 
+ensina:
+  conceitos:
+    - id: help-lista-as-opcoes
+      titulo: "--help é a resposta rápida: existe em quase todo comando e cabe na tela"
+    - id: man-tem-a-secao-options
+      titulo: "o manual é a referência completa, e se lê pela seção OPTIONS, não do começo"
+    - id: which-mostra-o-executavel
+      titulo: "which mostra QUAL executável o shell vai rodar quando você digita um nome"
+  comandos: [man, which, help]
+
+ensino:
+  gancho: |
+    Você precisa contar as palavras de um arquivo, não as linhas. Sabe que é
+    `wc`, não sabe a opção. Abrir o navegador, procurar, achar um blog de 2014
+    e voltar ao terminal leva três minutos — e no servidor do cliente pode nem
+    haver navegador.
+
+    A resposta está na máquina, a um comando de distância, e é a resposta da
+    versão exata que está instalada ali.
+
+  objetivos:
+    - verbo: escolher
+      texto: "escolher entre --help e man conforme a pressa e a profundidade"
+    - verbo: executar
+      texto: "descobrir sozinho a opção que falta, sem sair do terminal"
+    - verbo: diagnosticar
+      texto: "descobrir qual executável o shell roda quando há mais de um candidato"
+
+  modelo_mental: |
+    Você não precisa memorizar opção. Precisa de um **procedimento** para achá-la.
+
+    São três ferramentas, com propósitos distintos:
+
+    - `comando --help` — resumo, na tela, em um segundo. É a primeira parada em
+      95% dos casos. Existe em quase tudo.
+    - `man comando` — o manual completo, com as seções sempre na mesma ordem:
+      NAME, SYNOPSIS, DESCRIPTION, OPTIONS, EXAMPLES. Ninguém lê do começo:
+      vai-se direto à OPTIONS.
+    - `which comando` — não fala sobre uso, e sim sobre identidade: **qual**
+      arquivo o shell vai executar. Quando o comando "se comporta diferente do
+      esperado", muitas vezes é porque existe mais de um instalado e você está
+      rodando o outro.
+
+    Um comando embutido no próprio bash (como `cd`) não tem arquivo no disco e
+    não tem página de manual própria. Para esses existe o `help`.
+
+    Isto aqui é a lição que torna as outras dispensáveis: quem sabe consultar
+    para de depender de lembrar.
+
+  anatomia:
+    - linha: "man wc"
+      partes:
+        - trecho: "man"
+          papel: comando
+          explica: "abre o manual de referência instalado na máquina"
+        - trecho: "wc"
+          papel: argumento
+          explica: "o nome da página; costuma ser o nome do próprio comando"
+
+  demonstracao:
+    - comando: "wc --help"
+      saida: |-2
+        Usage: wc [OPTION]... [FILE]...
+          or:  wc [OPTION]... --files0-from=F
+        Print newline, word, and byte counts for each FILE, and a total line if
+        more than one FILE is specified.  A word is a non-zero-length sequence of
+        printable characters delimited by white space.
+
+        With no FILE, or when FILE is -, read standard input.
+
+        The options below may be used to select which counts are printed, always in
+        the following order: newline, word, character, byte, maximum line length.
+          -c, --bytes            print the byte counts
+          -m, --chars            print the character counts
+          -l, --lines            print the newline counts
+              --files0-from=F    read input from the files specified by
+                                   NUL-terminated names in file F;
+                                   If F is - then read names from standard input
+          -L, --max-line-length  print the maximum display width
+          -w, --words            print the word counts
+              --total=WHEN       when to print a line with total counts;
+                                   WHEN can be: auto, always, only, never
+              --help        display this help and exit
+              --version     output version information and exit
+
+        GNU coreutils online help: <https://www.gnu.org/software/coreutils/>
+        ... (mais 3 linha(s))
+      nota: "A primeira parada. Cabe na tela e já mostra `-w, --words` — a opção que a tarefa vai pedir estava aqui o tempo todo."
+    - comando: "which ls"
+      saida: |-2
+        /usr/bin/ls
+      nota: "O caminho do executável que o shell roda quando você digita `ls`. É esta linha que a tarefa pede gravada."
+    - comando: "which cd"
+      saida: ""
+      nota: "Nada, e sai com erro: `cd` é embutido no bash, não existe como arquivo no disco. Para ele a consulta é outra."
+    - comando: "help cd"
+      saida: |-2
+        cd: cd [-L|[-P [-e]] [-@]] [dir]
+            Change the shell working directory.
+
+            Change the current directory to DIR.  The default DIR is the value of the
+            HOME shell variable. If DIR is "-", it is converted to $OLDPWD.
+
+            The variable CDPATH defines the search path for the directory containing
+            DIR.  Alternative directory names in CDPATH are separated by a colon (:).
+            A null directory name is the same as the current directory.  If DIR begins
+            with a slash (/), then CDPATH is not used.
+
+            If the directory is not found, and the shell option `cdable_vars' is set,
+            the word is assumed to be  a variable name.  If that variable has a value,
+            its value is used for DIR.
+
+            Options:
+              -L	force symbolic links to be followed: resolve symbolic
+            		links in DIR after processing instances of `..'
+              -P	use the physical directory structure without following
+            		symbolic links: resolve symbolic links in DIR before
+            		processing instances of `..'
+              -e	if the -P option is supplied, and the current working
+            		directory cannot be determined successfully, exit with
+            		a non-zero status
+        ... (mais 10 linha(s))
+      nota: "O `help` documenta o que é embutido no shell. É o caso em que o `man` não teria ajudado."
+    - comando: "man wc"
+      saida: |-2
+        This system has been minimized by removing packages and content that are
+        not required on a system that users do not log into.
+
+        To restore this content, including manpages, you can run the 'unminimize'
+        command. You will still need to ensure the 'man-db' package is installed.
+      nota: "O manual completo. Sem terminal interativo ele sai direto na tela; na sua sessão, ele abre num paginador — role com as setas e saia com `q`."
+
+  pratica_guiada:
+    - instrucao: "Peça ao próprio wc a lista de opções que ele aceita."
+      modelo: "wc ____"
+      resposta: "wc --help"
+    - instrucao: "Na lista, ache a opção de contar PALAVRAS e use-a no arquivo de notas."
+      modelo: "wc ____ ~/documentos/notas.txt"
+      resposta: "wc -w ~/documentos/notas.txt"
+    - instrucao: "Descubra qual executável o shell roda quando você digita ls."
+      modelo: "____ ls"
+      resposta: "which ls"
+    - instrucao: "O cd não tem página de manual. Consulte-o do jeito que funciona para embutidos."
+      modelo: "____ cd"
+      resposta: "help cd"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "`man cd` responde `No manual entry for cd`. O comando `cd` não existe?"
+      resposta: |
+        Existe — mas é embutido no bash, não um arquivo no disco, e por isso não
+        tem página de manual própria. Para embutidos a consulta é `help cd`. O
+        `which cd` também não devolve nada, pelo mesmo motivo.
+    - tipo: predicao
+      pergunta: "Você precisa da opção que faz o `ls` ordenar por data. Onde procura primeiro, e por quê?"
+      resposta: |
+        `ls --help`. Cabe na tela, responde em um segundo e cobre 95% dos casos.
+        O `man ls` é a referência completa e vale quando o `--help` não bastar —
+        e nele se vai direto à seção OPTIONS, não se lê do começo.
+    - tipo: transferencia
+      pergunta: "Um comando que você conhece está se comportando diferente do esperado nesta máquina. Que consulta você faz antes de tudo?"
+      resposta: |
+        `which comando`. Pode haver mais de uma versão instalada, e o shell roda
+        a primeira que achar no PATH — que pode não ser a que você acha que está
+        usando. É uma pergunta de identidade, não de uso.
+
 objetivo_md: |
   Ninguém decora flags. O que separa quem trava de quem resolve é saber
   **onde perguntar** — e a resposta está na própria máquina.
@@ -69,10 +235,16 @@ dicas:
 
 erros_comuns:
   - match: "No manual entry"
-    explica: "Não existe página de manual com esse nome. Confira a grafia, ou tente `comando --help`, que quase sempre existe."
+    digita: "man cd"
+    mensagem: "No manual entry for cd"
+    causa: "cd é embutido no bash e não tem página de manual própria — não existe arquivo separado para documentar"
+    conserto: "para comandos embutidos use `help cd`"
     categoria: sintaxe
   - match: "invalid option|unrecognized option"
-    explica: "A opção não existe nesse comando. `--help` lista as válidas — é mais rápido que adivinhar."
+    digita: "wc -p ~/documentos/notas.txt"
+    mensagem: "wc: invalid option -- 'p'"
+    causa: "a opção não existe nesse comando; foi um chute em vez de uma consulta"
+    conserto: "rode `wc --help` e leia a lista real de opções antes de tentar de novo"
     categoria: flag_errada
 
 cards_revisao:

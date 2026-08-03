@@ -6,6 +6,7 @@ import type { ResultadoVerificacao } from '../verificacao/executor.ts'
 import { montarMensagens, recortarTerminal, sanitizar } from './prompts.ts'
 import { montarContextoSeguro } from './servico.ts'
 import { temModelo } from './ollama.ts'
+import { ENSINO_MINIMO } from '../conteudo/ensino-minimo.ts'
 
 const SEGREDO_DICA = 'ESTA-E-A-DICA-SECRETA'
 const SEGREDO_SOLUCAO = 'ESTA-E-A-SOLUCAO-SECRETA'
@@ -29,6 +30,7 @@ function licaoComSegredos(): Licao {
       { descricao: 'conteúdo confere', script: `echo ${SEGREDO_CHECK}; exit 1` },
     ],
     dicas: ['empurrão', 'com lacuna', SEGREDO_DICA],
+    ensino: ENSINO_MINIMO,
     solucao_referencia: SEGREDO_SOLUCAO,
   })
 }

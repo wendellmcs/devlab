@@ -41,7 +41,7 @@ SEED = RAIZ / "images/linux-base/seed/home/aluno"
 NIVEIS = ("operador", "construtor", "engenheiro")
 CHAVES_OBRIGATORIAS = (
     "id", "trilha", "nivel", "ordem", "titulo",
-    "capacidade", "objetivo_md", "verificar", "xp",
+    "capacidade", "ensino", "objetivo_md", "verificar", "xp",
 )
 ASSINATURAS_MINIMAS_LINUX = (
     "command not found",
@@ -154,6 +154,258 @@ def valida_grafo(licoes, trilhas) -> None:
         visita(ident, [])
     if not falhas:
         ok(f"{len(por_id)} lições, grafo acíclico")
+
+
+# ── E-G-P ──────────────────────────────────────────────────────────────────
+
+VERBOS_DE_BLOOM = {
+    "identificar", "descrever", "explicar", "prever", "executar",
+    "construir", "diagnosticar", "comparar", "escolher", "adaptar",
+}
+PAPEIS_DE_COMANDO = {"comando", "opcao", "argumento", "operador"}
+TIPOS_DE_PERGUNTA = {"predicao", "diagnostico", "transferencia"}
+CAMPOS_DO_ERRO = ("match", "digita", "mensagem", "causa", "conserto")
+
+# Teto de conceitos novos por lição: memória de trabalho real é 4±1, e parte
+# dela já está ocupada com o terminal e com a própria sintaxe.
+TETO_DE_CONCEITOS = 3
+
+
+def valida_ensino(licoes) -> None:
+    """Cobra os blocos do E-G-P, com as exigências que variam por nível."""
+    for arq, l in licoes:
+        nome = arq.relative_to(RAIZ)
+        lid = l.get("id", "?")
+        ensino = l.get("ensino")
+
+        if not isinstance(ensino, dict):
+            erro(f"{nome}: falta o bloco 'ensino' — a lição pede a tarefa sem nunca ensinar")
+            continue
+
+        for chave in ("gancho", "objetivos", "modelo_mental"):
+            if not ensino.get(chave):
+                erro(f"{lid}: ensino.{chave} ausente ou vazio")
+
+        objetivos = ensino.get("objetivos") or []
+        if not 2 <= len(objetivos) <= 5:
+            erro(f"{lid}: ensino.objetivos tem {len(objetivos)}; o intervalo é de 2 a 5")
+        for o in objetivos:
+            if o.get("verbo") not in VERBOS_DE_BLOOM:
+                erro(f"{lid}: verbo de Bloom desconhecido em objetivo: {o.get('verbo')!r}")
+
+        for i, a in enumerate(ensino.get("anatomia") or []):
+            partes = a.get("partes") or []
+            if len(partes) < 2:
+                erro(f"{lid}: anatomia[{i}] disseca menos de 2 partes")
+            for p in partes:
+                if p.get("papel") not in PAPEIS_DE_COMANDO:
+                    erro(f"{lid}: anatomia[{i}] com papel inválido: {p.get('papel')!r}")
+            opcoes = sum(1 for p in partes if p.get("papel") == "opcao")
+            if opcoes > 5:
+                erro(f"{lid}: anatomia[{i}] disseca {opcoes} opções; o teto é 5")
+
+        for i, p in enumerate(ensino.get("compreensao") or []):
+            if p.get("tipo") not in TIPOS_DE_PERGUNTA:
+                erro(f"{lid}: compreensao[{i}] com tipo inválido: {p.get('tipo')!r}")
+
+        # Bloco 6 em formato fixo de quatro campos. Sem os quatro, "erro comum"
+        # vira uma frase solta que não localiza nada quando aparece na tela.
+        for i, e in enumerate(l.get("erros_comuns") or []):
+            for campo in CAMPOS_DO_ERRO:
+                if not e.get(campo):
+                    erro(f"{lid}: erros_comuns[{i}] sem '{campo}'")
+
+        nivel = l.get("nivel")
+        demo = ensino.get("demonstracao") or []
+        guiada = ensino.get("pratica_guiada") or []
+
+        # Fading por nível (expertise reversal): o andaime que sustenta o
+        # operador atrapalha o engenheiro. O capstone é o ponto em que o
+        # andaime sai mesmo no nível operador — ele mede integração sem ajuda.
+        capstone = bool(l.get("capstone"))
+        if nivel == "operador" and not capstone:
+            if not demo:
+                erro(f"{lid}: lição de operador sem demonstração comentada (bloco 5)")
+            if not guiada:
+                erro(f"{lid}: lição de operador sem prática guiada (bloco 7)")
+        if (nivel == "engenheiro" or capstone) and guiada:
+            erro(f"{lid}: {'capstone' if capstone else 'lição de engenheiro'} não leva prática guiada (bloco 7)")
+
+        if len(guiada) > 4:
+            erro(f"{lid}: prática guiada com {len(guiada)} passos; o teto é 4")
+
+        conceitos = (l.get("ensina") or {}).get("conceitos") or []
+        if len(conceitos) > TETO_DE_CONCEITOS:
+            erro(
+                f"{lid}: introduz {len(conceitos)} conceitos novos; o teto é "
+                f"{TETO_DE_CONCEITOS} (memória de trabalho é 4±1)"
+            )
+
+        # O conserto de um erro comum conserta o ERRO, não entrega a tarefa.
+        # Sem isto, o bloco 6 — que é pré-tarefa e gratuito — publicaria de
+        # graça o que a dica 3 cobra 50% do XP para mostrar.
+        solucao = (l.get("solucao_referencia") or "").strip()
+        if solucao:
+            for i, e in enumerate(l.get("erros_comuns") or []):
+                if solucao and solucao in (e.get("conserto") or ""):
+                    erro(
+                        f"{lid}: erros_comuns[{i}].conserto contém a solução de "
+                        f"referência inteira — o bloco 6 é gratuito e pré-tarefa"
+                    )
+
+
+# Separadores de comando no shell: cada segmento começa um comando novo.
+SEPARADORES = re.compile(r"\|\||&&|[|;&\n]")
+# Trecho de código no markdown: cercado por ``` ou por `.
+CERCADO = re.compile(r"```[a-z]*\n(.*?)```", re.S)
+EM_LINHA = re.compile(r"`([^`\n]+)`")
+
+
+def comandos_em(linha: str) -> set[str]:
+    """Nomes de comando de uma linha de shell — o 1º token de cada segmento."""
+    achados: set[str] = set()
+    for segmento in SEPARADORES.split(linha or ""):
+        for token in segmento.strip().split():
+            # `FOO=bar cmd` — a atribuição precede o comando, não é um.
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token):
+                continue
+            # Lacuna da prática guiada, flag, caminho, variável, redirecionamento.
+            if token.startswith(("-", "/", "~", "$", "'", '"', "_", ">", "<", "(", "{")):
+                break
+            if not re.fullmatch(r"[a-z][a-z0-9._-]*", token):
+                break
+            achados.add(token)
+            break  # só o primeiro token do segmento é o comando
+    return achados
+
+
+def comandos_usados(licao) -> set[str]:
+    """Todo comando que a lição escreve, em qualquer bloco."""
+    ensino = licao.get("ensino") or {}
+    linhas: list[str] = []
+
+    for passo in ensino.get("demonstracao") or []:
+        linhas.append(passo.get("comando", ""))
+    for a in ensino.get("anatomia") or []:
+        linhas.append(a.get("linha", ""))
+    for passo in ensino.get("pratica_guiada") or []:
+        linhas.append(passo.get("resposta", ""))
+        linhas.append(passo.get("modelo", "") or "")
+    for e in licao.get("erros_comuns") or []:
+        linhas.append(e.get("digita", ""))
+        linhas.append(e.get("conserto", ""))
+    linhas.extend(licao.get("dicas") or [])
+    if licao.get("solucao_referencia"):
+        linhas.append(licao["solucao_referencia"])
+
+    # Markdown: só o que está marcado como código. Prosa viraria ruído.
+    for texto in (licao.get("objetivo_md"), ensino.get("gancho"), ensino.get("modelo_mental")):
+        if not texto:
+            continue
+        for bloco in CERCADO.findall(texto):
+            linhas.extend(bloco.splitlines())
+        for trecho in EM_LINHA.findall(CERCADO.sub("", texto)):
+            linhas.append(trecho)
+
+    usados: set[str] = set()
+    for linha in linhas:
+        usados |= comandos_em(linha)
+    return usados
+
+
+def ancestrais(lid: str, por_id: dict) -> set[str]:
+    """Fecho transitivo dos pré-requisitos — tudo que vem comprovadamente antes."""
+    vistos: set[str] = set()
+    pilha = list((por_id.get(lid) or {}).get("prereqs") or [])
+    while pilha:
+        atual = pilha.pop()
+        if atual in vistos or atual not in por_id:
+            continue
+        vistos.add(atual)
+        pilha.extend((por_id[atual].get("prereqs") or []))
+    return vistos
+
+
+def valida_grafo_de_conceitos(licoes) -> None:
+    """
+    "Ensina antes de pedir" deixa de ser promessa e vira build quebrado.
+
+    Cada lição declara em `ensina` os comandos e conceitos que INTRODUZ. Se uma
+    lição usa um comando que outra lição reivindica como seu, aquela outra tem
+    de estar no fecho transitivo dos pré-requisitos desta. Senão o aluno chega
+    ao comando antes da aula dele — que é exatamente o defeito que o modelo
+    E-G-P veio corrigir, e que só a ordem do currículo pode garantir.
+
+    Comando que NENHUMA lição reivindica é ignorado de propósito: seria
+    impossível distinguir, sem executar, um utilitário fora de escopo de um
+    argumento que por acaso parece nome de comando. O gate mede o que o
+    currículo afirma sobre si mesmo.
+    """
+    por_id = {l["id"]: l for _, l in licoes if "id" in l}
+
+    dono_do_comando: dict[str, str] = {}
+    dono_do_conceito: dict[str, str] = {}
+
+    for _, l in sorted(licoes, key=lambda t: t[1].get("ordem", 0)):
+        lid = l.get("id", "?")
+        ensina = l.get("ensina") or {}
+        for cmd in ensina.get("comandos") or []:
+            if cmd in dono_do_comando:
+                erro(
+                    f"{lid}: reivindica ensinar '{cmd}', que "
+                    f"{dono_do_comando[cmd]} já ensina — um comando tem um dono só"
+                )
+            else:
+                dono_do_comando[cmd] = lid
+        for c in ensina.get("conceitos") or []:
+            cid = c.get("id")
+            if not cid:
+                continue
+            if cid in dono_do_conceito:
+                erro(
+                    f"{lid}: reivindica o conceito '{cid}', que "
+                    f"{dono_do_conceito[cid]} já ensina"
+                )
+            else:
+                dono_do_conceito[cid] = lid
+
+    problemas = 0
+    for _, l in sorted(licoes, key=lambda t: t[1].get("ordem", 0)):
+        lid = l.get("id", "?")
+        antes = ancestrais(lid, por_id)
+
+        for cmd in sorted(comandos_usados(l)):
+            dono = dono_do_comando.get(cmd)
+            if dono is None or dono == lid or dono in antes:
+                continue
+            erro(
+                f"{lid}: usa '{cmd}', que é ensinado em '{dono}' — e '{dono}' "
+                f"não é pré-requisito (direto ou transitivo) desta lição"
+            )
+            problemas += 1
+
+        # Bloco 10: o cartão de revisão é a fonte canônica do item de repetição
+        # espaçada, então ele só pode revisar conceito que já foi ensinado.
+        for card in l.get("cards_revisao") or []:
+            dono = dono_do_conceito.get(card)
+            if dono is None:
+                erro(
+                    f"{lid}: cards_revisao referencia '{card}', que nenhuma lição "
+                    f"declara em ensina.conceitos"
+                )
+                problemas += 1
+            elif dono != lid and dono not in antes:
+                erro(
+                    f"{lid}: revisa o conceito '{card}', ensinado em '{dono}', que "
+                    f"não é pré-requisito desta lição"
+                )
+                problemas += 1
+
+    if problemas == 0 and dono_do_comando:
+        ok(
+            f"{len(dono_do_comando)} comando(s) e {len(dono_do_conceito)} conceito(s) "
+            f"com dono declarado; nenhum é usado antes de ser ensinado"
+        )
 
 
 def valida_sintaxe(licoes) -> int:
@@ -299,6 +551,15 @@ def main() -> int:
 
     secao("grafo de prereqs")
     valida_grafo(licoes, trilhas)
+
+    secao("blocos de ensino (E-G-P)")
+    antes = len(falhas)
+    valida_ensino(licoes)
+    if len(falhas) == antes:
+        ok("todas as lições trazem os blocos exigidos pelo nível")
+
+    secao("ensina antes de pedir")
+    valida_grafo_de_conceitos(licoes)
 
     secao("sintaxe bash")
     total = valida_sintaxe(licoes)

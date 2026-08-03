@@ -7,6 +7,139 @@ capacidade: "Sei a diferença prática entre copiar e mover, e verifico o result
 xp: 16
 prereqs: [linux-op-05-criar]
 
+ensina:
+  conceitos:
+    - id: cp-deixa-copia-na-origem
+      titulo: "cp duplica: passa a haver dois arquivos, e o original não é tocado"
+    - id: mv-move-e-renomeia
+      titulo: "mv é o mesmo comando para mover e para renomear — em ambos o original deixa de existir onde estava"
+    - id: cp-r-para-diretorio
+      titulo: "cp recusa diretório sem -r, porque copiar pasta é decisão diferente de copiar arquivo"
+  comandos: [cp, mv]
+
+ensino:
+  gancho: |
+    Antes de mexer numa configuração em produção, você faz backup dela. Digita
+    o comando, edita o arquivo, o serviço não sobe — e aí descobre que usou
+    `mv` em vez de `cp`. Não existe backup: existe o mesmo arquivo com outro
+    nome, já editado.
+
+    A diferença entre os dois é uma letra, e é a diferença entre ter e não ter
+    para onde voltar.
+
+  objetivos:
+    - verbo: comparar
+      texto: "dizer o que sobra na origem depois de um cp e depois de um mv"
+    - verbo: executar
+      texto: "copiar e mover arquivos conferindo os dois lados da operação"
+    - verbo: diagnosticar
+      texto: "reconhecer por que o cp recusou um diretório"
+
+  modelo_mental: |
+    Pense em duas ações do mundo físico:
+
+    - `cp` é a **fotocopiadora**. O original volta para a sua mão, e você sai
+      com uma folha a mais. Passam a existir dois.
+    - `mv` é **mudar de gaveta**. Continua existindo um só; o que mudou foi
+      onde ele está.
+
+    Daí sai a consequência que importa: **`cp` é reversível, `mv` não é**. Se a
+    cópia der errado, o original está lá. Se o `mv` foi para o lugar errado,
+    você precisa saber para onde foi para trazer de volta.
+
+    E renomear? No Linux, o nome de um arquivo é só a entrada dele num
+    diretório. Trocar o nome e trocar de pasta são a mesma operação — por isso
+    não existe um comando `rename`: `mv velho.txt novo.txt` já é isso.
+
+    Por que o `cp` recusa diretório sem `-r`: copiar uma pasta pode significar
+    copiar um arquivo ou dez mil. O `cp` obriga você a dizer que sabe disso.
+
+  anatomia:
+    - linha: "cp -r ~/configs ~/backup/configs"
+      partes:
+        - trecho: "cp"
+          papel: comando
+          explica: "copia; o primeiro caminho é a origem, o último é o destino"
+        - trecho: "-r"
+          papel: opcao
+          explica: "recursivo: desce na árvore e leva o conteúdo do diretório junto"
+        - trecho: "~/configs"
+          papel: argumento
+          explica: "origem — continua existindo intacta depois da operação"
+        - trecho: "~/backup/configs"
+          papel: argumento
+          explica: "destino; se o diretório pai não existir, o cp NÃO o cria"
+
+  demonstracao:
+    - comando: "ls configs downloads"
+      saida: |-2
+        configs:
+        ramais.txt
+        rede.conf
+
+        downloads:
+        leia-me.txt
+      nota: "O ponto de partida. Guarde o que há em cada pasta: a única forma de conferir cp e mv é olhar os dois lados depois."
+    - comando: "cp configs/ramais.txt ramais-copia.txt"
+      saida: ""
+      nota: "Silêncio: deu certo. O nome do destino pode ser diferente do da origem — copiar e renomear na mesma operação."
+    - comando: "ls configs; ls ramais-copia.txt"
+      saida: |-2
+        ramais.txt
+        rede.conf
+        ramais-copia.txt
+      nota: "A prova do `cp`: o original continua em configs/ E a cópia existe aqui. Dois arquivos."
+    - comando: "mv ramais-copia.txt ramais-renomeado.txt"
+      saida: ""
+      nota: "Mesmo diretório, nome novo. É assim que se renomeia — não existe comando separado para isso."
+    - comando: "ls ramais-copia.txt"
+      saida: |-2
+        ls: cannot access 'ramais-copia.txt': No such file or directory
+      nota: "A prova do `mv`: o nome antigo não existe mais. Nada foi duplicado, só passou a se chamar outra coisa."
+    - comando: "cp configs backup-configs"
+      saida: |-2
+        cp: -r not specified; omitting directory 'configs'
+      nota: "Recusado. `configs` é diretório, e o cp sem `-r` não copia diretório — ele exige que você declare a intenção."
+    - comando: "cp -r configs backup-configs; ls backup-configs"
+      saida: |-2
+        ramais.txt
+        rede.conf
+      nota: "Com `-r` ele desce na árvore e leva o conteúdo junto."
+
+  pratica_guiada:
+    - instrucao: "Veja o que existe em configs/ antes de mexer em qualquer coisa."
+      modelo: "ls ____"
+      resposta: "ls ~/configs"
+    - instrucao: "Duplique o ramais.txt para a sua pasta pessoal, mantendo o original no lugar."
+      modelo: "____ ~/configs/ramais.txt ~/ramais-teste.txt"
+      resposta: "cp ~/configs/ramais.txt ~/ramais-teste.txt"
+    - instrucao: "Confirme que agora existem dois: o original e a cópia."
+      modelo: "ls ~/configs/ramais.txt ____"
+      resposta: "ls ~/configs/ramais.txt ~/ramais-teste.txt"
+    - instrucao: "Renomeie a cópia — sem criar mais um arquivo."
+      modelo: "____ ~/ramais-teste.txt ~/ramais-antigo.txt"
+      resposta: "mv ~/ramais-teste.txt ~/ramais-antigo.txt"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você roda `cp a.txt b.txt` e depois `mv a.txt c.txt`. Quais arquivos existem no fim?"
+      resposta: |
+        `b.txt` e `c.txt`. O `cp` criou `b.txt` sem tocar em `a.txt`; o `mv`
+        depois renomeou `a.txt` para `c.txt`, e com isso `a.txt` deixou de
+        existir.
+    - tipo: diagnostico
+      pergunta: "Você ia fazer backup de uma config antes de editá-la, usou `mv`, e o serviço não sobe. O que exatamente você tem em mãos agora?"
+      resposta: |
+        Um arquivo só, com o nome novo — e nenhum backup. O `mv` não duplica:
+        ele renomeia. O original no caminho que o serviço lê não existe mais, e
+        é por isso que o serviço não sobe.
+    - tipo: transferencia
+      pergunta: "Você precisa copiar a pasta `~/configs` inteira para `~/backup/configs`, e `~/backup` ainda não existe. Quantos comandos, e quais?"
+      resposta: |
+        Dois: `mkdir -p ~/backup` e depois `cp -r ~/configs ~/backup/configs`.
+        O `cp` cria o arquivo de destino, nunca o diretório que o contém — e
+        precisa de `-r` porque a origem é diretório.
+
 objetivo_md: |
   - `cp origem destino` — o arquivo passa a existir **nos dois lugares**.
   - `mv origem destino` — o arquivo **deixa de existir** na origem.
@@ -65,13 +198,22 @@ dicas:
 
 erros_comuns:
   - match: "omitting directory"
-    explica: "O `cp` sem `-r` recusa diretórios. Para copiar uma pasta inteira, use `cp -r`."
+    digita: "cp configs backup-configs"
+    mensagem: "cp: -r not specified; omitting directory 'configs'"
+    causa: "copiar diretório pode significar copiar um arquivo ou dez mil, então o cp exige que você declare a intenção"
+    conserto: "acrescente a opção recursiva para levar o conteúdo junto"
     categoria: flag_errada
   - match: "are the same file"
-    explica: "Origem e destino apontam para o mesmo arquivo. Confira o caminho do destino."
+    digita: "cp configs/ramais.txt configs/ramais.txt"
+    mensagem: "cp: 'configs/ramais.txt' and 'configs/ramais.txt' are the same file"
+    causa: "origem e destino resolvem para o mesmo arquivo, e o cp recusa para não zerar o conteúdo"
+    conserto: "dê ao destino um caminho ou um nome diferente do da origem"
     categoria: sintaxe
   - match: "No such file or directory"
-    explica: "Um dos dois caminhos não existe. O `cp` e o `mv` não criam o diretório de destino."
+    digita: "cp configs/ramais.txt ~/backup/ramais.txt"
+    mensagem: "cp: cannot create regular file '/home/aluno/backup/ramais.txt': No such file or directory"
+    causa: "cp e mv criam o ARQUIVO no destino, nunca o diretório que o contém"
+    conserto: "crie o diretório de destino antes, com mkdir -p"
     categoria: conceitual
 
 cards_revisao:

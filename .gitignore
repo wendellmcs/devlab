@@ -13,3 +13,4 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
+__pycache__/

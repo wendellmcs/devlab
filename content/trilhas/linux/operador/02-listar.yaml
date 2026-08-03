@@ -7,6 +7,155 @@ capacidade: "Sei listar arquivos com detalhes, incluindo ocultos, e ler cada col
 xp: 12
 prereqs: [linux-op-01-shell]
 
+ensina:
+  conceitos:
+    - id: ls-l-formato-longo
+      titulo: "ls -l troca a grade de nomes por uma linha de metadados por arquivo"
+    - id: ls-a-arquivos-ocultos
+      titulo: "nome começado por ponto é escondido do ls por convenção, não por segurança"
+    - id: til-e-a-pasta-pessoal
+      titulo: "~ é o atalho do shell para a sua pasta pessoal"
+  comandos: [ls]
+
+ensino:
+  gancho: |
+    O cliente jura que subiu o arquivo de configuração novo no servidor. Você
+    entra na pasta, lista, e não vê nada de novo. Duas explicações possíveis:
+    ele não subiu, ou o arquivo começa com ponto e o `ls` sem opção não mostra.
+
+    Saber qual das duas é o caso resolve o chamado em dez segundos ou em duas
+    horas.
+
+  objetivos:
+    - verbo: executar
+      texto: "listar um diretório com o nível de detalhe que a situação exige"
+    - verbo: identificar
+      texto: "ler cada coluna do formato longo e dizer o que ela informa"
+    - verbo: explicar
+      texto: "dizer por que um arquivo existente pode não aparecer na listagem"
+
+  modelo_mental: |
+    O `ls` sem opção mente por omissão. Ele mostra uma grade de nomes, e só —
+    e esconde tudo que começa com ponto.
+
+    Esse "esconder" não é permissão nem segurança: é uma **convenção do
+    programa**. Os arquivos estão lá, no disco, com o mesmo tamanho e as mesmas
+    permissões de sempre. O `ls` é que decidiu não citá-los, e uma opção o faz
+    mudar de ideia.
+
+    As opções não mudam o que existe — mudam **o que é dito**. Guarde isso:
+    quando algo "não aparece", a primeira pergunta é se você perguntou direito.
+
+    O `~` é outra coisa parecida, mas do lado do shell: ele é substituído por
+    `/home/aluno` **antes** de o `ls` rodar. O `ls` nunca vê o til.
+
+  anatomia:
+    - linha: "ls -lah ~"
+      partes:
+        - trecho: "ls"
+          papel: comando
+          explica: "lista o conteúdo de um diretório"
+        - trecho: "-l"
+          papel: opcao
+          explica: "formato longo: uma linha por arquivo, com permissões, dono, tamanho e data"
+        - trecho: "-a"
+          papel: opcao
+          explica: "inclui os nomes começados por ponto, que ficam ocultos por padrão"
+        - trecho: "-h"
+          papel: opcao
+          explica: "tamanhos em unidade legível (K, M, G) em vez de bytes crus; só faz efeito junto com -l"
+        - trecho: "~"
+          papel: argumento
+          explica: "o diretório a listar; o shell troca o til por /home/aluno antes de chamar o ls"
+
+  demonstracao:
+    - comando: "ls"
+      saida: |-2
+        README.txt
+        configs
+        documentos
+        downloads
+        logs
+        scripts
+      nota: "A visão padrão: só nomes, em grade. É rápida de ler e esconde tudo o que interessa num diagnóstico."
+    - comando: "ls -l"
+      saida: |-2
+        total 24
+        -rw-r--r-- 1 aluno aluno  492 Aug  2 15:13 README.txt
+        drwxr-xr-x 2 aluno aluno 4096 Aug  2 15:14 configs
+        drwxr-xr-x 2 aluno aluno 4096 Aug  2 15:13 documentos
+        drwxr-xr-x 2 aluno aluno 4096 Aug  2 15:14 downloads
+        drwxr-xr-x 2 aluno aluno 4096 Aug  2 15:13 logs
+        drwxr-xr-x 2 aluno aluno 4096 Aug  2 15:14 scripts
+      nota: "Uma linha por arquivo. Da esquerda para a direita: tipo e permissões, número de links, dono, grupo, tamanho em bytes, data de modificação e nome. O `d` na primeira coluna diz que é diretório."
+    - comando: "ls -a"
+      saida: |-2
+        .
+        ..
+        .bash_logout
+        .bashrc
+        .profile
+        README.txt
+        configs
+        documentos
+        downloads
+        logs
+        scripts
+      nota: "Aparecem `.bashrc` e `.profile`, que estavam ali o tempo todo. Também aparecem `.` (este diretório) e `..` (o de cima) — vamos usar os dois na próxima lição."
+    - comando: "ls -lah"
+      saida: |-2
+        total 44K
+        drwxr-x--- 1 aluno aluno 4.0K Aug  2 15:14 .
+        drwxr-xr-x 1 root  root  4.0K Aug  2 16:28 ..
+        -rw-r--r-- 1 aluno aluno  220 Mar 31  2024 .bash_logout
+        -rw-r--r-- 1 aluno aluno 3.7K Mar 31  2024 .bashrc
+        -rw-r--r-- 1 aluno aluno  807 Mar 31  2024 .profile
+        -rw-r--r-- 1 aluno aluno  492 Aug  2 15:13 README.txt
+        drwxr-xr-x 2 aluno aluno 4.0K Aug  2 15:14 configs
+        drwxr-xr-x 2 aluno aluno 4.0K Aug  2 15:13 documentos
+        drwxr-xr-x 2 aluno aluno 4.0K Aug  2 15:14 downloads
+        drwxr-xr-x 2 aluno aluno 4.0K Aug  2 15:13 logs
+        drwxr-xr-x 2 aluno aluno 4.0K Aug  2 15:14 scripts
+      nota: "As três opções juntas, agrupadas depois de um único hífen. `-lah` é idêntico a `-l -a -h`."
+    - comando: "ls -l ~/logs"
+      saida: |-2
+        total 8
+        -rw-r--r-- 1 aluno aluno 567 Aug  2 15:13 chamadas.log
+        -rw-r--r-- 1 aluno aluno 729 Aug  2 15:13 sistema.log
+      nota: "Passando um diretório como argumento, o `ls` lista aquele em vez do atual — sem precisar sair de onde você está."
+
+  pratica_guiada:
+    - instrucao: "Liste a sua pasta pessoal do jeito mais simples possível."
+      modelo: "____"
+      resposta: "ls"
+    - instrucao: "Agora peça os detalhes: quem é dono, que tamanho tem, quando mudou."
+      modelo: "ls ____"
+      resposta: "ls -l"
+    - instrucao: "Faça aparecer também o que está oculto."
+      modelo: "ls ____"
+      resposta: "ls -la"
+    - instrucao: "Liste a pasta logs/ sem sair de onde você está."
+      modelo: "ls -l ____"
+      resposta: "ls -l ~/logs"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Um colega diz que gravou `.env` na pasta e que o arquivo sumiu. `ls` não mostra nada com esse nome. O que você faz antes de acreditar que sumiu?"
+      resposta: |
+        `ls -a`. O nome começa com ponto, então o `ls` sem `-a` não o cita. O
+        arquivo provavelmente está lá — o que faltou foi perguntar direito.
+    - tipo: predicao
+      pergunta: "Na saída de `ls -l`, uma linha começa com `drwxr-xr-x`. Sem olhar mais nada, o que você já sabe sobre esse item?"
+      resposta: |
+        O `d` inicial diz que é um **diretório**, não um arquivo. Por isso
+        comandos que esperam arquivo (como `cat`) vão responder `Is a directory`
+        se você apontar para ele.
+    - tipo: transferencia
+      pergunta: "Você precisa da listagem mais recente primeiro. `ls --help` mostra a opção `-t`. Como fica o comando com detalhe e ordenado por tempo?"
+      resposta: |
+        `ls -lt`. As opções se acumulam no mesmo hífen, e `-t` reordena a mesma
+        informação que `-l` já mostrava.
+
 objetivo_md: |
   `ls` sozinho mostra pouco. As três opções que você vai usar todo dia:
 
@@ -77,13 +226,19 @@ dicas:
 
 erros_comuns:
   - match: "cannot access|No such file or directory"
-    explica: "O caminho passado ao `ls` não existe. `~` é um atalho para /home/aluno; confira a grafia."
+    digita: "ls -l ~/documento"
+    mensagem: "ls: cannot access '/home/aluno/documento': No such file or directory"
+    causa: "o shell já trocou o `~` por /home/aluno e entregou o caminho pronto; foi o ls que não encontrou nada ali"
+    conserto: "confira o nome com `ls ~` antes — no seed a pasta é `documentos`, no plural"
     categoria: sintaxe
   - match: "invalid option"
-    explica: "Uma das letras não é uma opção válida do `ls`. Consulte `ls --help` para ver a lista real."
+    digita: "ls -lz"
+    mensagem: "ls: invalid option -- 'z'"
+    causa: "num grupo como `-lz` cada letra é uma opção separada, e `z` não existe no ls"
+    conserto: "veja a lista real das opções válidas com `ls --help`"
     categoria: flag_errada
 
 cards_revisao:
   - ls-l-formato-longo
   - ls-a-arquivos-ocultos
-  - ls-h-tamanho-legivel
+  - til-e-a-pasta-pessoal

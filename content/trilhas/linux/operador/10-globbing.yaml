@@ -7,6 +7,158 @@ capacidade: "Sei selecionar vários arquivos com um padrão e sei proteger do sh
 xp: 18
 prereqs: [linux-op-09-ajuda]
 
+ensina:
+  conceitos:
+    - id: o-shell-expande-o-glob-nao-o-comando
+      titulo: "quem expande *.log é o shell, antes de o comando rodar — o comando recebe a lista pronta"
+    - id: aspas-protegem-nome-com-espaco
+      titulo: "espaço separa argumentos; aspas mantêm o nome inteiro como um argumento só"
+    - id: echo-testa-o-padrao-antes
+      titulo: "echo na frente do padrão mostra no que ele expande, sem executar nada"
+  comandos: []
+
+ensino:
+  gancho: |
+    São 200 arquivos de captura numa pasta e você precisa dos `.log` numa
+    pasta separada para anexar ao chamado. Copiar um por um está fora de
+    questão.
+
+    E há a outra metade do problema: um dos arquivos se chama
+    `captura final.log`, com espaço no nome. Se você não souber protegê-lo, o
+    comando vai entender dois arquivos onde há um — e nenhum dos dois existe.
+
+  objetivos:
+    - verbo: executar
+      texto: "selecionar vários arquivos de uma vez com um padrão"
+    - verbo: explicar
+      texto: "dizer quem expande o padrão e em que momento"
+    - verbo: prever
+      texto: "prever no que um padrão expande antes de usá-lo num comando destrutivo"
+
+  modelo_mental: |
+    Este é o mesmo mecanismo do `{a,b}` da lição 5, e a pergunta continua sendo
+    a mesma: **quem está lendo este caractere?**
+
+    Quando você digita `cp ~/logs/*.log ~/relatorios/`, o `cp` **nunca vê o
+    asterisco**. O shell procura no disco os nomes que casam, monta a linha
+    real com todos eles, e só então chama o `cp`:
+
+    ```
+    cp ~/logs/chamadas.log ~/logs/sistema.log ~/relatorios/
+    ```
+
+    Duas consequências que explicam quase todo engano com glob:
+
+    1. Se o padrão **não casa com nada**, o bash não avisa: ele entrega o texto
+       literal `*.log` ao comando, e quem reclama é o comando, de um arquivo com
+       esse nome esquisito.
+    2. O comando não tem como saber que houve um padrão. Não existe "desfazer o
+       glob" depois.
+
+    O outro lado da moeda é o espaço. Para o shell, espaço é **separador de
+    argumentos**. `touch nota importante.txt` cria dois arquivos, porque são
+    dois argumentos. As aspas dizem "isto é uma palavra só".
+
+    Daí a prática que evita estrago: ponha `echo` na frente. Ele mostra a linha
+    exatamente como o shell a montou — o mesmo truque, agora valendo para
+    comandos que apagam.
+
+  anatomia:
+    - linha: "cp ~/logs/*.log ~/relatorios/"
+      partes:
+        - trecho: "cp"
+          papel: comando
+          explica: "recebe a lista já expandida; para ele são vários argumentos comuns"
+        - trecho: "~/logs/"
+          papel: argumento
+          explica: "a parte fixa do caminho; o shell só expande o pedaço com curinga"
+        - trecho: "*.log"
+          papel: operador
+          explica: "curinga lido pelo SHELL: casa qualquer sequência, inclusive vazia, terminada em .log"
+        - trecho: "~/relatorios/"
+          papel: argumento
+          explica: "destino; com vários arquivos de origem, ele precisa ser um diretório que já exista"
+
+  demonstracao:
+    - comando: "ls logs"
+      saida: |-2
+        chamadas.log
+        sistema.log
+      nota: "O que existe. Um padrão só é seguro depois de você saber sobre o que ele vai passar."
+    - comando: "echo logs/*.log"
+      saida: |-2
+        logs/chamadas.log logs/sistema.log
+      nota: "O passo que evita estrago: o `echo` mostra a lista que o shell montou. É exatamente isso que o próximo comando vai receber."
+    - comando: "echo logs/*.xyz"
+      saida: |-2
+        logs/*.xyz
+      nota: "Não casou com nada, e o bash devolveu o texto literal. É por isso que o erro seguinte fala de um arquivo chamado `*.xyz`."
+    - comando: "cp logs/*.xyz /tmp/"
+      saida: |-2
+        cp: cannot stat 'logs/*.xyz': No such file or directory
+      nota: "A consequência direta do passo anterior: o `cp` recebeu `logs/*.xyz` como nome de arquivo e reclamou dele."
+    - comando: "mkdir -p relatorios; cp logs/*.log relatorios/; ls relatorios"
+      saida: |-2
+        chamadas.log
+        sistema.log
+      nota: "Agora com um padrão que casa. O destino precisava existir antes — o `cp` cria arquivo, não diretório."
+    - comando: "touch nota importante.txt; ls"
+      saida: |-2
+        README.txt
+        configs
+        documentos
+        downloads
+        importante.txt
+        logs
+        nota
+        relatorios
+        scripts
+      nota: "O erro clássico: sem aspas o shell viu DOIS argumentos, e o touch criou dois arquivos — `nota` e `importante.txt`."
+    - comando: "rm nota importante.txt; touch 'nota importante.txt'; ls"
+      saida: |-2
+        README.txt
+        configs
+        documentos
+        downloads
+        logs
+        nota importante.txt
+        relatorios
+        scripts
+      nota: "Com aspas o nome inteiro chega como um argumento só, e o arquivo criado é um."
+
+  pratica_guiada:
+    - instrucao: "Veja o que existe em logs/, antes de escrever padrão nenhum."
+      modelo: "ls ____"
+      resposta: "ls ~/logs"
+    - instrucao: "Peça ao shell que mostre no que o padrão expande, sem executar nada de verdade."
+      modelo: "____ ~/logs/*.log"
+      resposta: "echo ~/logs/*.log"
+    - instrucao: "Crie a pasta de destino — o cp não a cria por você."
+      modelo: "mkdir ____ ~/relatorios"
+      resposta: "mkdir -p ~/relatorios"
+    - instrucao: "Crie um arquivo cujo nome tem espaço, protegendo-o do shell."
+      modelo: "touch ~/documentos/____"
+      resposta: "touch ~/documentos/'teste com espaco.txt'"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "A pasta tem `a.log`, `b.log` e `c.txt`. O comando `echo *.log` mostra o quê?"
+      resposta: |
+        `a.log b.log`. O shell resolve o padrão contra os nomes que existem e
+        monta a linha com os dois que casaram; o `c.txt` fica de fora.
+    - tipo: diagnostico
+      pergunta: "`rm *.bak` responde `rm: cannot remove '*.bak': No such file or directory`. O que isso diz sobre a pasta?"
+      resposta: |
+        Que não há nenhum arquivo `.bak` ali. Como o padrão não casou com nada,
+        o bash entregou o texto literal `*.bak` ao `rm`, que foi procurar um
+        arquivo com esse nome. Ou seja: não havia o que apagar.
+    - tipo: transferencia
+      pergunta: "Você vai rodar `rm *.tmp` numa pasta de produção. Que comando roda ANTES, e por quê?"
+      resposta: |
+        `echo *.tmp`. Ele mostra exatamente a lista que o `rm` vai receber, sem
+        apagar nada. Num comando irreversível, ver a linha expandida antes é a
+        diferença entre uma limpeza e um incidente.
+
 objetivo_md: |
   Quem expande `*.log` **não é o comando** — é o shell, antes de o comando
   rodar. Entender isso resolve metade dos enganos com nomes de arquivo.
@@ -94,10 +246,16 @@ dicas:
 
 erros_comuns:
   - match: "No such file or directory"
-    explica: "Se o padrão não casa com nada, o bash entrega o texto literal ao comando — e aí o comando reclama de um arquivo chamado `*.log`. Teste antes com `echo`."
+    digita: "cp logs/*.xyz /tmp/"
+    mensagem: "cp: cannot stat 'logs/*.xyz': No such file or directory"
+    causa: "o padrão não casou com nada e o bash entregou o texto literal ao comando; o cp foi procurar um arquivo cujo nome tem asterisco"
+    conserto: "teste o padrão antes com `echo logs/*.xyz` e veja no que ele expande"
     categoria: conceitual
   - match: "omitting directory"
-    explica: "O padrão pegou um diretório junto. Restrinja o padrão ou use `cp -r`."
+    digita: "cp logs/* relatorios/"
+    mensagem: "cp: -r not specified; omitting directory 'logs/antigos'"
+    causa: "o `*` casa com tudo, inclusive diretórios, e o cp sem -r recusa diretório"
+    conserto: "restrinja o padrão ao que interessa, como `logs/*.log`, em vez de acrescentar -r"
     categoria: flag_errada
 
 cards_revisao:

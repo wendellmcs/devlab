@@ -7,6 +7,155 @@ capacidade: "Sei inspecionar um log sem abrir editor, pegando só o pedaço que 
 xp: 20
 prereqs: [linux-op-07-remover]
 
+ensina:
+  conceitos:
+    - id: cat-emenda-arquivos
+      titulo: "cat com vários argumentos emenda os arquivos em sequência numa saída só"
+    - id: head-tail-recortam-as-pontas
+      titulo: "head e tail entregam só uma ponta do arquivo, sem carregar o resto"
+    - id: wc-l-conta-linhas
+      titulo: "wc -l conta linhas, e conta de um jeito diferente conforme receba nome ou conteúdo"
+  comandos: [head, tail, wc, file]
+
+ensino:
+  gancho: |
+    O cliente reclama de chamada caindo às 14h. O log do servidor tem 400 mil
+    linhas e 60 MB. Abrir isso num editor trava a sessão, e rolar a tela até
+    encontrar algo é hora paga sem entregar nada.
+
+    Você não precisa do arquivo. Precisa das últimas vinte linhas, ou de saber
+    quantas linhas ele tem, ou do começo dele. Cada uma dessas perguntas tem um
+    comando de uma linha.
+
+  objetivos:
+    - verbo: escolher
+      texto: "escolher entre cat, head, tail e wc conforme a pergunta que você tem"
+    - verbo: executar
+      texto: "recortar um pedaço específico de um arquivo grande sem abrir editor"
+    - verbo: explicar
+      texto: "dizer por que `wc -l arquivo` e `wc -l < arquivo` respondem diferente"
+
+  modelo_mental: |
+    Todos estes comandos trabalham com **fluxo de texto**, não com "o arquivo
+    aberto". Eles leem o que precisam e param — por isso `tail` num arquivo de
+    60 MB responde instantaneamente: ele não leu 60 MB.
+
+    A escolha vem da pergunta:
+
+    | Pergunta | Comando |
+    |---|---|
+    | como esse arquivo começa? | `head` |
+    | o que aconteceu por último? | `tail` |
+    | quanto disso existe? | `wc -l` |
+    | quero o conteúdo inteiro / emendar arquivos | `cat` |
+    | isso é texto mesmo? | `file` |
+
+    Um detalhe que confunde muita gente e vale instalar agora: quando você
+    escreve `wc -l arquivo.txt`, o `wc` recebe o **nome** e por isso pode
+    imprimi-lo ao lado do número. Quando você escreve `wc -l < arquivo.txt`,
+    quem abre o arquivo é o **shell** — o `wc` recebe só o conteúdo, não sabe
+    de onde veio, e imprime o número sozinho.
+
+    É a mesma ideia do `>` da primeira lição, na direção contrária: o `<`
+    troca o fio do canal de ENTRADA.
+
+  anatomia:
+    - linha: "tail -n 2 ~/logs/chamadas.log"
+      partes:
+        - trecho: "tail"
+          papel: comando
+          explica: "mostra o fim de um fluxo de texto"
+        - trecho: "-n"
+          papel: opcao
+          explica: "diz que o próximo valor é a quantidade de linhas"
+        - trecho: "2"
+          papel: argumento
+          explica: "o valor da opção -n: duas linhas"
+        - trecho: "~/logs/chamadas.log"
+          papel: argumento
+          explica: "o arquivo a ler; sem ele, o tail leria da entrada padrão"
+
+  demonstracao:
+    - comando: "file logs/chamadas.log"
+      saida: |-2
+        logs/chamadas.log: ASCII text
+      nota: "Antes de despejar na tela: o `file` olha o conteúdo, não a extensão. Um `.log` que na verdade é binário travaria o terminal."
+    - comando: "wc -l logs/chamadas.log"
+      saida: |-2
+        8 logs/chamadas.log
+      nota: "O tamanho da pergunta antes da resposta. Repare que o nome do arquivo aparece ao lado do número."
+    - comando: "wc -l < logs/chamadas.log"
+      saida: |-2
+        8
+      nota: "O mesmo número, sem o nome. Aqui quem abriu o arquivo foi o shell, e o `wc` só recebeu o conteúdo — ele não sabe o nome para imprimir."
+    - comando: "head -n 3 logs/chamadas.log"
+      saida: |-2
+        2026-07-28 08:12:03 ramal=1001 destino=1002 status=ATENDIDA duracao=42
+        2026-07-28 08:15:47 ramal=1003 destino=9911 status=OCUPADO duracao=0
+        2026-07-28 09:02:11 ramal=1002 destino=1005 status=ATENDIDA duracao=317
+      nota: "As três primeiras linhas. Serve para reconhecer o formato do log sem ler o arquivo inteiro."
+    - comando: "tail -n 2 logs/chamadas.log"
+      saida: |-2
+        2026-07-28 13:22:09 ramal=1002 destino=1003 status=ATENDIDA duracao=155
+        2026-07-28 14:50:41 ramal=1001 destino=1002 status=ATENDIDA duracao=21
+      nota: "As duas últimas. Num incidente em andamento, é quase sempre por aqui que se começa."
+    - comando: "cat logs/chamadas.log logs/sistema.log"
+      saida: |-2
+        2026-07-28 08:12:03 ramal=1001 destino=1002 status=ATENDIDA duracao=42
+        2026-07-28 08:15:47 ramal=1003 destino=9911 status=OCUPADO duracao=0
+        2026-07-28 09:02:11 ramal=1002 destino=1005 status=ATENDIDA duracao=317
+        2026-07-28 09:31:58 ramal=1001 destino=1004 status=NAO_ATENDIDA duracao=0
+        2026-07-28 10:44:20 ramal=1005 destino=1001 status=ATENDIDA duracao=88
+        2026-07-28 11:07:35 ramal=1004 destino=9911 status=FALHA duracao=0
+        2026-07-28 13:22:09 ramal=1002 destino=1003 status=ATENDIDA duracao=155
+        2026-07-28 14:50:41 ramal=1001 destino=1002 status=ATENDIDA duracao=21
+        2026-07-28 07:00:01 INFO  servico de telefonia iniciado
+        2026-07-28 07:00:04 INFO  perfil interno escutando em 5060/udp
+        2026-07-28 07:00:04 INFO  perfil externo escutando em 5080/udp
+        2026-07-28 07:14:22 WARN  registro do ramal 1004 expirou
+        2026-07-28 08:11:59 INFO  ramal 1001 registrado
+        2026-07-28 08:15:47 WARN  destino 9911 devolveu 486 Busy Here
+        2026-07-28 09:31:58 WARN  ramal 1004 nao atendeu em 30s
+        2026-07-28 11:07:35 ERROR gateway saida-1 sem resposta: 503 Service Unavailable
+        2026-07-28 11:07:36 INFO  failover para gateway saida-2
+        2026-07-28 12:00:00 INFO  rotacao de log concluida
+        2026-07-28 13:22:09 INFO  chamada 1002 -> 1003 estabelecida
+        2026-07-28 15:45:10 ERROR falha ao gravar voicemail: No space left on device
+      nota: "Dois arquivos, uma saída contínua: é daí que vem o nome (concatenate). A ordem da saída é a ordem dos argumentos."
+
+  pratica_guiada:
+    - instrucao: "Descubra o tamanho do log antes de decidir como lê-lo."
+      modelo: "wc ____ ~/logs/chamadas.log"
+      resposta: "wc -l ~/logs/chamadas.log"
+    - instrucao: "Veja como o arquivo começa, para reconhecer o formato."
+      modelo: "____ -n 3 ~/logs/chamadas.log"
+      resposta: "head -n 3 ~/logs/chamadas.log"
+    - instrucao: "Veja o que aconteceu por último."
+      modelo: "____ -n 2 ~/logs/chamadas.log"
+      resposta: "tail -n 2 ~/logs/chamadas.log"
+    - instrucao: "Confirme que o arquivo é mesmo texto antes de despejá-lo inteiro na tela."
+      modelo: "____ ~/logs/chamadas.log"
+      resposta: "file ~/logs/chamadas.log"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Um arquivo tem 10 linhas. Quantas linhas `head -n 3 arquivo | wc -l` conta?"
+      resposta: |
+        Três. O `head` corta o fluxo nas três primeiras linhas, e o `wc` só vê
+        o que o `head` deixou passar — não o arquivo original.
+    - tipo: diagnostico
+      pergunta: "`wc -l log.txt` responde `42 log.txt`, mas `wc -l < log.txt` responde só `42`. Por que a diferença?"
+      resposta: |
+        No primeiro, o `wc` recebeu o NOME do arquivo e o imprime ao lado da
+        contagem. No segundo, quem abriu o arquivo foi o shell: o `wc` recebeu
+        só o conteúdo pela entrada padrão e não tem nome nenhum para imprimir.
+    - tipo: transferencia
+      pergunta: "Um log de 2 GB está crescendo agora e você precisa das últimas linhas. Por que `tail` é seguro aqui e `cat` não?"
+      resposta: |
+        O `tail` lê só o fim do arquivo e responde na hora. O `cat` despejaria
+        2 GB no terminal — travando a sessão e, no fim, mostrando só o que
+        coube na rolagem.
+
 objetivo_md: |
   Num servidor, log grande é regra. Abrir tudo na tela raramente ajuda.
 
@@ -118,15 +267,19 @@ dicas:
 
 erros_comuns:
   - match: "Is a directory"
-    explica: "Você apontou o comando para um diretório em vez de um arquivo. Confirme com `ls -l` o que é o quê."
+    digita: "cat logs"
+    mensagem: "cat: logs: Is a directory"
+    causa: "logs é um diretório, e estes comandos leem fluxo de texto — um diretório não é um"
+    conserto: "aponte para um arquivo; use `ls -l logs` para ver o que há dentro"
     categoria: conceitual
   - match: "No such file or directory"
-    explica: "O caminho do log está errado. Ele fica em `~/logs/chamadas.log`."
+    digita: "head -n 3 chamadas.log"
+    mensagem: "head: cannot open 'chamadas.log' for reading: No such file or directory"
+    causa: "o caminho é relativo ao diretório atual, e o arquivo está em logs/, não aqui"
+    conserto: "use o caminho completo: ~/logs/chamadas.log"
     categoria: sintaxe
 
 cards_revisao:
   - cat-emenda-arquivos
-  - file-diz-o-tipo
-  - head-mostra-o-comeco
-  - tail-mostra-o-fim
+  - head-tail-recortam-as-pontas
   - wc-l-conta-linhas

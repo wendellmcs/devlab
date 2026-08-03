@@ -11,11 +11,20 @@ function armazem(): ArmazemDeProgresso {
 const BASE = { licaoId: 'linux-op-01-shell', trilha: 'linux', xpBase: 100 }
 
 describe('regras de XP', () => {
-  it('cobra mais caro conforme a dica é mais profunda', () => {
+  it('cobra mais caro conforme a dica é mais profunda, e a primeira é grátis', () => {
     assert.equal(xpDaConclusao(100, 0, false), 100)
-    assert.equal(xpDaConclusao(100, 1, false), 90)
+    // A dica 1 é empurrão conceitual, não comando: explicação não se paga.
+    assert.equal(xpDaConclusao(100, 1, false), 100)
     assert.equal(xpDaConclusao(100, 2, false), 75)
     assert.equal(xpDaConclusao(100, 3, false), 50)
+  })
+
+  it('a dica 1 não conta como ajuda para o XP, mas conta para a maestria', () => {
+    // Gratuita no preço e visível no histórico: quem abriu a dica 1 não
+    // resolveu igual a quem não abriu, e a métrica de autonomia registra isso.
+    assert.equal(penalidade(1, false), 0)
+    assert.equal(resolvidaSemAjuda(1, false), false)
+    assert.equal(resolvidaSemAjuda(0, false), true)
   })
 
   it('a IA custa o mesmo que a dica de nível 3', () => {

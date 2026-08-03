@@ -7,10 +7,20 @@
  * pode pagar mais que resolver o difícil.
  */
 
-/** Fração do XP descontada conforme o nível de dica mais fundo que foi revelado. */
+/**
+ * Fração do XP descontada conforme o nível de dica mais fundo que foi revelado.
+ *
+ * A dica 1 é GRÁTIS. Ela é um empurrão conceitual — reancora o modelo mental e
+ * não entrega comando nenhum. Cobrar por ela punia exatamente o comportamento
+ * que o curso quer: parar e reconsiderar o modelo antes de sair tentando
+ * sintaxe. Pior, cobrava por uma explicação que, desde o E-G-P, a lição já dá
+ * de graça no bloco 3 — o aluno pagava por ler de novo o que estava acima.
+ *
+ * As dicas 2 e 3 continuam custando: aí já é a forma do comando e a solução.
+ */
 export const CUSTO_DE_DICA: Record<number, number> = {
   0: 0,
-  1: 0.1,
+  1: 0,
   2: 0.25,
   3: 0.5,
 }

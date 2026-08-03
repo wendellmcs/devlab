@@ -7,6 +7,7 @@ import { LicaoSchema, type Licao } from '../conteudo/schema.ts'
 import { ExecutorDeChecks } from '../verificacao/executor.ts'
 import { ExtratorDeEstado } from '../estado/extrator.ts'
 import { GerenciadorDeLabs } from './gerenciador.ts'
+import { ENSINO_MINIMO } from '../conteudo/ensino-minimo.ts'
 
 /**
  * Teste de integração do Lab Manager: sobe container de verdade.
@@ -37,6 +38,7 @@ function licaoDeTeste(extra: Partial<Record<string, unknown>> = {}): Licao {
     capacidade: 'Sei rodar o teste.',
     objetivo_md: 'crie /home/aluno/alvo.txt',
     xp: 10,
+    ensino: ENSINO_MINIMO,
     verificar: [
       {
         descricao: 'alvo.txt existe',

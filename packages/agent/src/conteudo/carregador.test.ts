@@ -6,6 +6,7 @@ import { after, describe, it } from 'node:test'
 
 import { config } from '../config.ts'
 import { carregarConteudo } from './carregador.ts'
+import { ENSINO_MINIMO_YAML } from './ensino-minimo.ts'
 
 const temporarios: string[] = []
 
@@ -41,7 +42,7 @@ prereqs: [${prereqs.join(', ')}]
 verificar:
   - descricao: ok
     script: exit 0
-`
+${ENSINO_MINIMO_YAML}`
 }
 
 after(async () => {

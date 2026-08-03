@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { LicaoSchema } from '../conteudo/schema.ts'
 import { ehTransitorio } from './gerenciador.ts'
 import { CAPACIDADES_BASE, descreverLimites, montarHostConfig } from './limites.ts'
+import { ENSINO_MINIMO } from '../conteudo/ensino-minimo.ts'
 
 function labDe(extra: Record<string, unknown> = {}): ReturnType<typeof LicaoSchema.parse>['lab'] {
   return LicaoSchema.parse({
@@ -16,6 +17,7 @@ function labDe(extra: Record<string, unknown> = {}): ReturnType<typeof LicaoSche
     objetivo_md: 'x',
     xp: 1,
     verificar: [{ descricao: 'x', script: 'exit 0' }],
+    ensino: ENSINO_MINIMO,
     lab: extra,
   }).lab
 }
