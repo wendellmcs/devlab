@@ -14,7 +14,9 @@ import type {
   ResumoProgresso,
   Trilha,
 } from './tipos.ts'
+import { AvisoDeTtl, LIMIAR_AVISO_MS } from './componentes/AvisoDeTtl.tsx'
 import { Cabecalho, migalhasDe } from './componentes/Cabecalho.tsx'
+import { Confirmacao } from './componentes/Confirmacao.tsx'
 import { MapaDaTrilha, MapaTrilhas } from './componentes/Trilha.tsx'
 import { AreaDoAluno } from './componentes/AreaDoAluno.tsx'
 import { PainelObjetivo } from './componentes/PainelObjetivo.tsx'
@@ -26,8 +28,23 @@ const INTERVALO_ESTADO_MS = 2500
 
 type Tema = 'escuro' | 'claro'
 
+/**
+ * O que está pendente de confirmação, e o texto que a explica.
+ *
+ * `acao` é a função que só roda se o aluno confirmar. Guardar a AÇÃO, e não um
+ * enum de "tipo de confirmação", é o que impede a lista de casos de crescer em
+ * dois lugares — o diálogo não precisa saber o que ele está confirmando.
+ */
+type Pendente = {
+  titulo: string
+  rotuloConfirmar: string
+  perde: string[]
+  mantem: string[]
+  acao: () => void
+}
+
 export function App(): ReactElement {
-  const [rota, navegar] = useRota()
+  const [rota, navegarDireto] = useRota()
 
   const [doctor, setDoctor] = useState<RelatorioDoctor | null>(null)
   const [trilhas, setTrilhas] = useState<Trilha[]>([])
@@ -50,6 +67,18 @@ export function App(): ReactElement {
   })
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [falha, setFalha] = useState<string | null>(null)
+  const [pendente, setPendente] = useState<Pendente | null>(null)
+
+  /**
+   * Prazo do lab, ancorado no instante em que foi medido.
+   *
+   * A leitura de estado chega a cada 2,5 s; mostrar o valor dela cru faria o
+   * relógio pular de 3 em 3 segundos, o que parece defeito. Guardando quando a
+   * medida foi feita, o segundo corre localmente entre uma leitura e outra e o
+   * servidor continua sendo a fonte da verdade.
+   */
+  const [prazo, setPrazo] = useState<{ restanteMs: number; medidoEm: number } | null>(null)
+  const [agora, setAgora] = useState(() => Date.now())
 
   const terminal = useRef<ControleTerminal>(null)
   /** Sequência do último pedido de abrir lição, para descartar os atrasados. */
@@ -60,6 +89,12 @@ export function App(): ReactElement {
   /** Espelho de `licao`, pelo mesmo motivo, dentro do efeito de rota. */
   const licaoRef = useRef<Licao | null>(null)
   licaoRef.current = licao
+  /** Espelho da rota, para a guarda de saída não se recriar a cada navegação. */
+  const rotaRef = useRef<Rota>(rota)
+  rotaRef.current = rota
+  /** Espelho de quantas ações do aluno o servidor contou neste lab. */
+  const acoesRef = useRef(0)
+  acoesRef.current = estado?.acoesDoAluno ?? 0
 
   const alvoDeFoco = useRef<HTMLElement>(null)
   const primeiraTela = useRef(true)
@@ -115,6 +150,7 @@ export function App(): ReactElement {
   useEffect(() => {
     if (lab === null || lab.estado !== 'pronto') {
       setEstado(null)
+      setPrazo(null)
       return
     }
     let ativo = true
@@ -122,7 +158,9 @@ export function App(): ReactElement {
     const coletar = async (): Promise<void> => {
       try {
         const novo = await api.estadoDoLab(lab.id)
-        if (ativo) setEstado(novo)
+        if (!ativo) return
+        setEstado(novo)
+        if (novo.ttl !== null) setPrazo({ restanteMs: novo.ttl.restanteMs, medidoEm: Date.now() })
       } catch {
         // lab pode ter sido destruído entre um tick e outro: o próximo resolve
       }
@@ -135,6 +173,34 @@ export function App(): ReactElement {
       window.clearInterval(timer)
     }
   }, [lab])
+
+  /** Restante calculado agora, entre uma leitura do servidor e a próxima. */
+  const restanteMs =
+    prazo === null ? null : Math.max(0, prazo.restanteMs - (agora - prazo.medidoEm))
+
+  // O segundo só corre quando o aviso está perto de aparecer. Um tick por
+  // segundo o tempo todo re-renderizaria a árvore inteira para mostrar um
+  // relógio que ninguém está vendo — e o app já tem um ciclo de 2,5 s.
+  const contando = restanteMs !== null && restanteMs <= LIMIAR_AVISO_MS + 60_000
+  useEffect(() => {
+    if (!contando) return
+    const t = window.setInterval(() => setAgora(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [contando])
+
+  const manterVivo = useCallback(async () => {
+    const l = labRef.current
+    if (l === null) return
+    setOcupado('Renovando o lab…')
+    try {
+      const renovado = await api.renovarLab(l.id)
+      setPrazo({ restanteMs: renovado.ociosidadeRestanteMs, medidoEm: Date.now() })
+    } catch (e) {
+      relatarFalha(e)
+    } finally {
+      setOcupado(null)
+    }
+  }, [relatarFalha])
 
   /**
    * A ROTA manda no lab: entrar numa lição sobe o lab dela, sair destrói.
@@ -200,7 +266,51 @@ export function App(): ReactElement {
     alvoDeFoco.current?.focus()
   }, [rota])
 
-  const resetar = useCallback(async () => {
+  /**
+   * Navegação com guarda de saída — WCAG 3.3.6.
+   *
+   * Sair da lição destrói o container: é a perda de trabalho mais fácil de
+   * causar sem querer no app inteiro, porque acontece com um clique na trilha
+   * de navegação e sem nenhum passo intermediário.
+   *
+   * A guarda só entra quando há o que perder — `acoesDoAluno > 0`, contado
+   * pelo agente. Abrir a lição e voltar não pergunta nada; perguntar sempre
+   * treinaria o aluno a confirmar no automático, e aí a confirmação deixa de
+   * proteger no dia em que importa.
+   *
+   * Cobre os links do app. O botão VOLTAR do navegador não passa por aqui: só
+   * seria interceptável desfazendo a navegação já ocorrida e reempilhando o
+   * histórico, e um histórico remendado quebra de formas piores do que o
+   * problema que resolveria. Está registrado como limite conhecido no
+   * `docs/ROTEIRO-TECLADO.md`.
+   */
+  const navegar = useCallback<Navegar>(
+    (destino, opcoes) => {
+      const atual = rotaRef.current
+      const saindoDaLicao =
+        atual.tela === 'licao' && !(destino.tela === 'licao' && destino.licaoId === atual.licaoId)
+
+      if (!saindoDaLicao || labRef.current === null || acoesRef.current === 0) {
+        navegarDireto(destino, opcoes)
+        return
+      }
+
+      setPendente({
+        titulo: 'Sair da lição destrói o lab',
+        rotuloConfirmar: 'Sair e destruir o lab',
+        perde: [
+          'os arquivos e diretórios que você criou dentro do container',
+          'o histórico do terminal desta sessão',
+        ],
+        mantem: ['o XP já creditado', 'o progresso e as dicas já reveladas desta lição'],
+        acao: () => navegarDireto(destino, opcoes),
+      })
+    },
+    [navegarDireto],
+  )
+
+  const resetarAgora = useCallback(async () => {
+    const lab = labRef.current
     if (lab === null) return
     setOcupado('Recriando o lab…')
     setFalha(null)
@@ -214,7 +324,31 @@ export function App(): ReactElement {
     } finally {
       setOcupado(null)
     }
-  }, [lab, relatarFalha])
+  }, [relatarFalha])
+
+  /**
+   * Resetar é a ação mais destrutiva que o app oferece, e a mais fácil de
+   * apertar por engano: o botão fica no cabeçalho, ao lado de trocar tema e
+   * mudar a fonte. Diferente da saída da lição, aqui a confirmação é SEMPRE —
+   * quem reseta sem ter feito nada não perde nada, mas também não é
+   * interrompido por acaso, porque foi ele quem apertou.
+   */
+  const pedirReset = useCallback(() => {
+    setPendente({
+      titulo: 'Recriar o lab do zero',
+      rotuloConfirmar: 'Resetar o lab',
+      perde: [
+        'os arquivos e diretórios que você criou dentro do container',
+        'o histórico do terminal desta sessão',
+      ],
+      mantem: [
+        'o XP já creditado',
+        'o progresso e as dicas já reveladas desta lição',
+        'o enunciado e o estado inicial, que voltam exatamente como estavam',
+      ],
+      acao: () => void resetarAgora(),
+    })
+  }, [resetarAgora])
 
   const verificar = useCallback(async () => {
     if (lab === null) return
@@ -311,8 +445,45 @@ export function App(): ReactElement {
         aoAlternarTema={() => setTema((t) => (t === 'escuro' ? 'claro' : 'escuro'))}
         navegar={navegar}
         ocupado={ocupado}
-        aoResetar={lab !== null ? () => void resetar() : undefined}
+        aoResetar={lab !== null ? pedirReset : undefined}
       />
+
+      {rota.tela === 'licao' && lab !== null && restanteMs !== null && (
+        <AvisoDeTtl
+          restanteMs={restanteMs}
+          aoManterVivo={() => void manterVivo()}
+          ocupado={ocupado !== null}
+        />
+      )}
+
+      <Confirmacao
+        aberto={pendente !== null}
+        titulo={pendente?.titulo ?? ''}
+        rotuloConfirmar={pendente?.rotuloConfirmar ?? ''}
+        aoCancelar={() => setPendente(null)}
+        aoConfirmar={() => {
+          const acao = pendente?.acao
+          setPendente(null)
+          acao?.()
+        }}
+      >
+        {pendente !== null && (
+          <>
+            <p className="confirmacao__perde">Você perde:</p>
+            <ul>
+              {pendente.perde.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+            <p className="confirmacao__mantem">Continua com você:</p>
+            <ul>
+              {pendente.mantem.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </Confirmacao>
 
       {falha !== null && (
         <div className="alerta" role="alert">

@@ -1,0 +1,128 @@
+/* ── interrupções: confirmação destrutiva e aviso de prazo ─────────────────
+ *
+ * As duas telas que existem para EVITAR perda de trabalho (WCAG 3.3.6 e
+ * 2.2.6). Nenhuma delas usa fundo tingido: fundo colorido eleva a superfície e
+ * derruba o contraste do texto que vive em cima — é o que reprovou metade da
+ * paleta antiga. A cor semântica fica na borda, que cai em 1.4.11 (3:1) e não
+ * tem exigência AAA.
+ */
+
+/* ── confirmação ─────────────────────────────────────────────────────────── */
+
+.confirmacao {
+  /* `<dialog>` nativo: margin auto é o que o centraliza quando aberto por
+   * showModal(). Sem isto ele encosta no topo da janela. */
+  margin: auto;
+  inline-size: min(34rem, calc(100vw - 2 * var(--e-6)));
+  padding: var(--e-5);
+  background: var(--sup-2);
+  color: var(--texto-1);
+  border: 1px solid var(--borda-forte);
+  border-radius: var(--raio-g);
+}
+
+.confirmacao::backdrop {
+  /* Escurece o fundo sem tingir: o diálogo é a única coisa operável agora, e o
+   * `inert` que o showModal() aplica precisa de contrapartida visual. */
+  background: rgb(0 0 0 / 0.6);
+}
+
+.confirmacao__titulo {
+  margin: 0 0 var(--e-4);
+  font-size: var(--t-lg);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.confirmacao__corpo ul {
+  margin: 0 0 var(--e-4);
+  padding-inline-start: var(--e-5);
+  color: var(--texto-1);
+}
+
+.confirmacao__corpo li {
+  margin-block: var(--e-1);
+}
+
+.confirmacao__perde,
+.confirmacao__mantem {
+  margin: 0 0 var(--e-2);
+  font-weight: 600;
+}
+
+/* Barra lateral no lugar de cor no texto: o rótulo continua a 7:1. */
+.confirmacao__perde {
+  border-inline-start: 3px solid var(--vermelho);
+  padding-inline-start: var(--e-2);
+}
+
+.confirmacao__mantem {
+  border-inline-start: 3px solid var(--verde);
+  padding-inline-start: var(--e-2);
+}
+
+.confirmacao__acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--e-3);
+  margin-block-start: var(--e-5);
+}
+
+/* 44×44 (2.5.5) explícito: aqui o alvo errado custa o trabalho do aluno. */
+.confirmacao .botao {
+  min-block-size: 44px;
+}
+
+/* Perigo pela BORDA. Vermelho de fundo com texto por cima não fecha 7:1 em
+ * nenhuma das duas direções — e a cor não é a única marca: o rótulo do botão
+ * diz o que vai acontecer ("Resetar o lab", "Sair e destruir o lab"). */
+.botao--perigo {
+  border-color: var(--vermelho);
+}
+
+.botao--acento {
+  border-color: var(--azul);
+}
+
+/* ── aviso de prazo ──────────────────────────────────────────────────────── */
+
+.ttl {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  padding: var(--e-3) var(--e-4);
+  background: var(--sup-2);
+  border-inline-start: 3px solid var(--ambar);
+  border-block-end: 1px solid var(--borda-media);
+}
+
+.ttl__icone {
+  color: var(--ambar);
+}
+
+.ttl__texto {
+  flex: 1;
+  min-inline-size: 0;
+  margin: 0;
+}
+
+/* Tabular para o relógio não dançar a cada segundo. */
+.ttl__relogio {
+  font-family: var(--fonte-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--texto-2);
+}
+
+.ttl .botao {
+  min-block-size: 44px;
+  white-space: nowrap;
+}
+
+/* Nota do painel de estado: o limite dito ANTES de faltar pouco. */
+.estado__nota {
+  margin-block: var(--e-4) 0;
+  padding-block-start: var(--e-3);
+  border-block-start: 1px solid var(--borda-sutil);
+  color: var(--texto-2);
+  font-size: var(--t-sm);
+}

@@ -7,6 +7,7 @@ import './estilos/tokens.css'
 import './estilos/base.css'
 import './estilos/navegacao.css'
 import './estilos/ensino.css'
+import './estilos/avisos.css'
 import './styles.css'
 import { App } from './App.tsx'
 

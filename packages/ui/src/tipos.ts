@@ -132,9 +132,16 @@ export type LabInfo = {
   workdir: string
   estado: 'subindo' | 'pronto' | 'erro' | 'destruido'
   criadoEm: number
+  /** Última ação DELIBERADA do aluno — a leitura do painel não conta. */
   ultimaAtividade: number
+  /** Quantas ações deliberadas o aluno já fez neste lab. */
+  acoesDoAluno: number
   resets: number
   limites: Licao['lab']['limites']
+  /** Quanto falta para a coleta por ociosidade, no instante da resposta. */
+  ociosidadeRestanteMs: number
+  /** O TTL configurado no agente, em ms. */
+  ttlMs: number
   erro?: string
 }
 
@@ -161,6 +168,11 @@ export type EstadoDoLab = {
   truncada: boolean
   recursos: Recursos | null
   atualizadoEm: number
+  /** Relógio da coleta por ociosidade; viaja junto porque esta é a rota que a
+   *  interface já repete a cada 2,5 s. */
+  ttl: { restanteMs: number; totalMs: number } | null
+  /** Ações deliberadas do aluno neste lab — só o agente sabe contar. */
+  acoesDoAluno: number | null
 }
 
 export type CategoriaDeErro =

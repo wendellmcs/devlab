@@ -242,7 +242,7 @@ Não escreva "AAA" sem cumprir a lista.
 | **1.4.9** Imagens de texto | nenhum texto dentro de imagem |
 | **2.1.3** Teclado (Sem Exceção) | tudo operável por teclado, incluindo redimensionar painéis e sair do terminal |
 | **2.2.3** Sem tempo | nenhum limite de tempo na interface |
-| **2.2.6** Timeout | o lab morre por TTL de 45 min — **avise antes** e ofereça manter vivo; perder trabalho em silêncio reprova |
+| **2.2.6** Timeout | **Feito** — aviso a 5 min do fim, com botão "Manter o lab vivo", e a regra dos 45 min declarada no painel de estado desde o começo. O relógio passou a medir ação do aluno: a leitura automática do painel o zerava a cada 2,5 s e o TTL nunca disparava |
 | **2.3.3** Animação por interação | toda animação não essencial desligável |
 | **2.4.8** Localização | breadcrumb + posição na trilha |
 | **2.4.9** Finalidade do link (só o link) | o texto do link basta; nada de "clique aqui" |
@@ -253,7 +253,7 @@ Não escreva "AAA" sem cumprir a lista.
 | **3.1.5** Nível de leitura | enunciados legíveis por quem está começando; jargão explicado na primeira aparição |
 | **3.2.5** Mudança sob demanda | nada muda de contexto sozinho |
 | **3.3.5** Ajuda | ajuda contextual acessível de qualquer tela |
-| **3.3.6** Prevenção de erro (Todos) | resetar e destruir lab confirmam e explicam o que se perde |
+| **3.3.6** Prevenção de erro (Todos) | **Feito** — resetar e sair da lição abrem um `<dialog>` modal que ENUMERA o que se perde e o que fica. Sair só pergunta se o aluno mexeu no lab: perguntar sempre treina a confirmar no automático. Limite conhecido: o botão voltar do navegador não passa pela guarda |
 
 **Dispensados, com justificativa obrigatória no relatório:** `1.2.6` (língua de
 sinais), `1.2.7`, `1.2.8`, `1.2.9`, `1.4.7` — não há mídia nem áudio no produto.

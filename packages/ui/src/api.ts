@@ -90,6 +90,10 @@ export const api = {
   resetarLab: (labId: string) =>
     pedir<LabInfo>(`/api/labs/${encodeURIComponent(labId)}/reset`, { method: 'POST' }),
 
+  /** "Manter o lab vivo": zera o relógio de ociosidade, não toca no container. */
+  renovarLab: (labId: string) =>
+    pedir<LabInfo>(`/api/labs/${encodeURIComponent(labId)}/renovar`, { method: 'POST' }),
+
   destruirLab: (labId: string) =>
     pedir<{ destruido: boolean }>(`/api/labs/${encodeURIComponent(labId)}`, {
       method: 'DELETE',

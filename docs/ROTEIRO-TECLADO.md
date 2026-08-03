@@ -46,10 +46,13 @@ o fim.** Em cada passo, anote o que o leitor de tela falou.
 | 8 | `Tab` até "Entrar no terminal", `Enter` | O foco entra no terminal e o shell responde às teclas |
 | 9 | Dentro do terminal, `Tab` | O shell recebe o `Tab` (completa o comando). O foco **não** sai — isto é intencional |
 | 10 | `Esc` | O foco volta para fora do terminal, no marcador "Fim do terminal" |
-| 11 | `Tab` até "Resetar lab", `Enter` | Explica o que se perde antes de recriar (WCAG 3.3.6) |
-| 12 | `Tab` até "Trilhas" no breadcrumb, `Enter` | Volta ao mapa; o lab é destruído |
-| 13 | `Tab` até o placar de XP, `Enter` | Abre `/aluno` |
-| 14 | `Alt+←` (voltar do navegador) | Volta ao mapa, sem deixar container órfão |
+| 11 | `Tab` até "Resetar lab", `Enter` | Abre a confirmação, que **enumera** o que se perde e o que fica (WCAG 3.3.6). O foco vai para "Cancelar" |
+| 12 | Dentro do diálogo, `Tab` | O foco circula **dentro** dele; a página de trás está inerte |
+| 13 | `Esc` | Fecha sem resetar, e o foco **volta** para o botão "Resetar lab" |
+| 14 | `Tab` até "Trilhas" no breadcrumb, `Enter` | Se você mexeu no lab, pergunta antes de sair e destruir; se não mexeu, sai direto |
+| 15 | Com o aviso de prazo na tela, `Tab` até "Manter o lab vivo", `Enter` | O aviso some e o prazo volta ao cheio (WCAG 2.2.1/2.2.6) |
+| 16 | `Tab` até o placar de XP, `Enter` | Abre `/aluno` |
+| 17 | `Alt+←` (voltar do navegador) | Volta ao mapa, sem deixar container órfão |
 
 ### Em cada tela, confira também
 
@@ -104,9 +107,34 @@ Uma linha por execução. Não apague as antigas: a comparação é o valor.
 - [ ] **`screenReaderMode` do xterm.js** — a saída do shell é anunciada? É o
       ponto mais difícil do produto e o único que exige o app com Docker de pé
       (`npm run iniciar`), não o servidor de fixtures.
-- [ ] **Passo 11** — "Resetar lab" ainda não confirma nem explica o que se
-      perde (WCAG 3.3.6, Prevenção de Erro). Está no roteiro como alvo, não
-      como aprovado.
+
+### 2026-08-03 — confirmação destrutiva (3.3.6) e prazo do lab (2.2.6)
+
+**Automático — passou:**
+
+- `npm run a11y:axe` — 18 auditorias (**9** telas × 2 temas), 0 violações. As
+  duas telas novas são estados efêmeros que ninguém conferiria à mão: o aviso
+  de prazo (existe por 5 minutos na vida real) e o diálogo de confirmação
+  aberto.
+- `npm run a11y:teclado` — passos 1 a 17, incluindo foco inicial no botão que
+  não destrói, `Tab` preso no diálogo, `Esc` devolvendo o foco a quem abriu, e
+  cancelar a saída mantendo o aluno na lição.
+- Contra o app REAL (agente + Docker + terminal de verdade, não fixture):
+  arquivo criado pelo PTY sobrevive ao cancelar e some ao confirmar; o
+  contador de resets sobe; a guarda de saída dispara só depois de o aluno ter
+  mexido no lab.
+
+**Defeito de fundo achado no caminho:** o relógio de ociosidade media o APP,
+não o aluno. O painel de estado lê a árvore de arquivos a cada 2,5 s e essa
+leitura zerava o TTL — ou seja, o lab de 45 min nunca era coletado com a tela
+aberta, e qualquer aviso construído sobre esse relógio jamais apareceria.
+Agora só ação deliberada conta (`OpcoesExec.atividade`).
+
+**Limite conhecido, registrado de propósito:** a guarda de saída cobre os links
+do app, não o **botão voltar do navegador**. Interceptá-lo exigiria desfazer a
+navegação já ocorrida e reempilhar o histórico; um histórico remendado quebra
+de formas piores do que o problema que resolveria. Quem usa `Alt+←` sai e
+perde o container — como antes.
 
 ---
 

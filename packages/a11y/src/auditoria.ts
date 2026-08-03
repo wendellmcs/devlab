@@ -50,7 +50,7 @@ type Tela = {
   /** Espera até a tela estar de fato montada — evita auditar o esqueleto. */
   pronta: string
   /** Estado do servidor de fixtures antes de carregar. */
-  fixture?: 'doctor-quebrado'
+  fixture?: 'doctor-quebrado' | 'ttl-apertado' | 'aluno-trabalhou'
   /** Interações que levam a tela ao estado a auditar. */
   preparar?: (page: Page) => Promise<void>
 }
@@ -106,6 +106,30 @@ const TELAS: Tela[] = [
     },
   },
   {
+    // WCAG 2.2.6: o aviso de que o lab está para ser coletado. Estado de tela
+    // que só existe por alguns minutos na vida real e por isso nunca seria
+    // conferido à mão — tem barra semântica, relógio e um botão de ação.
+    nome: 'lição com o aviso de prazo do lab',
+    caminho: `/licao/${LICAO_AUDITADA}`,
+    pronta: '.licao__titulo',
+    fixture: 'ttl-apertado',
+    preparar: async (page) => {
+      await page.locator('.ttl').waitFor({ state: 'visible', timeout: 15_000 })
+    },
+  },
+  {
+    // WCAG 3.3.6: a confirmação de reset, com o diálogo modal ABERTO. É o
+    // estado em que o resto da página fica inerte — se o axe achar algo aqui,
+    // achou dentro do único lugar operável da tela.
+    nome: 'lição com a confirmação de reset aberta',
+    caminho: `/licao/${LICAO_AUDITADA}`,
+    pronta: '.licao__titulo',
+    preparar: async (page) => {
+      await page.getByRole('button', { name: /Resetar lab/ }).click()
+      await page.locator('dialog.confirmacao[open]').waitFor({ state: 'visible', timeout: 10_000 })
+    },
+  },
+  {
     // Primeira tela de quem instalou errado. Se ela reprovar, reprova para
     // exatamente o público que menos consegue contornar.
     nome: 'diagnóstico do ambiente com falha',
@@ -114,6 +138,13 @@ const TELAS: Tela[] = [
     fixture: 'doctor-quebrado',
   },
 ]
+
+/** Query do controle de fixtures para cada estado pedido pela tela. */
+const QUERY_DE_FIXTURE: Record<NonNullable<Tela['fixture']>, string> = {
+  'doctor-quebrado': '?doctor=quebrado',
+  'ttl-apertado': '?ttl=apertado',
+  'aluno-trabalhou': '?trabalhou=1',
+}
 
 type Achado = { tela: string; tema: Tema; violacoes: Result[] }
 
@@ -281,7 +312,7 @@ async function principal(): Promise<number> {
         const page = await contexto.newPage()
         try {
           await page.request.post(
-            `${url}/api/_fixture/estado${tela.fixture === 'doctor-quebrado' ? '?doctor=quebrado' : ''}`,
+            `${url}/api/_fixture/estado${tela.fixture === undefined ? '' : QUERY_DE_FIXTURE[tela.fixture]}`,
           )
           await page.goto(`${url}${tela.caminho}`, { waitUntil: 'domcontentloaded' })
           await page.locator(tela.pronta).first().waitFor({ state: 'visible', timeout: 15_000 })

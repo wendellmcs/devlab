@@ -15,6 +15,9 @@ import { LICAO_AUDITADA, subirServidorDeFixtures } from './servidor.ts'
  */
 
 const JANELA = { width: 1440, height: 900 }
+/** URL do servidor de fixtures. Preenchida em `principal()`: alguns passos
+ *  precisam recarregar a tela num estado que só o controle do fixture cria. */
+const BASE = { url: '' }
 /** Teto de Tabs por busca: a tela mais densa tem ~16 paradas. */
 const MAX_TABS = 60
 
@@ -179,10 +182,45 @@ const PASSOS: Passo[] = [
     },
   },
   {
-    nome: 'resetar o lab',
+    nome: 'resetar o lab pede confirmação, e cancelar devolve o foco',
     executar: async (page) => {
       const tabs = await tabularAte(page, porNome(/Resetar lab/i))
       checar(tabs > 0, `o botão Resetar lab é alcançável por Tab (${tabs} paradas)`)
+
+      await page.keyboard.press('Enter')
+      const aberto = await page.locator('dialog.confirmacao[open]').count()
+      checar(aberto > 0, 'Enter abriu a confirmação em vez de destruir o container')
+
+      // WCAG 3.3.6 só vale se a confirmação DISSER o que se perde. Um "tem
+      // certeza?" vazio transfere a decisão sem transferir a informação.
+      const corpo = (await page.locator('.confirmacao__corpo').innerText()).toLowerCase()
+      checar(
+        corpo.includes('perde') || corpo.includes('arquivos'),
+        'a confirmação enumera o que se perde e o que fica',
+      )
+
+      // O foco tem de estar DENTRO do diálogo, e no botão que não destrói.
+      const dentro = await focoAtual(page)
+      checar(/Cancelar/i.test(dentro.nome), `o foco inicial é o botão que não destrói (foi: "${dentro.nome}")`)
+
+      // Modal de verdade: Tab não escapa para a página de trás.
+      await page.keyboard.press('Tab')
+      const aindaDentro = await page.evaluate(
+        () => document.activeElement?.closest('dialog.confirmacao') !== null,
+      )
+      checar(aindaDentro, 'Tab continua dentro do diálogo (o resto da página está inerte)')
+
+      // WCAG 2.1.2: Esc fecha. E o foco volta para quem abriu — sem isso, quem
+      // usa teclado é despejado no topo do documento depois de cancelar.
+      await page.keyboard.press('Escape')
+      const fechado = await page.locator('dialog.confirmacao[open]').count()
+      checar(fechado === 0, 'Esc fecha a confirmação')
+
+      const devolvido = await focoAtual(page)
+      checar(
+        /Resetar lab/i.test(devolvido.nome),
+        `o foco voltou para o botão que abriu (foi: "${devolvido.nome}")`,
+      )
     },
   },
   {
@@ -199,6 +237,64 @@ const PASSOS: Passo[] = [
       await page.keyboard.press('Enter')
       await page.waitForURL(/\/aluno$/, { timeout: 10_000 })
       checar(true, 'Enter no placar abriu /aluno')
+    },
+  },
+  {
+    nome: 'o aviso de prazo do lab é operável por teclado',
+    executar: async (page) => {
+      // A vida real leva 40 minutos para chegar neste estado; o fixture o
+      // entrega pronto. O que se testa é o DOM do aviso, não o relógio.
+      await page.request.post(`${BASE.url}/api/_fixture/estado?ttl=apertado`)
+      await page.goto(`${BASE.url}/licao/${LICAO_AUDITADA}`, { waitUntil: 'domcontentloaded' })
+      await page.locator('.ttl').waitFor({ state: 'visible', timeout: 15_000 })
+      checar(true, 'com pouco tempo restante, o aviso aparece sozinho')
+
+      // WCAG 4.1.3 / 2.2.1: o aviso é anunciado, e a saída é alcançável.
+      const vivo = await page.locator('[role="alert"] .ttl__texto, .ttl[role="alert"]').count()
+      checar(vivo > 0, 'o aviso está numa região que o leitor de tela anuncia')
+
+      const tabs = await tabularAte(page, porNome(/Manter o lab vivo/i))
+      checar(tabs > 0, `"Manter o lab vivo" é alcançável por Tab (${tabs} paradas)`)
+
+      await page.keyboard.press('Enter')
+      await page.locator('.ttl').waitFor({ state: 'hidden', timeout: 10_000 })
+      checar(true, 'Enter renovou o prazo e o aviso saiu da tela')
+    },
+  },
+  {
+    nome: 'sair da lição com trabalho feito pede confirmação, e cancelar não sai',
+    executar: async (page) => {
+      await page.request.post(`${BASE.url}/api/_fixture/estado?trabalhou=1`)
+      await page.goto(`${BASE.url}/licao/${LICAO_AUDITADA}`, { waitUntil: 'domcontentloaded' })
+      await page.locator('.licao__titulo').waitFor({ state: 'visible', timeout: 15_000 })
+      // A contagem de ações do aluno chega na primeira leitura de estado; a
+      // nota do painel só existe depois dela, então serve de sinal de chegada.
+      await page.locator('.estado__nota').waitFor({ state: 'visible', timeout: 15_000 })
+
+      const tabs = await tabularAte(page, porLink('/'))
+      checar(tabs > 0, `o breadcrumb "Trilhas" é alcançável por Tab (${tabs} paradas)`)
+      await page.keyboard.press('Enter')
+
+      const aberto = await page.locator('dialog.confirmacao[open]').count()
+      checar(aberto > 0, 'sair com trabalho feito abre a confirmação em vez de destruir o lab')
+
+      await page.keyboard.press('Escape')
+      checar(
+        /\/licao\//.test(page.url()),
+        `cancelar mantém o aluno na lição (URL: ${new URL(page.url()).pathname})`,
+      )
+
+      // E confirmar leva mesmo embora — senão a guarda seria uma parede.
+      await page.keyboard.press('Enter')
+      await page.locator('dialog.confirmacao[open]').waitFor({ state: 'attached', timeout: 10_000 })
+      const confirmar = await tabularAte(page, porNome(/Sair e destruir/i))
+      checar(confirmar > 0, `o botão de confirmar é alcançável por Tab (${confirmar} paradas)`)
+      await page.keyboard.press('Enter')
+      await page.waitForURL(/\/$/, { timeout: 10_000 })
+      checar(true, 'confirmar saiu da lição')
+
+      // Devolve o fixture ao padrão: os passos seguintes não herdam este estado.
+      await page.request.post(`${BASE.url}/api/_fixture/estado`)
     },
   },
   {
@@ -220,6 +316,7 @@ const PASSOS: Passo[] = [
 
 async function principal(): Promise<number> {
   const { url, fechar } = await subirServidorDeFixtures()
+  BASE.url = url
   let navegador: Browser | undefined
 
   try {

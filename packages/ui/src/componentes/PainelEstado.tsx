@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 
 import type { EstadoDoLab, LabInfo, NoArvore } from '../tipos.ts'
+import { RegraDeTtl } from './AvisoDeTtl.tsx'
 
 type Props = {
   estado: EstadoDoLab | null
@@ -79,6 +80,10 @@ export function PainelEstado({ estado, lab }: Props): ReactElement {
                 <NoDaArvore no={estado.arvore} raiz />
               </ul>
             )}
+
+            {/* A regra dita antes de morder: WCAG 2.2.6 quer que o limite seja
+                conhecido desde o começo, não só anunciado quando falta pouco. */}
+            {estado.ttl !== null && <RegraDeTtl totalMs={estado.ttl.totalMs} />}
           </>
         )}
       </div>
