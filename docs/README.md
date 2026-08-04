@@ -23,6 +23,7 @@ prompt. O código e o conteúdo em `content/` seguem o PRD, nunca o contrário.
 | §4.2 State Extractor | `packages/agent/src/estado/extrator.ts` |
 | §4.2 Progress Store | `packages/agent/src/progresso/store.ts` |
 | §4.3 Imagens de lab | `images/linux-base/` |
+| §4.7 Capacidades por lab | `limites.ts` → `CAPACIDADES_BASE`, campo `lab.capacidades` |
 | §4.4 Verificação de tarefas | `content/trilhas/linux/**` (campo `verificar`) |
 | §4.5 Reset e injeção de falha | `gerenciador.ts` → `reiniciar()`, campo `lab.break` |
 | §4.7 Segurança e isolamento | `packages/agent/src/lab/limites.ts` |

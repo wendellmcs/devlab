@@ -11,9 +11,15 @@ set -euo pipefail
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIR_IMAGENS="$RAIZ/images"
 
-# Imagens disponíveis nesta fase. Cada linha: <diretorio>:<tag>
-IMAGENS_FASE_0=(
+# Imagens já escritas. Cada linha: <diretorio>:<tag>
+#
+# Construir TODAS é o padrão, e é por isso que a lista não é filtrada por fase:
+# quem instala o DevLab não sabe em que fase cada trilha está, e uma imagem que
+# falta só aparece quando o aluno abre a lição e o lab não sobe. Quem quiser
+# economizar espaço ou tempo constrói uma só, pelo nome do diretório.
+IMAGENS=(
   "linux-base:devlab/linux-base:1.0.0"
+  "voip-tools:devlab/voip-tools:1.0.0"
 )
 
 # Base das imagens de lab. O padrão é fixo de propósito: o container traz o
@@ -79,7 +85,7 @@ for arg in "$@"; do
 done
 encontrou=0
 
-for entrada in "${IMAGENS_FASE_0[@]}"; do
+for entrada in "${IMAGENS[@]}"; do
   dir="${entrada%%:*}"
   tag="${entrada#*:}"
   if [ -z "$alvo" ] || [ "$alvo" = "$dir" ]; then
@@ -89,8 +95,8 @@ for entrada in "${IMAGENS_FASE_0[@]}"; do
 done
 
 if [ "$encontrou" -eq 0 ]; then
-  echo "erro: imagem '$alvo' desconhecida nesta fase." >&2
-  echo "disponíveis: ${IMAGENS_FASE_0[*]%%:*}" >&2
+  echo "erro: imagem '$alvo' desconhecida." >&2
+  echo "disponíveis: ${IMAGENS[*]%%:*}" >&2
   exit 1
 fi
 
