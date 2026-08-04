@@ -66,13 +66,41 @@ def roteiro(comandos: list[str]) -> str:
     return "\n".join(linhas) + "\n"
 
 
+# Espelho de CAPACIDADES_BASE em packages/agent/src/lab/limites.ts.
+CAPACIDADES_BASE = (
+    "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "SETGID", "SETUID", "KILL",
+)
+
+
+def argumentos_do_lab(lab: dict) -> list[str]:
+    """
+    Reproduz o perfil de segurança que o lab de verdade dá ao container.
+
+    Sem isto a demonstração rodava com as capacidades PADRÃO do Docker, que não
+    são as do lab: sobra CAP_NET_RAW (então o tcpdump enganosamente funcionava)
+    e falta CAP_NET_ADMIN (então o `iptables` de uma lição de falha injetada
+    falhava aqui e só aqui). A saída gravada tem de vir do mesmo ambiente em
+    que o aluno vai digitar, senão o arquivo que existe para impedir deriva
+    passa a ser a fonte dela.
+    """
+    extras = [c.upper().removeprefix("CAP_") for c in lab.get("capacidades") or []]
+    args = [
+        "--network", "none" if lab.get("rede", "nenhuma") == "nenhuma" else "bridge",
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges=true",
+    ]
+    for c in (*CAPACIDADES_BASE, *extras):
+        args += ["--cap-add", c]
+    return args
+
+
 def executar(licao: dict, comandos: list[str]) -> list[str]:
     lab = licao.get("lab") or {}
     imagem = lab.get("imagem", "devlab/linux-base:1.0.0")
     usuario = lab.get("usuario", "aluno")
 
     criado = docker([
-        "run", "-d", "--rm", "--network", "none",
+        "run", "-d", "--rm", *argumentos_do_lab(lab),
         "--entrypoint", "sleep", imagem, "600",
     ])
     if criado.returncode != 0:

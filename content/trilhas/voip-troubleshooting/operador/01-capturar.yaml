@@ -1,0 +1,242 @@
+id: voip-op-01-capturar
+trilha: voip-troubleshooting
+nivel: operador
+ordem: 1
+titulo: "Gravar a chamada antes que ela passe"
+capacidade: "Sei gravar o tráfego de uma chamada num arquivo e provar que ele está lá."
+xp: 20
+# Sem prereqs de propósito: o PRD §7 diz que quem já é da área entra direto
+# nesta trilha. Por isso nenhum bloco visível ao aluno usa comando que outra
+# trilha ensina — o que ela precisa, ela ensina.
+prereqs: []
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  # root, e não `aluno`: capturar pacote exige CAP_NET_RAW, e um processo
+  # não-root não a herda (o Docker não expõe o conjunto ambient, e o
+  # no-new-privileges do lab recusa file capability). Ver decisão 20.
+  usuario: root
+  workdir: /root
+  # A chamada inteira acontece em 127.0.0.1, dentro deste container.
+  rede: nenhuma
+  capacidades: [NET_RAW]
+
+ensina:
+  conceitos:
+    - id: captura-e-um-arquivo
+      titulo: "capturar é gravar os pacotes num arquivo, que se lê depois quantas vezes quiser"
+    - id: captura-escolhe-uma-interface
+      titulo: "toda captura escuta UMA interface; escolher a errada devolve arquivo vazio"
+    - id: captura-precisa-vir-antes
+      titulo: "a captura tem de estar de pé ANTES do problema; o que já passou não volta"
+  comandos: [tcpdump, devlab-chamada]
+
+ensino:
+  gancho: |
+    O cliente liga: "a chamada caiu de novo agora há pouco". Você abre o
+    terminal do servidor e olha. Está tudo normal — porque já passou.
+
+    Sem captura, a conversa vira opinião: você acha que foi a operadora, a
+    operadora acha que foi o seu PABX, e não há como provar. Com captura, a
+    chamada fica gravada pacote a pacote, e você reabre o arquivo quantas
+    vezes precisar — inclusive para mandar para a operadora.
+
+    Esta lição é a base de todas as outras da trilha: nada se diagnostica sem
+    ter gravado primeiro.
+
+  objetivos:
+    - verbo: executar
+      texto: "gravar o tráfego de uma chamada num arquivo .pcap"
+    - verbo: identificar
+      texto: "identificar em qual interface a chamada acontece"
+    - verbo: explicar
+      texto: "explicar por que a captura precisa começar antes do problema"
+
+  modelo_mental: |
+    O `tcpdump` é um **gravador** ligado a uma tomada da rede.
+
+    Três ideias, e só três:
+
+    - **A tomada é a interface.** A máquina tem várias (`lo`, `eth0`…), e o
+      gravador escuta **uma**. Se você grava na tomada errada, o arquivo sai
+      vazio — e vazio não quer dizer "não houve chamada", quer dizer "não era
+      aqui". Neste lab os dois lados da chamada estão no mesmo container e
+      conversam por `127.0.0.1`, então a interface é a **loopback**: `lo`.
+
+    - **O arquivo é uma gravação.** `-w arquivo.pcap` grava; depois `-r
+      arquivo.pcap` reproduz. A gravação não expira, não muda e pode ser
+      aberta em outra máquina, por outra pessoa, meses depois.
+
+    - **O gravador tem de estar rodando na hora.** Esta é a que mais custa
+      caro: o `tcpdump` não sabe o que aconteceu antes de você apertar o
+      play. Por isso o procedimento real é sempre **primeiro deixar a captura
+      de pé, depois reproduzir o problema** — e não o contrário.
+
+    É por isso que o comando fica ocupado quando você o roda: ele está
+    gravando, e continua até você mandar parar.
+
+  anatomia:
+    - linha: "tcpdump -i lo -w /root/captura.pcap"
+      partes:
+        - trecho: "tcpdump"
+          papel: comando
+          explica: "o gravador de pacotes"
+        - trecho: "-i"
+          papel: opcao
+          explica: "diz qual interface escutar; sem ele o tcpdump escolhe uma sozinho, e pode não ser a sua"
+        - trecho: "lo"
+          papel: argumento
+          explica: "a interface loopback — onde a chamada deste lab acontece, porque os dois lados são o mesmo host"
+        - trecho: "-w"
+          papel: opcao
+          explica: "grava os pacotes crus num arquivo em vez de imprimir na tela"
+        - trecho: "/root/captura.pcap"
+          papel: argumento
+          explica: "o arquivo de saída; a extensão .pcap é convenção, o que importa é o conteúdo"
+
+  demonstracao:
+    - comando: "devlab-chamada"
+      saida: |-2
+        → atendendo em 127.0.0.1:5060 (aguardando INVITE)
+        → ligando de 127.0.0.1:5061
+        ✔ chamada concluída — quem ligou contabilizou 1 chamada(s) bem-sucedida(s)
+      nota: "Primeiro, veja uma chamada acontecer. Este comando origina uma chamada de verdade dentro do lab: um lado atende, o outro liga, e os dois trocam áudio."
+    - comando: "tcpdump -i lo -w /root/exemplo.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "A ordem é o conteúdo da lição: o gravador sobe primeiro (`&` o deixa rodando ao fundo), a chamada acontece depois, e só então o gravador é parado. Inverta a ordem e o arquivo sai vazio."
+    - comando: "tcpdump -r /root/exemplo.pcap -t -n -c 4"
+      saida: |-2
+        reading from file /root/exemplo.pcap, link-type EN10MB (Ethernet), snapshot length 262144
+        IP 127.0.0.1.5061 > 127.0.0.1.5060: SIP: INVITE sip:service@127.0.0.1:5060 SIP/2.0
+        IP 127.0.0.1.5060 > 127.0.0.1.5061: SIP: SIP/2.0 180 Ringing
+        IP 127.0.0.1.5060 > 127.0.0.1.5061: SIP: SIP/2.0 200 OK
+        IP 127.0.0.1.5061 > 127.0.0.1.5060: SIP: ACK sip:service@127.0.0.1:5060 SIP/2.0
+      nota: "A gravação reproduzida. `-r` lê o arquivo e `-c 4` mostra só os quatro primeiros pacotes. O `-n` é o que mais importa: sem ele o tcpdump traduz porta em nome de serviço e imprime `sip-tls` para a 5061 — que aqui não tem TLS nenhum. Em telefonia, sempre `-n`."
+
+  pratica_guiada:
+    - instrucao: "Deixe o gravador de pé na loopback, gravando em /root/treino.pcap, ao fundo."
+      modelo: "tcpdump -i ____ -w /root/treino.pcap -q 2>/dev/null &"
+      resposta: "tcpdump -i lo -w /root/treino.pcap -q 2>/dev/null &"
+    - instrucao: "Com o gravador rodando, faça a chamada acontecer."
+      modelo: "____ -q"
+      resposta: "devlab-chamada -q"
+    - instrucao: "Pare o gravador para que ele feche o arquivo."
+      modelo: "pkill -x ____"
+      resposta: "pkill -x tcpdump"
+    - instrucao: "Reproduza os três primeiros pacotes da sua gravação, sem horário e sem traduzir porta em nome."
+      modelo: "tcpdump ____ /root/treino.pcap -t -n -c 3"
+      resposta: "tcpdump -r /root/treino.pcap -t -n -c 3"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você gravou durante a chamada, mas o arquivo tem zero pacote. O que investigar primeiro?"
+      resposta: |
+        A interface. Um arquivo vazio quase nunca significa "não houve
+        tráfego" — significa que o gravador estava na tomada errada. Neste lab
+        a chamada é entre dois processos do mesmo host, então ela só aparece na
+        `lo`; gravar numa interface de rede externa devolveria exatamente isso:
+        nada.
+    - tipo: predicao
+      pergunta: "Você roda o tcpdump, ele parece travar e não devolve o terminal. O que está acontecendo?"
+      resposta: |
+        Nada de errado: ele **está gravando**. O tcpdump fica no ar até alguém
+        mandar parar. É por isso que, num procedimento real, ele vai para o
+        segundo plano (`&`) ou para outra aba do terminal — para você poder
+        reproduzir o problema enquanto ele grava.
+    - tipo: transferencia
+      pergunta: "Um cliente relata que a chamada falha 'de vez em quando'. Como você monta a captura?"
+      resposta: |
+        Deixa a captura de pé **antes**, e por muito mais tempo do que a
+        chamada dura — porque não se sabe quando o problema vai acontecer. O
+        erro clássico é começar a gravar só depois que o cliente reclama:
+        aí o evento já passou, e o que se grava é o funcionamento normal.
+
+objetivo_md: |
+  Gravar é o primeiro gesto de todo diagnóstico de telefonia. Sem gravação não
+  há prova — e sem prova a discussão com a operadora não tem fim.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `-i lo` | escuta a interface loopback, onde este lab conversa |
+  | `-w arquivo` | grava os pacotes crus num arquivo |
+  | `-r arquivo` | reproduz um arquivo já gravado |
+  | `-c N` | para depois de N pacotes |
+  | `-n` | não traduz endereço nem porta em nome — em telefonia, sempre |
+  | `-t` | omite o horário na hora de reproduzir |
+  | `&` | deixa o comando rodando ao fundo e devolve o terminal |
+
+  ### Sua tarefa
+
+  Grave uma chamada inteira no arquivo `/root/captura.pcap`.
+
+  A ordem importa: deixe a captura rodando **antes** de originar a chamada com
+  `devlab-chamada`, e só pare a captura depois que a chamada terminar. Se o
+  arquivo sair vazio, foi a ordem — ou a interface.
+
+verificar:
+  - descricao: "/root/captura.pcap existe e é um arquivo de captura legível"
+    script: |
+      #!/bin/bash
+      ARQ=/root/captura.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"captura.pcap nao existe","dica_diagnostica":"o tcpdump so cria o arquivo quando roda com -w; confira o caminho /root/captura.pcap"}'
+        exit 1
+      fi
+      # -r falha em arquivo truncado ou que nunca foi fechado.
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"o tcpdump so fecha o arquivo ao ser parado; encerre-o com pkill -x tcpdump antes de verificar"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "a captura contém o INVITE da chamada"
+    script: |
+      #!/bin/bash
+      ARQ=/root/captura.pcap
+      # A pergunta nao e "tem pacote?", e sim "tem a chamada?". Um arquivo com
+      # trafego qualquer, gravado fora da janela da chamada, reprova aqui — que
+      # e exatamente o erro de ordem que a licao ensina.
+      N=$(tshark -r "$ARQ" -Y sip.Method==INVITE 2>/dev/null | grep -c .)
+      if [ "${N:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao contem nenhum INVITE","dica_diagnostica":"o arquivo foi gravado, mas nao durante a chamada: deixe o tcpdump de pe ANTES de rodar devlab-chamada"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/captura.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+
+dicas:
+  - "O gravador precisa estar no ar antes da chamada. Um comando que termina em `&` continua rodando e devolve o terminal para você."
+  - "São três tempos: subir a captura em `lo` gravando com `-w`, originar a chamada, e parar a captura com `pkill -x tcpdump` para que o arquivo seja fechado."
+  - "tcpdump -i lo -w /root/captura.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump"
+
+erros_comuns:
+  - match: "You don't have permission to perform this capture|Operation not permitted"
+    digita: "tcpdump -i lo -w /root/captura.pcap"
+    mensagem: "tcpdump: lo: You don't have permission to perform this capture on that device"
+    causa: "capturar pacote é privilégio do sistema (CAP_NET_RAW); o usuário atual não o tem"
+    conserto: "nos labs desta trilha o shell já é root — se você trocou de usuário, volte para root"
+    categoria: permissao
+  - match: "No such device|SIOCGIFFLAGS"
+    digita: "tcpdump -i eth0 -w /root/captura.pcap"
+    mensagem: "tcpdump: eth0: No such device exists"
+    causa: "a interface pedida não existe neste lab; aqui a chamada é local e só existe a loopback"
+    conserto: "capture em `lo`, que é onde os dois lados desta chamada conversam"
+    categoria: flag_errada
+  - match: "0 packets captured"
+    digita: "tcpdump -i lo -w /root/captura.pcap -c 10"
+    mensagem: "0 packets captured"
+    causa: "a captura rodou numa janela em que não havia tráfego — normalmente porque começou depois da chamada"
+    conserto: "suba a captura primeiro e só então origine a chamada; o tcpdump não grava o passado"
+    categoria: conceitual
+
+cards_revisao:
+  - captura-e-um-arquivo
+  - captura-escolhe-uma-interface
+  - captura-precisa-vir-antes

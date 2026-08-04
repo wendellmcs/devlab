@@ -7,17 +7,31 @@ aluno trava. Este validador fecha esse buraco antes de a lição chegar ao lab:
   1. schema (chaves obrigatórias, kebab-case, dicas <= 3, um corpo por check)
   2. grafo de pré-requisitos: existência e ausência de ciclo
   3. `bash -n` em todo script de setup, break, check e solução
-  4. execução de verdade: monta uma árvore falsa a partir do seed da imagem,
-     roda os checks (têm de REPROVAR), aplica a solução de referência e roda
-     de novo (têm de APROVAR)
+  4. execução de verdade: roda os checks (têm de REPROVAR), aplica a solução de
+     referência e roda de novo (têm de APROVAR)
 
 O passo 4 é o que pega o erro caro: check que aprova sozinho — e portanto não
 mede nada — e dica de nível 3 que não é um comando executável.
 
+Ele tem dois motores, escolhidos pela imagem que a lição declara:
+
+  - `devlab/linux-base` roda numa ÁRVORE FALSA no host, montada a partir do
+    seed da imagem. É rápido e não exige Docker, que é o que mantém
+    `npm run valida` utilizável em qualquer máquina.
+  - qualquer outra imagem roda DENTRO DO CONTAINER de verdade, com a rede e as
+    capacidades que a lição declara. Uma lição de VoIP não tem árvore falsa
+    possível: o estado que ela mede é uma chamada acontecendo, e emular isso no
+    host seria testar a emulação.
+
+Sem Docker, as lições do segundo grupo não são exercitadas — e isso é dito em
+alto e bom som no resumo, nunca confundido com "passou". Ver a decisão 12 em
+docs/DESIGN-VOIP.md: "0 violações" e "a regra nunca rodou" não podem imprimir
+a mesma linha verde.
+
 Uso:
     python3 scripts/valida-conteudo.py [--so-schema]
 
-Requisitos: python3 com PyYAML e bash. Nenhum container é criado.
+Requisitos: python3 com PyYAML e bash. Docker só se houver lição que o exija.
 """
 from __future__ import annotations
 
@@ -37,6 +51,21 @@ except ImportError:
 RAIZ = Path(__file__).resolve().parent.parent
 CONTENT = RAIZ / "content"
 SEED = RAIZ / "images/linux-base/seed/home/aluno"
+
+# A imagem que tem árvore falsa equivalente no host. Qualquer outra é
+# exercitada dentro do container de verdade.
+IMAGEM_COM_ARVORE_FALSA = "devlab/linux-base:1.0.0"
+
+# Espelho de CAPACIDADES_BASE em packages/agent/src/lab/limites.ts.
+#
+# Duplicar é feio, e a alternativa era pior: o validador teria de importar
+# TypeScript para descobrir com que capacidades o lab nasce. Se as duas listas
+# divergirem, o sintoma é um check que passa aqui e falha no lab — por isso o
+# teste de integração do agente cobre as capacidades de verdade, e aqui fica só
+# o necessário para reproduzir o ambiente.
+CAPACIDADES_BASE = (
+    "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "SETGID", "SETUID", "KILL",
+)
 
 NIVEIS = ("operador", "construtor", "engenheiro")
 CHAVES_OBRIGATORIAS = (
@@ -462,12 +491,126 @@ def roda(corpo: str, home: Path):
     )
 
 
-def valida_execucao(licoes) -> int:
+def docker(args: list[str], entrada: str | None = None, timeout: int = 180):
+    """Chama o docker pelo grupo, que é como esta máquina o alcança."""
+    comando = " ".join(f"'{a}'" if " " in a else a for a in ["docker", *args])
+    return subprocess.run(
+        ["sg", "docker", "-c", comando],
+        input=entrada, text=True, capture_output=True, timeout=timeout,
+    )
+
+
+_docker_ok: bool | None = None
+
+
+def docker_disponivel() -> bool:
+    global _docker_ok
+    if _docker_ok is None:
+        try:
+            _docker_ok = docker(["version", "--format", "{{.Server.Version}}"],
+                                timeout=30).returncode == 0
+        except Exception:
+            _docker_ok = False
+    return _docker_ok
+
+
+def argumentos_do_lab(lab: dict) -> list[str]:
+    """Reproduz o perfil que `montarHostConfig` dá ao lab de verdade."""
+    extras = [c.upper().removeprefix("CAP_") for c in lab.get("capacidades") or []]
+    args = [
+        "--network", "none" if lab.get("rede", "nenhuma") == "nenhuma" else "bridge",
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges=true",
+    ]
+    for c in (*CAPACIDADES_BASE, *extras):
+        args += ["--cap-add", c]
+    return args
+
+
+def exercita_no_container(l: dict, solucao: str) -> bool | None:
+    """
+    Roda a lição na imagem que ela declara. `None` = não deu para exercitar.
+
+    Mesma prova do motor de árvore falsa — os checks reprovam antes e aprovam
+    depois — só que no ambiente real: a imagem da lição, a rede que ela pediu e
+    as capacidades que ela pediu. Para VoIP é a única forma honesta, porque o
+    estado medido é uma chamada, não um arquivo.
+    """
+    lid = l.get("id", "?")
+    lab = l.get("lab") or {}
+    imagem = lab.get("imagem", IMAGEM_COM_ARVORE_FALSA)
+
+    if not docker_disponivel():
+        avisos.append(f"{lid}: exige container ({imagem}) e o Docker não respondeu "
+                      f"— NÃO foi exercitada")
+        return None
+    if docker(["image", "inspect", imagem], timeout=60).returncode != 0:
+        avisos.append(f"{lid}: a imagem '{imagem}' não está no cache local "
+                      f"(rode: npm run imagens) — NÃO foi exercitada")
+        return None
+
+    criado = docker([
+        "run", "-d", "--rm", *argumentos_do_lab(lab),
+        "-w", lab.get("workdir", "/root"),
+        "--entrypoint", "sleep", imagem, "900",
+    ], timeout=120)
+    if criado.returncode != 0:
+        erro(f"{lid}: o container não subiu — {criado.stderr.strip()[:200]}")
+        return False
+    cid = criado.stdout.strip()
+
+    def roda_dentro(corpo: str, usuario: str):
+        return docker(["exec", "-i", "-u", usuario, cid, "bash", "-s"],
+                      entrada=corpo, timeout=180)
+
+    try:
+        for rotulo in ("setup", "break"):
+            corpo = lab.get(rotulo)
+            if corpo:
+                r = roda_dentro(corpo, "root")
+                if r.returncode != 0:
+                    erro(f"{lid}: o {rotulo} falhou no container — "
+                         f"{(r.stderr or r.stdout).strip()[:200]}")
+                    return False
+
+        checks = [c["script"] for c in l["verificar"]]
+
+        if all(roda_dentro(c, "root").returncode == 0 for c in checks):
+            erro(f"{lid}: os checks já aprovam ANTES da solução — não medem nada")
+            return False
+
+        r = roda_dentro(solucao, lab.get("usuario", "aluno"))
+        if r.returncode != 0:
+            erro(f"{lid}: a solução de referência falhou no container — "
+                 f"{(r.stderr or r.stdout).strip()[:300]}")
+            return False
+
+        reprovados = [
+            (i, x) for i, x in enumerate(roda_dentro(c, "root") for c in checks)
+            if x.returncode != 0
+        ]
+        if reprovados:
+            for i, x in reprovados:
+                desc = l["verificar"][i].get("descricao", "?")
+                erro(f"{lid}: check[{i}] '{desc}' reprova DEPOIS da solução "
+                     f"(exit {x.returncode}) {x.stdout.strip()[:200]}")
+            return False
+
+        ok(f"{lid}: {len(checks)} check(s) reprovam antes e aprovam depois "
+           f"(container {imagem})")
+        return True
+    finally:
+        docker(["rm", "-f", cid], timeout=60)
+
+
+def valida_execucao(licoes) -> tuple[int, int]:
+    """Devolve (exercitadas, nao_exercitadas_por_falta_de_ambiente)."""
     if not SEED.is_dir():
         avisos.append(f"seed da imagem não encontrado em {SEED} — passo 4 pulado")
-        return 0
+        return 0, 0
 
     exercitadas = 0
+    sem_ambiente = 0
     for _, l in sorted(licoes, key=lambda t: t[1].get("ordem", 0)):
         lid = l.get("id", "?")
         dicas = l.get("dicas") or []
@@ -477,6 +620,15 @@ def valida_execucao(licoes) -> int:
             continue
         if any("script" not in c for c in l.get("verificar") or []):
             avisos.append(f"{lid}: usa check por 'run' (dentro da imagem) — não foi exercitada")
+            continue
+
+        # Lição de imagem própria não tem árvore falsa possível: vai ao container.
+        if (l.get("lab") or {}).get("imagem", IMAGEM_COM_ARVORE_FALSA) != IMAGEM_COM_ARVORE_FALSA:
+            resultado = exercita_no_container(l, solucao)
+            if resultado is None:
+                sem_ambiente += 1
+            elif resultado:
+                exercitadas += 1
             continue
 
         base, home = prepara_raiz()
@@ -512,7 +664,7 @@ def valida_execucao(licoes) -> int:
                 exercitadas += 1
         finally:
             shutil.rmtree(base, ignore_errors=True)
-    return exercitadas
+    return exercitadas, sem_ambiente
 
 
 def valida_catalogo(catalogo) -> None:
@@ -566,9 +718,10 @@ def main() -> int:
     ok(f"{total} scripts verificados com bash -n")
 
     exercitadas = 0
+    sem_ambiente = 0
     if not so_schema:
-        secao("execução dos checks (árvore falsa, sem Docker)")
-        exercitadas = valida_execucao(licoes)
+        secao("execução dos checks (árvore falsa no host; container quando a lição exige)")
+        exercitadas, sem_ambiente = valida_execucao(licoes)
 
     secao("catálogo de erros")
     valida_catalogo(catalogo)
@@ -578,9 +731,19 @@ def main() -> int:
         print(f"  \033[33m!\033[0m {a}")
     if not so_schema:
         print(f"  lições exercitadas de ponta a ponta: {exercitadas}/{len(licoes)}")
+        # Decisão 12: "passou" e "nunca rodou" não podem imprimir a mesma linha.
+        # Sem Docker o gate mais forte simplesmente não roda, e quem lê o resumo
+        # tem de saber disso sem precisar caçar um aviso amarelo no meio.
+        if sem_ambiente:
+            print(f"  \033[31m✘ {sem_ambiente} lição(ões) NÃO exercitada(s) por falta "
+                  f"de ambiente — o gate mais forte não rodou nelas\033[0m")
     if falhas:
         print(f"  \033[31m✘ {len(falhas)} problema(s)\033[0m")
         return 1
+    if sem_ambiente:
+        print(f"  \033[33m✔ conteúdo válido no que PÔDE ser verificado "
+              f"({sem_ambiente} lição(ões) sem ambiente)\033[0m")
+        return 0
     print("  \033[32m✔ conteúdo válido\033[0m")
     return 0
 

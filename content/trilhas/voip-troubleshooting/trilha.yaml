@@ -6,9 +6,7 @@ resumo: >-
 ordem: 6
 icone: "◉"
 fase: 3
-# Sem lições escritas ainda. Aparece no mapa como "em breve" — o aluno vê o
-# caminho inteiro em vez de concluir que o produto acabou na primeira trilha.
-situacao: em_breve
+situacao: disponivel
 capacidades:
   operador: "Sei ler um diálogo SIP no sngrep e identificar o código de resposta."
   construtor: "Sei capturar no ponto certo e provar se o problema é sinalização ou mídia."

@@ -96,6 +96,11 @@ RUN chmod 0755 /usr/local/bin/devlab-gerar-midia \
 # isso que /usr/share/sipp é o workdir dos labs desta trilha.
 COPY cenarios/ /usr/share/sipp/cenarios/
 
+# A chamada reproduzível que as lições mandam originar.
+COPY bin/ /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/devlab-* \
+ && mkdir -p /var/lib/devlab
+
 # O usuário `ubuntu` ocupa o uid 1000 na imagem oficial; aqui quem manda é o aluno.
 #
 # Atenção: nas lições desta trilha o shell do aluno roda como ROOT, não como
