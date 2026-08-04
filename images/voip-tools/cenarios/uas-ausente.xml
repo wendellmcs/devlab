@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<!-- 480 Temporarily Unavailable — o número existe, mas não há aparelho
+     alcançável agora. É o código do ramal que não está registrado, do celular
+     desligado, do softphone fechado.
+
+     Na prática é o mais confundido com 486: os dois chegam ao usuário como
+     "não consegui falar". A diferença está em quem responde — 486 é o destino
+     dizendo "estou aqui e ocupado", 480 é o servidor dizendo "não achei
+     ninguém para tocar". Por isso a investigação diverge: 480 manda olhar
+     REGISTRO, 486 manda olhar o aparelho. -->
+<scenario name="UAS temporariamente indisponível (480)">
+
+  <recv request="INVITE" crlf="true">
+  </recv>
+
+  <send>
+    <![CDATA[
+
+      SIP/2.0 480 Temporarily Unavailable
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv request="ACK" crlf="true">
+  </recv>
+
+  <timewait milliseconds="1000"/>
+
+</scenario>

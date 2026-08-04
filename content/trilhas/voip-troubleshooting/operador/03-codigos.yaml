@@ -1,0 +1,289 @@
+id: voip-op-03-codigos
+trilha: voip-troubleshooting
+nivel: operador
+ordem: 3
+titulo: "O número que diz por que a chamada não foi"
+capacidade: "Sei achar a resposta final de uma chamada recusada e dizer, pelo código, onde investigar."
+xp: 25
+prereqs: [voip-op-02-dialogo]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+  # O lab já nasce com o problema do cliente: o destino padrão deste lab recusa
+  # as chamadas. É de propósito que o nome do defeito NÃO aparece na linha de
+  # comando do aluno — se ele tivesse de digitar `--destino alguma-coisa`, o
+  # exercício viraria "leia o que você mesmo pediu". Aqui ele reproduz a
+  # chamada como o cliente a fez, e o código tem de sair da captura.
+  break: |
+    printf 'desconhecido\n' > /var/lib/devlab/destino-padrao
+
+ensina:
+  conceitos:
+    - id: resposta-provisoria-e-final
+      titulo: "1xx é aviso de andamento; quem decide a chamada é a resposta final"
+    - id: classe-do-codigo
+      titulo: "o primeiro dígito diz a classe: 4xx é o pedido que não pode ser atendido, 5xx é o servidor que falhou"
+    - id: codigo-aponta-a-investigacao
+      titulo: "cada código final manda olhar um lugar diferente — trocar um pelo outro é procurar no lugar errado"
+
+ensino:
+  gancho: |
+    "Não consigo ligar para o 4002." É o chamado mais comum da telefonia, e o
+    mais fácil de responder errado.
+
+    Sem o código, sobra achismo: pode ser o número, pode ser o aparelho, pode
+    ser a operadora, pode ser a central. Cada uma dessas hipóteses leva a
+    investigação para um lado, e testar todas custa a tarde.
+
+    O destino já respondeu por que não foi. A resposta é um número de três
+    dígitos, está na gravação, e você aprendeu na lição 2 a achá-la. O que
+    falta é saber o que ela quer dizer.
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar a resposta final de uma chamada, separando-a das provisórias"
+    - verbo: explicar
+      texto: "explicar a diferença entre um 4xx e um 5xx em termos de quem falhou"
+    - verbo: escolher
+      texto: "escolher onde investigar a partir do código que o destino devolveu"
+
+  modelo_mental: |
+    Toda resposta SIP tem três dígitos, e o **primeiro** é o que classifica:
+
+    | classe | significa | o que fazer |
+    |---|---|---|
+    | `1xx` | estou tratando — provisória | esperar; não decide nada |
+    | `2xx` | deu certo | nada |
+    | `4xx` | **este pedido, assim, não vai** | conferir número, destino, mídia |
+    | `5xx` | **eu, servidor, falhei** | olhar a central ou a rota, não o número |
+    | `6xx` | recusa global: ninguém, em lugar nenhum | raro |
+
+    **Provisória contra final.** O `180 Ringing` é provisória: avisa que está
+    tocando e não promete nada. Uma chamada pode ter várias provisórias e tem
+    **uma** resposta final — a que fecha a história. É a final que você
+    procura. Ver um `180` e concluir "funcionou" é o erro que faz o técnico
+    dizer ao cliente que está tudo bem enquanto o telefone dele não toca.
+
+    **A diferença que mais economiza tempo é 4xx contra 5xx.** Um `4xx` diz
+    "tem algo neste pedido que impede" — repetir igual dá o mesmo resultado, e
+    a investigação é do lado do pedido: o número existe? o aparelho está lá? o
+    codec bate? Um `5xx` diz o contrário: o pedido podia estar perfeito, e quem
+    falhou fui eu, servidor. É a diferença entre *o ramal está ocupado* e *a
+    central caiu*, e ela decide se você vai conferir um cadastro ou acordar
+    quem cuida da central.
+
+    Os cinco que aparecem quase sempre:
+
+    | código | nome | o que costuma ser |
+    |---|---|---|
+    | `404` | Not Found | o número não existe ali: plano de numeração ou rota errada |
+    | `480` | Temporarily Unavailable | o número existe, mas nada alcançável agora — tipicamente sem registro |
+    | `486` | Busy Here | o destino existe, está lá, e está ocupado |
+    | `488` | Not Acceptable Here | não fecharam codec — é problema de mídia, não de número |
+    | `503` | Service Unavailable | o servidor se declarou fora: sobrecarga, tronco caído |
+
+    **O texto ao lado do número não é contrato.** `486 Busy Here` pode chegar
+    escrito de outro jeito, em outro idioma, ou trazer um texto que o
+    fabricante inventou. O número é padronizado; a frase é livre. Diagnostique
+    pelo número, e leia a frase só como pista extra.
+
+  anatomia:
+    - linha: "tshark -r /root/chamada.pcap -Y sip.Status-Code -T fields -e sip.Status-Line -n"
+      partes:
+        - trecho: "-r"
+          papel: opcao
+          explica: "lê a gravação já feita"
+        - trecho: "-Y"
+          papel: opcao
+          explica: "filtro de exibição, como na lição 2"
+        - trecho: "sip.Status-Code"
+          papel: argumento
+          explica: "filtro por EXISTÊNCIA do campo: mostra só mensagens que têm código, ou seja, só respostas — os pedidos somem"
+        - trecho: "-T"
+          papel: opcao
+          explica: "muda o formato da saída para campos escolhidos"
+        - trecho: "-e"
+          papel: opcao
+          explica: "qual campo imprimir; pode repetir para pedir vários"
+        - trecho: "sip.Status-Line"
+          papel: argumento
+          explica: "a linha inteira da resposta: versão, código e o texto do motivo"
+        - trecho: "-n"
+          papel: opcao
+          explica: "não traduz endereço nem porta em nome"
+
+  demonstracao:
+    - comando: "tcpdump -i lo -w /root/ok.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --destino atende; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Primeiro uma chamada que dá certo, para ter com o que comparar. O `--destino atende` pede explicitamente o destino que funciona — este lab, como você vai ver, não é assim por padrão."
+    - comando: "tshark -r /root/ok.pcap -Y sip.Status-Code -T fields -e sip.Status-Line -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        SIP/2.0 180 Ringing
+        SIP/2.0 200 OK
+        SIP/2.0 200 OK
+      nota: "Três respostas numa chamada que funcionou. A primeira é PROVISÓRIA — `180` avisa que está tocando. As outras duas são finais: uma fecha o INVITE (atenderam) e a outra fecha o BYE (desligou). Repare que só os pedidos sumiram: o filtro `sip.Status-Code` seleciona por existência do campo."
+    - comando: "tcpdump -i lo -w /root/ruim.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --destino sobrecarga; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Agora um destino que se declara fora do ar. Do lado de quem liga, o sintoma é o mesmo de sempre: não completou."
+    - comando: "tshark -r /root/ruim.pcap -Y sip.Status-Code -T fields -e sip.Status-Line -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        SIP/2.0 503 Service Unavailable
+      nota: "Uma resposta só, e ela é final. O `5` da frente muda a investigação inteira: não adianta conferir o número discado nem pedir para o cliente testar de novo do jeito que testou — quem disse que falhou foi o servidor. Compare com um `486`, que teria dito o oposto: o destino está lá, atendendo, e ocupado."
+
+  pratica_guiada:
+    - instrucao: "Grave uma chamada para um destino que está apenas ocupado, em /root/t1.pcap."
+      modelo: "tcpdump -i lo -w /root/t1.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --destino ____; sleep 2; pkill -x tcpdump"
+      resposta: "tcpdump -i lo -w /root/t1.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --destino ocupado; sleep 2; pkill -x tcpdump"
+    - instrucao: "Mostre só as RESPOSTAS dessa gravação — nenhum pedido."
+      modelo: "tshark -r /root/t1.pcap -Y ____ -T fields -e sip.Status-Line -n"
+      resposta: "tshark -r /root/t1.pcap -Y sip.Status-Code -T fields -e sip.Status-Line -n"
+    - instrucao: "Agora peça só o número, sem o texto do motivo — é o número que vale."
+      modelo: "tshark -r /root/t1.pcap -Y sip.Status-Code -T fields -e ____ -n"
+      resposta: "tshark -r /root/t1.pcap -Y sip.Status-Code -T fields -e sip.Status-Code -n"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "A gravação mostra `100 Trying`, depois `180 Ringing`, e acaba. Que resposta final o cliente recebeu?"
+      resposta: |
+        Nenhuma. As duas são provisórias — `1xx` — e provisória não fecha
+        chamada. O destino avisou que estava tratando e que estava tocando, e
+        depois disso a conversa morreu sem veredito.
+
+        Isso não é "a chamada deu erro X": é uma chamada **sem resposta
+        final**, o que aponta para outra família de problemas — o outro lado
+        parou de responder no meio, ou a resposta final voltou e não chegou.
+    - tipo: transferencia
+      pergunta: "Metade das ligações para a operadora volta `503` e a outra metade completa. Por onde você começa?"
+      resposta: |
+        Pelo lado do servidor/rota, não pelo número. `5xx` é o outro lado
+        admitindo falha própria, e "metade sim, metade não" combina com
+        capacidade ou com uma rota entre várias que está ruim: tronco
+        sobrecarregado, um dos servidores do balanceamento fora, limite de
+        chamadas simultâneas estourado.
+
+        Se fosse `404` em metade das ligações, a investigação seria outra —
+        aí sim número, prefixo e plano de numeração.
+    - tipo: predicao
+      pergunta: "Você filtra com `-Y \"sip.Status-Code==404\"` e não sai nada, sem erro nenhum. O que concluir?"
+      resposta: |
+        Só que **não houve 404** nessa gravação. Nada mais.
+
+        Filtro que não casa nada imprime nada e termina com sucesso, igualzinho
+        a um comando que deu certo — não há mensagem de erro para avisar. Por
+        isso a leitura honesta é a de baixo para cima: primeiro peça TODAS as
+        respostas (`-Y sip.Status-Code`) e veja o que existe; depois filtre um
+        código específico, se ainda precisar.
+
+objetivo_md: |
+  O destino não fica em silêncio quando recusa: ele diz por quê, num número de
+  três dígitos. Ler esse número é o que separa "não consigo ligar" de um
+  problema com endereço certo para investigar.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `-Y sip.Status-Code` | só as respostas; os pedidos somem |
+  | `-e sip.Status-Line` | a linha inteira: código e texto do motivo |
+  | `-e sip.Status-Code` | só o número — o que de fato vale |
+  | `1xx` | provisória: avisa andamento, não decide |
+  | `4xx` | o pedido não pode ser atendido assim |
+  | `5xx` | o servidor falhou; o pedido podia estar certo |
+
+  ### Sua tarefa
+
+  Um cliente abriu chamado: as ligações para o ramal dele não completam. Este
+  lab já está configurado com exatamente o problema dele — o `devlab-chamada`,
+  **sem nenhuma opção**, reproduz a chamada que o cliente fez.
+
+  Reproduza-a gravando em `/root/chamada.pcap`, descubra a resposta final que o
+  destino devolveu e escreva **só o número de três dígitos** em
+  `/root/codigo.txt`.
+
+  Um número só no arquivo. Listar vários códigos "para garantir" não é
+  diagnóstico — é chute, e reprova.
+
+verificar:
+  - descricao: "/root/chamada.pcap contém a chamada recusada, com a resposta do destino"
+    script: |
+      #!/bin/bash
+      ARQ=/root/chamada.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"chamada.pcap nao existe","dica_diagnostica":"grave com tcpdump -i lo -w /root/chamada.pcap ANTES de rodar devlab-chamada"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      N=$(tshark -r "$ARQ" -Y "sip.Status-Code==404" 2>/dev/null | grep -c .)
+      if [ "${N:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao contem a resposta que este lab produz","dica_diagnostica":"rode devlab-chamada SEM opcao alguma, com a captura de pe: e assim que a chamada do cliente se reproduz"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/codigo.txt traz um único código, e é o que o destino respondeu"
+    script: |
+      #!/bin/bash
+      ARQ=/root/codigo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"codigo.txt nao existe","dica_diagnostica":"escreva no arquivo so o numero de tres digitos da resposta final"}'
+        exit 1
+      fi
+      # Um chute em forma de lista ("404 480 486") passaria num teste que so
+      # procurasse o numero certo. Por isso conta-se QUANTOS numeros ha.
+      TODOS=$(grep -oE '[0-9]{3}' "$ARQ" | sort -u)
+      QUANTOS=$(printf '%s\n' "$TODOS" | grep -c .)
+      if [ "$QUANTOS" -ne 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo tem $QUANTOS codigos, e o diagnostico e um so\",\"dica_diagnostica\":\"deixe no arquivo apenas o numero da resposta FINAL que o destino devolveu\"}"
+        exit 1
+      fi
+      if [ "$TODOS" != "404" ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o codigo registrado ($TODOS) nao e o que o destino respondeu\",\"dica_diagnostica\":\"peca todas as respostas da sua gravacao com -Y sip.Status-Code e leia a final\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/chamada.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  tshark -r /root/chamada.pcap -Y sip.Status-Code -T fields -e sip.Status-Code -n > /root/codigo.txt
+
+dicas:
+  - "Grave a chamada como na lição 2, mas rodando `devlab-chamada` sem opção nenhuma — o defeito do cliente já está neste lab. Depois olhe só as respostas."
+  - "O filtro que mostra apenas respostas é `-Y sip.Status-Code`. Para gravar só o número, peça o campo `sip.Status-Code` com `-T fields -e`, e mande a saída para o arquivo com `>`."
+  - "tshark -r /root/chamada.pcap -Y sip.Status-Code -T fields -e sip.Status-Code -n > /root/codigo.txt"
+
+erros_comuns:
+  - match: "is neither a field nor a protocol name"
+    digita: "tshark -r /root/chamada.pcap -Y sip.StatusCode -n"
+    mensagem: "tshark: \"sip.StatusCode\" is neither a field nor a protocol name."
+    causa: "o nome do campo tem hífen (`sip.Status-Code`), e sem ele o tshark não reconhece nada — não é um campo vazio, é um campo inexistente"
+    conserto: "escreva `sip.Status-Code`, com o hífen entre `Status` e `Code`"
+    categoria: sintaxe
+  - match: "was unexpected in this context"
+    digita: "tshark -r /root/chamada.pcap -Y sip.Status-Code=404 -n"
+    mensagem: "tshark: \"=\" was unexpected in this context."
+    causa: "no filtro de exibição a comparação usa DOIS sinais de igual; com um só o tshark não sabe o que fazer com o `=`"
+    conserto: "use `sip.Status-Code==404`, com `==`"
+    categoria: sintaxe
+  - match: "was specified, but no fields were specified"
+    digita: "tshark -r /root/chamada.pcap -Y sip.Status-Code -T fields -n"
+    mensagem: "tshark: \"-Tfields\" was specified, but no fields were specified with \"-e\"."
+    causa: "`-T fields` só diz o FORMATO da saída; ele não escolhe nada sozinho, e sem um `-e` não há coluna alguma para imprimir"
+    conserto: "acrescente o campo que você quer, como `-e sip.Status-Code`"
+    categoria: flag_errada
+
+cards_revisao:
+  - resposta-provisoria-e-final
+  - classe-do-codigo
+  - codigo-aponta-a-investigacao

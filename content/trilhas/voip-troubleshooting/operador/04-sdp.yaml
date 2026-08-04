@@ -1,0 +1,286 @@
+id: voip-op-04-sdp
+trilha: voip-troubleshooting
+nivel: operador
+ordem: 4
+titulo: "O SIP não carrega áudio — ele combina onde o áudio vai passar"
+capacidade: "Sei ler a proposta de mídia de uma chamada e dizer qual codec cada lado ofereceu."
+xp: 30
+prereqs: [voip-op-03-codigos]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+  # Outro chamado, outro defeito: aqui o destino recusa por MÍDIA. O aluno
+  # reproduz a chamada do cliente sem digitar o nome do defeito — mesmo motivo
+  # da lição 3.
+  break: |
+    printf 'sem-codec\n' > /var/lib/devlab/destino-padrao
+
+ensina:
+  conceitos:
+    - id: sdp-e-a-proposta-de-midia
+      titulo: "o SIP leva no corpo uma proposta de mídia (SDP): para onde mandar o áudio e em que formato"
+    - id: m-audio-lista-os-codecs
+      titulo: "a linha m=audio traz a porta e a lista de formatos, em ordem de preferência"
+    - id: sem-codec-comum-nao-ha-chamada
+      titulo: "sem um formato em comum a chamada morre, com o número certo e o destino disponível"
+
+ensino:
+  gancho: |
+    O número está certo. O ramal existe, está registrado e não está ocupado. E
+    a chamada cai no mesmo instante em que você aperta o botão.
+
+    Quem só olha código de resposta trava aqui: o `488` não fala de número nem
+    de aparelho. Ele fala de uma negociação que acontece **dentro** do
+    `INVITE`, num pedaço que a maioria nunca abriu — e que decide se vai
+    existir áudio antes mesmo de existir chamada.
+
+    Esse pedaço é o SDP, e é o assunto desta lição.
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar a proposta de mídia dentro de uma mensagem SIP"
+    - verbo: comparar
+      texto: "comparar o que um lado ofereceu com o que o outro respondeu"
+    - verbo: diagnosticar
+      texto: "diagnosticar uma chamada recusada por falta de codec em comum"
+
+  modelo_mental: |
+    A frase que resolve metade dos problemas de telefonia: **o SIP não
+    transporta a voz.** Ele é só a conversa que combina a voz. A voz vai por
+    fora, em outro fluxo, em outras portas — assunto da lição 5.
+
+    Combinar o quê, exatamente? Duas coisas:
+
+    1. **Para onde** mandar o áudio: um endereço e uma porta.
+    2. **Em que formato** — o codec.
+
+    Isso viaja no corpo da mensagem, num texto chamado **SDP**. As linhas que
+    importam:
+
+    ```
+    m=audio 6100 RTP/AVP 8 101
+    a=rtpmap:8 PCMA/8000
+    a=rtpmap:101 telephone-event/8000
+    ```
+
+    - `m=audio 6100` — "mande o áudio para a minha porta 6100". Repare que
+      **não é 5060**: a porta do áudio nada tem a ver com a porta do SIP.
+    - `RTP/AVP 8 101` — a lista de formatos que eu aceito, **em ordem de
+      preferência**. São números.
+    - `a=rtpmap:8 PCMA/8000` — a legenda do número 8: PCMA, 8000 Hz.
+    - `a=rtpmap:101 telephone-event/8000` — o 101 **não é voz**: é o formato
+      dos dígitos do teclado (DTMF). Confundi-lo com codec é erro comum.
+
+    **A negociação é oferta e resposta.** Quem liga oferece uma lista; quem
+    atende devolve, no `200 OK`, a sua própria linha `m=audio` com o que ele
+    escolheu. Se as duas listas não tiverem **nenhum** número em comum, não há
+    como transportar voz entre os dois — e a chamada é recusada com `488 Not
+    Acceptable Here`, mesmo com o número certo e o destino livre.
+
+    É por isso que `488` manda você olhar codec e não cadastro. É o único da
+    lista da lição 3 que fala de mídia.
+
+  anatomia:
+    - linha: "tshark -r /root/chamada.pcap -Y sdp -T fields -e sdp.media -n"
+      partes:
+        - trecho: "-r"
+          papel: opcao
+          explica: "lê a gravação já feita"
+        - trecho: "-Y"
+          papel: opcao
+          explica: "filtro de exibição"
+        - trecho: "sdp"
+          papel: argumento
+          explica: "só as mensagens que CARREGAM proposta de mídia; um 488 não aparece aqui, porque ele não propõe nada"
+        - trecho: "-T"
+          papel: opcao
+          explica: "saída em campos escolhidos"
+        - trecho: "-e"
+          papel: opcao
+          explica: "o campo a imprimir"
+        - trecho: "sdp.media"
+          papel: argumento
+          explica: "a linha `m=`: tipo de mídia, porta e a lista de formatos aceitos"
+        - trecho: "-n"
+          papel: opcao
+          explica: "não traduz endereço nem porta em nome"
+
+  demonstracao:
+    - comando: "tcpdump -i lo -w /root/ok.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --destino atende; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Uma chamada que dá certo, para servir de comparação."
+    - comando: "tshark -r /root/ok.pcap -Y sdp -T fields -e sdp.media -e sdp.media_attr -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        audio 6100 RTP/AVP 8 101	rtpmap:8 PCMA/8000,rtpmap:101 telephone-event/8000,fmtp:101 0-11,16
+        audio 6000 RTP/AVP 8	rtpmap:8 PCMA/8000
+      nota: "Duas linhas: a de cima é a OFERTA de quem ligou, a de baixo é a RESPOSTA de quem atendeu. Quem ligou ofereceu os formatos 8 e 101 na sua porta 6100; quem atendeu escolheu o 8 e disse para mandar na porta 6000 dele. O `8` aparece nos dois lados — é isso que faz existir áudio. Repare que o 101 (telephone-event) não é voz: é o formato dos dígitos do teclado."
+    - comando: "tcpdump -i lo -w /root/ruim.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Agora a chamada do chamado: `devlab-chamada` sem opção nenhuma, porque o defeito do cliente já está neste lab."
+    - comando: "tshark -r /root/ruim.pcap -Y sdp -T fields -e sdp.media -e sdp.media_attr -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        audio 6100 RTP/AVP 8 101	rtpmap:8 PCMA/8000,rtpmap:101 telephone-event/8000,fmtp:101 0-11,16
+      nota: "Uma linha só. A oferta saiu igualzinha à da chamada boa — e não houve resposta de mídia nenhuma. Isso não é captura incompleta: é o diagnóstico. Quem atendeu não devolveu proposta porque não tinha o que propor."
+    - comando: "tshark -r /root/ruim.pcap -Y sip.Status-Code -T fields -e sip.Status-Line -e sip.Warning -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        SIP/2.0 488 Not Acceptable Here	399 devlab "Incompatible media format: only G729 (18) offered here"
+      nota: "O `488` confirma, e o cabeçalho `Warning` explica em texto: o outro lado só trabalha com o formato 18 (G729), e a oferta trazia 8 e 101. Nenhum número em comum, nenhuma chamada. Nem todo equipamento manda esse `Warning` — quando manda, é a primeira linha a procurar depois de um 488."
+
+  pratica_guiada:
+    - instrucao: "Grave em /root/t1.pcap uma chamada para o destino que funciona."
+      modelo: "tcpdump -i lo -w /root/t1.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --destino ____; sleep 2; pkill -x tcpdump"
+      resposta: "tcpdump -i lo -w /root/t1.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --destino atende; sleep 2; pkill -x tcpdump"
+    - instrucao: "Mostre só as mensagens que carregam proposta de mídia."
+      modelo: "tshark -r /root/t1.pcap -Y ____ -n"
+      resposta: "tshark -r /root/t1.pcap -Y sdp -n"
+    - instrucao: "Peça a linha m= de cada uma delas — porta e lista de formatos."
+      modelo: "tshark -r /root/t1.pcap -Y sdp -T fields -e ____ -n"
+      resposta: "tshark -r /root/t1.pcap -Y sdp -T fields -e sdp.media -n"
+    - instrucao: "Acrescente as legendas dos números, para saber que codec é cada um."
+      modelo: "tshark -r /root/t1.pcap -Y sdp -T fields -e sdp.media -e ____ -n"
+      resposta: "tshark -r /root/t1.pcap -Y sdp -T fields -e sdp.media -e sdp.media_attr -n"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "A chamada completa (`200 OK`, `ACK`), o cliente atende e não ouve nada. O SDP dos dois lados fechou no formato 8. Isso inocenta a negociação?"
+      resposta: |
+        Inocenta. Se os dois lados anunciaram o mesmo formato e a chamada
+        completou, a combinação foi feita: cada um sabe para onde mandar o
+        áudio e em que formato.
+
+        O que a negociação **não** garante é que o áudio realmente trafegue.
+        Combinar a porta é uma coisa; o pacote chegar nela é outra — e é aí que
+        entram firewall, NAT e rota. Sinalização boa com áudio mudo é
+        justamente o caso em que olhar mais SIP não adianta mais nada.
+    - tipo: predicao
+      pergunta: "Numa oferta você vê `m=audio 0 RTP/AVP 8`. A porta é zero. O que isso quer dizer?"
+      resposta: |
+        Porta zero em SDP não é erro nem porta desconhecida: é o jeito
+        padronizado de dizer **desligue esta mídia**. É o que se usa para
+        colocar em espera ou para recusar um fluxo específico numa proposta.
+
+        Ou seja, a chamada pode seguir viva em sinalização enquanto o áudio foi
+        deliberadamente desativado — e o sintoma que chega ao usuário é
+        "mudo", sem nenhum código de erro para explicar.
+    - tipo: transferencia
+      pergunta: "Um cliente novo só fala G729 e o seu tronco só oferece PCMA. O que se vê na captura, e quais são as saídas?"
+      resposta: |
+        Vê-se o `INVITE` com a oferta de um lado, e um `488 Not Acceptable
+        Here` de volta — sem nenhuma resposta de mídia, porque não há o que
+        responder.
+
+        As saídas são duas, e nenhuma é "conferir o número": ou se acrescenta
+        um formato em comum em algum dos lados (habilitar G729 no tronco, ou
+        PCMA no cliente), ou se põe no caminho algo que converta de um para o
+        outro — transcodificação, que custa processamento e não sai de graça.
+
+objetivo_md: |
+  O SIP combina a voz; ele não a carrega. Essa combinação é o SDP, e quando ela
+  falha a chamada morre com o número certo e o destino livre — por isso o `488`
+  manda olhar codec, e não cadastro.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `-Y sdp` | só as mensagens que carregam proposta de mídia |
+  | `-e sdp.media` | a linha `m=`: tipo, porta e lista de formatos |
+  | `-e sdp.media_attr` | as linhas `a=`: a legenda de cada número |
+  | `-e sip.Warning` | o texto que o outro lado mandou junto da recusa |
+  | `m=audio` | porta e formatos do áudio — nada a ver com a porta do SIP |
+  | `a=rtpmap:` | traduz o número do formato em nome de codec |
+
+  ### Sua tarefa
+
+  Outro chamado: o cliente liga e a chamada cai na hora. Este lab já está com o
+  problema dele — `devlab-chamada`, **sem opção nenhuma**, reproduz a chamada.
+
+  Grave-a em `/root/chamada.pcap` e escreva em `/root/codec.txt` **apenas o
+  nome do codec de voz que quem ligou ofereceu**, como ele aparece escrito no
+  SDP.
+
+  Só o codec de voz. A oferta traz mais de um formato, e um deles não é voz —
+  saber separar os dois faz parte da tarefa.
+
+verificar:
+  - descricao: "/root/chamada.pcap tem a oferta de mídia e a recusa do destino"
+    script: |
+      #!/bin/bash
+      ARQ=/root/chamada.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"chamada.pcap nao existe","dica_diagnostica":"grave com tcpdump -i lo -w /root/chamada.pcap ANTES de rodar devlab-chamada"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      N=$(tshark -r "$ARQ" -Y "sdp" 2>/dev/null | grep -c .)
+      if [ "${N:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao contem nenhuma proposta de midia","dica_diagnostica":"a captura precisa estar de pe antes da chamada; e o INVITE que carrega o SDP"}'
+        exit 1
+      fi
+      N=$(tshark -r "$ARQ" -Y "sip.Status-Code==488" 2>/dev/null | grep -c .)
+      if [ "${N:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao contem a recusa que este lab produz","dica_diagnostica":"rode devlab-chamada SEM opcao alguma: e assim que a chamada do cliente se reproduz"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/codec.txt nomeia o codec de voz ofertado, e só ele"
+    script: |
+      #!/bin/bash
+      ARQ=/root/codec.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"codec.txt nao existe","dica_diagnostica":"escreva no arquivo o nome do codec de voz da oferta, como ele aparece no SDP"}'
+        exit 1
+      fi
+      # telephone-event e o formato dos digitos do teclado, nao voz. Copiar a
+      # linha inteira de rtpmap e o atalho que a licao pede para NAO tomar.
+      if grep -qi 'telephone' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo inclui telephone-event, que nao e codec de voz","dica_diagnostica":"telephone-event (o 101) transporta digito de teclado; deixe no arquivo so o nome do codec que carrega a voz"}'
+        exit 1
+      fi
+      if ! grep -qi 'pcma' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao nomeia o codec de voz que a oferta traz","dica_diagnostica":"olhe a linha a=rtpmap do INVITE: ela traduz o numero do formato em nome"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/chamada.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  tshark -r /root/chamada.pcap -Y sdp -T fields -e sdp.media_attr -n 2>/dev/null \
+    | tr ',' '\n' | grep 'rtpmap:8 ' | sed 's|.*rtpmap:8 ||; s|/.*||' | sort -u > /root/codec.txt
+
+dicas:
+  - "A proposta de mídia viaja dentro do INVITE. O filtro que mostra só as mensagens que a carregam é `-Y sdp`."
+  - "Peça `-e sdp.media` para ver a linha `m=` com a lista de números, e `-e sdp.media_attr` para ver a legenda de cada número. Dos dois formatos ofertados, um é voz e o outro é dígito de teclado."
+  - "tshark -r /root/chamada.pcap -Y sdp -T fields -e sdp.media_attr -n  →  a legenda do formato 8 é o codec de voz; grave o nome dele em /root/codec.txt"
+
+erros_comuns:
+  - match: "Some fields aren't valid"
+    digita: "tshark -r /root/chamada.pcap -Y sdp -T fields -e sdp.codec -n"
+    mensagem: "tshark: Some fields aren't valid:\n\tsdp.codec"
+    causa: "não existe campo chamado `sdp.codec`: o nome do codec mora dentro das linhas `a=`, que o tshark expõe como `sdp.media_attr`"
+    conserto: "peça `-e sdp.media` para a linha `m=` e `-e sdp.media_attr` para as legendas"
+    categoria: flag_errada
+  - match: "488 Not Acceptable Here"
+    digita: "tshark -r /root/chamada.pcap -Y sip.Status-Code -T fields -e sip.Status-Line -n"
+    mensagem: "SIP/2.0 488 Not Acceptable Here"
+    causa: "os dois lados não acharam nenhum formato de mídia em comum; o destino existe, está livre, e recusou por causa da mídia"
+    conserto: "compare a lista da linha `m=audio` dos dois lados: ou se habilita um formato em comum, ou se põe transcodificação no caminho"
+    categoria: conceitual
+cards_revisao:
+  - sdp-e-a-proposta-de-midia
+  - m-audio-lista-os-codecs
+  - sem-codec-comum-nao-ha-chamada

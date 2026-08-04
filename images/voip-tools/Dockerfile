@@ -101,6 +101,13 @@ COPY bin/ /usr/local/bin/
 RUN chmod 0755 /usr/local/bin/devlab-* \
  && mkdir -p /var/lib/devlab
 
+# A captura com várias chamadas misturadas, que a lição de sngrep manda separar.
+# Fica pronta na imagem porque gerá-la custa ~30 s — metade do teto do setup de
+# um lab. Ver o cabeçalho do script.
+COPY gerar-captura-central.sh /usr/local/bin/devlab-gerar-captura-central
+RUN chmod 0755 /usr/local/bin/devlab-gerar-captura-central \
+ && /usr/local/bin/devlab-gerar-captura-central /usr/share/devlab/central.pcap
+
 # O usuário `ubuntu` ocupa o uid 1000 na imagem oficial; aqui quem manda é o aluno.
 #
 # Atenção: nas lições desta trilha o shell do aluno roda como ROOT, não como

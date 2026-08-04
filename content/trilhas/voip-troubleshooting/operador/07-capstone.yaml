@@ -1,0 +1,244 @@
+id: voip-op-07-capstone
+trilha: voip-troubleshooting
+nivel: operador
+ordem: 7
+titulo: "Chamado 2117: completa, atende e ninguém ouve"
+capacidade: "Sei provar a causa de uma chamada muda, documentar a evidência e corrigir."
+xp: 60
+capstone: true
+prereqs: [voip-op-06-sngrep]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW, NET_ADMIN]
+  # O defeito do chamado, injetado antes de o aluno abrir o terminal.
+  #
+  # A escolha de INPUT e não OUTPUT é deliberada e está medida na decisão 21
+  # de docs/DESIGN-VOIP.md: um DROP em OUTPUT faria o próprio `send()` falhar
+  # com EPERM, e nenhum firewall do mundo real se comporta assim — o sintoma
+  # ensinado ficaria errado. Em INPUT o pacote chega à placa, é GRAVADO pela
+  # captura e só então é descartado, que é exatamente a cena que a lição 5
+  # mostrou e que este capstone cobra.
+  #
+  # A porta 6100 é a de quem LIGA. Logo o sintoma é assimétrico: quem ligou
+  # não ouve, e quem atendeu ouve normalmente.
+  break: |
+    iptables -A INPUT -p udp --dport 6100 -j DROP
+
+ensina:
+  conceitos: []
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 2117, aberto há vinte minutos:
+
+    > "A ligação completa normalmente, a pessoa atende — e eu não escuto nada.
+    > Ela diz que me escuta bem."
+
+    Você já viu cada peça disto separadamente. Ninguém vai dizer qual comando
+    usar em cada passo, e é assim que o chamado chega.
+
+    Uma advertência antes de começar: neste caso a captura vai parecer
+    inocentar tudo. Se você aceitar o que ela mostra, vai fechar o chamado
+    dizendo que está tudo certo.
+
+  objetivos:
+    - verbo: diagnosticar
+      texto: "diagnosticar uma chamada que completa e não tem áudio, separando sinalização de mídia"
+    - verbo: executar
+      texto: "documentar a evidência do defeito antes de alterar qualquer coisa"
+    - verbo: construir
+      texto: "construir a conclusão a partir do que o sistema contabilizou, não do que a captura sugere"
+
+  modelo_mental: |
+    Nada de novo aqui. O que muda é que ninguém separa os passos para você.
+
+    O método que atravessa as seis lições anteriores:
+
+    1. **Sinalização ou mídia?** Leia o diálogo. Se houve `200 OK` e `ACK`, a
+       sinalização fez o trabalho dela e o problema não está nela.
+    2. **Se é mídia, qual sentido?** São dois fluxos independentes. "Eu não
+       ouço e ela me ouve" já nomeia o sentido que falhou: o que vem em
+       direção a quem reclamou.
+    3. **Não pare na captura.** Ela prova que o pacote passou pelo ponto de
+       captura — não que a aplicação recebeu. Quando o sintoma contradiz a
+       captura, é a captura que está respondendo a outra pergunta.
+    4. **Pergunte a quem contabiliza.** Contador de firewall, estatística do
+       endpoint, log da aplicação. É lá que aparece o que foi descartado.
+    5. **Documente antes de consertar.** Contador zera, regra some, e quem
+       apagou a evidência não consegue mais provar o que aconteceu — nem para
+       o cliente, nem para o relatório, nem para si mesmo daqui a uma semana.
+
+    O passo 5 é o que mais se pula sob pressão, e é o que separa "resolvi" de
+    "consigo mostrar o que era". Neste chamado ele é obrigatório.
+
+  demonstracao:
+    - comando: "devlab-chamada"
+      saida: |-2
+        → atendendo em 127.0.0.1:5060 (aguardando INVITE)
+        → ligando de 127.0.0.1:5061
+        ✔ chamada concluída — quem ligou contabilizou 1 chamada(s) bem-sucedida(s)
+      nota: "O ponto de partida, e o paradoxo do chamado: a chamada COMPLETA. Quem ligou contabilizou uma chamada bem-sucedida — e mesmo assim o cliente não ouve nada. A partir daqui é com você."
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Antes de mexer em qualquer coisa: por que gravar o estado do firewall vale mais do que consertar rápido?"
+      resposta: |
+        Porque o contador é volátil e a regra também. No instante em que você
+        remove a regra, some o número que provava quantos pacotes foram
+        descartados — e some a única evidência que liga o sintoma à causa.
+
+        Sem ela sobra a sua palavra. Com ela, o chamado se fecha com "250
+        pacotes de áudio descartados nesta porta por esta regra", que é
+        verificável por qualquer pessoa depois.
+    - tipo: transferencia
+      pergunta: "Mesmo sintoma, mas o servidor não tem regra de firewall nenhuma. Onde procurar em seguida?"
+      resposta: |
+        Continua valendo o método: a captura mostra o pacote chegando e a
+        aplicação não o recebe — então alguma coisa entre a placa e o processo
+        o descarta, ou o processo não está escutando ali.
+
+        As suspeitas seguintes são: um firewall **mais acima** no caminho (ou
+        no equipamento do cliente), NAT reescrevendo o endereço anunciado no
+        SDP para um que não volta, ou a aplicação escutando numa porta
+        diferente da que ela anunciou. Nos três casos a pergunta é a mesma —
+        quem contabilizou o quê — e a resposta nunca sai só da captura.
+
+objetivo_md: |
+  Este é o capstone do nível: ele integra as seis lições e não dá o passo a
+  passo.
+
+  O cliente do chamado 2117 relata que a chamada completa, o outro lado atende,
+  e ele não escuta nada — enquanto o outro lado escuta ele. Este lab já está
+  com o defeito dele.
+
+  ### Sua entrega
+
+  Quatro coisas, nesta ordem:
+
+  1. **Reproduza e grave.** A chamada inteira em `/root/prova.pcap`.
+  2. **Documente a evidência, ANTES de consertar.** Grave em
+     `/root/firewall-antes.txt` o estado do firewall **com os contadores** —
+     é o número que prova o descarte, e ele se perde quando a regra sai.
+  3. **Escreva o diagnóstico** em `/root/diagnostico.txt`: em uma ou duas
+     frases, qual porta estava sendo descartada e o que a descartava.
+  4. **Conserte.** Ao final, a chamada tem de poder trafegar áudio nos dois
+     sentidos.
+
+  Não há dicas nesta lição. Tudo o que ela cobra já foi ensinado.
+
+verificar:
+  - descricao: "/root/prova.pcap tem a chamada inteira, com mídia nos dois sentidos"
+    script: |
+      #!/bin/bash
+      ARQ=/root/prova.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"prova.pcap nao existe","dica_diagnostica":"reproduza a chamada com a captura de pe e grave em /root/prova.pcap"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      for filtro in "sip.Method==INVITE" "sip.Status-Code==200" "sip.Method==BYE"; do
+        N=$(tshark -r "$ARQ" -Y "$filtro" 2>/dev/null | grep -c .)
+        if [ "${N:-0}" -lt 1 ]; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"a captura nao tem a chamada inteira (falta $filtro)\",\"dica_diagnostica\":\"a captura precisa comecar antes do INVITE e so parar depois do BYE\"}"
+          exit 1
+        fi
+      done
+      IDA=$(tshark -r "$ARQ" -Y "rtp and not icmp and udp.dstport==6000" 2>/dev/null | grep -c .)
+      VOLTA=$(tshark -r "$ARQ" -Y "rtp and not icmp and udp.dstport==6100" 2>/dev/null | grep -c .)
+      if [ "${IDA:-0}" -lt 1 ] || [ "${VOLTA:-0}" -lt 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura nao mostra midia nos dois sentidos (para 6000: $IDA, para 6100: $VOLTA)\",\"dica_diagnostica\":\"grave a chamada inteira: a midia so comeca depois do ACK\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/firewall-antes.txt registra a regra e o contador de descarte"
+    script: |
+      #!/bin/bash
+      ARQ=/root/firewall-antes.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"firewall-antes.txt nao existe","dica_diagnostica":"grave o estado do firewall COM contadores num arquivo, antes de remover a regra"}'
+        exit 1
+      fi
+      LINHA=$(grep 'DROP' "$ARQ" | grep 'dpt:6100' | head -1)
+      if [ -z "$LINHA" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao traz a regra que descartava a midia","dica_diagnostica":"a listagem precisa mostrar a regra da porta 6100; use a forma do iptables que inclui os contadores"}'
+        exit 1
+      fi
+      # Sem -v a listagem sai SEM contador, e o arquivo provaria so que a regra
+      # existia — nao que ela descartou alguma coisa. O numero e a evidencia.
+      PKTS=$(printf '%s' "$LINHA" | awk '{print $1}')
+      case "$PKTS" in
+        ''|0|*[!0-9KMG]*)
+          echo "DEVLAB_JSON:{\"mensagem\":\"a linha da regra nao traz um contador de pacotes maior que zero (li: '$PKTS')\",\"dica_diagnostica\":\"liste o firewall no modo detalhado, que inclui as colunas pkts e bytes, e faca isso DEPOIS de ter reproduzido a chamada — senao o contador esta zerado\"}"
+          exit 1 ;;
+      esac
+      exit 0
+
+  - descricao: "/root/diagnostico.txt nomeia a porta e o que descartava"
+    script: |
+      #!/bin/bash
+      ARQ=/root/diagnostico.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"diagnostico.txt nao existe","dica_diagnostica":"escreva em uma ou duas frases qual porta era descartada e o que a descartava"}'
+        exit 1
+      fi
+      if ! grep -q '6100' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o diagnostico nao diz qual porta era descartada","dica_diagnostica":"a porta e a do lado que nao ouvia; ela aparece no SDP e na regra do firewall"}'
+        exit 1
+      fi
+      if ! grep -qiE 'firewall|iptables|drop|descart' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o diagnostico nao diz o que descartava os pacotes","dica_diagnostica":"nomeie o mecanismo: uma regra de firewall local descartando o que chegava naquela porta"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o defeito foi corrigido: a mídia não é mais descartada"
+    script: |
+      #!/bin/bash
+      # Oraculo de ESTADO, nao de captura: a regra que descartava tem de nao
+      # existir mais. `-C` sai 0 quando a regra esta la.
+      if iptables -C INPUT -p udp --dport 6100 -j DROP 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"a regra que descartava o audio ainda esta ativa","dica_diagnostica":"remova a regra do firewall; o iptables remove com -D a regra escrita exatamente como ela foi criada"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/prova.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  iptables -L INPUT -v -n > /root/firewall-antes.txt
+  printf 'A sinalizacao completa (200 OK e ACK). A midia de volta, destinada a porta 6100 de quem ligou, aparece na captura mas nao chega a aplicacao: uma regra DROP no firewall local (iptables, cadeia INPUT) descarta tudo o que chega nessa porta, depois do ponto de captura.\n' > /root/diagnostico.txt
+  iptables -D INPUT -p udp --dport 6100 -j DROP
+
+dicas: []
+
+erros_comuns:
+  - match: "Bad rule \\(does a matching rule exist in that chain"
+    digita: "iptables -D INPUT -p udp --dport 6000 -j DROP"
+    mensagem: "iptables: Bad rule (does a matching rule exist in that chain?)."
+    causa: "o `-D` remove uma regra idêntica à que você descreveu; se qualquer detalhe diferir — a porta, o protocolo, o alvo — não há o que remover"
+    conserto: "liste antes com `iptables -L INPUT -n --line-numbers` e remova exatamente a regra que está lá"
+    categoria: flag_errada
+  - match: "0 packets captured"
+    digita: "tcpdump -i lo -w /root/prova.pcap"
+    mensagem: "0 packets captured"
+    causa: "a captura rodou numa janela sem tráfego — quase sempre porque foi iniciada depois da chamada"
+    conserto: "suba a captura primeiro, reproduza a chamada, e só então pare a captura"
+    categoria: conceitual
+
+cards_revisao:
+  - midia-e-outro-fluxo
+  - cada-sentido-e-um-fluxo
+  - captura-nao-prova-entrega

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<!-- 503 Service Unavailable — o único da lista que NÃO fala do destino.
+
+     4xx é "esta chamada, deste jeito, não vai" — o pedido tem algo que o
+     impede, e repetir igual dá o mesmo resultado. 5xx é o servidor admitindo
+     que ele próprio falhou: o pedido podia estar perfeito. É a diferença entre
+     "o ramal está ocupado" e "a central caiu", e é por isso que 503 é o único
+     em que a resposta certa costuma ser tentar outra rota (ou o mesmo destino
+     mais tarde) em vez de conferir o número.
+
+     O `Retry-After` é o que o servidor sério manda junto com um 503. Vale a
+     pena estar aqui porque é a evidência de que a recusa é temporária e
+     assumida — RFC 3261 §20.33. -->
+<scenario name="UAS sobrecarregado (503)">
+
+  <recv request="INVITE" crlf="true">
+  </recv>
+
+  <send>
+    <![CDATA[
+
+      SIP/2.0 503 Service Unavailable
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Retry-After: 30
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv request="ACK" crlf="true">
+  </recv>
+
+  <timewait milliseconds="1000"/>
+
+</scenario>

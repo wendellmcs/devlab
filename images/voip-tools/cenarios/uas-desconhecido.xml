@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<!-- 404 Not Found — o número discado não existe neste destino.
+
+     A diferença que a lição 3 explora: 404 fala do ENDEREÇO (não existe
+     ninguém com esse número aqui), enquanto 486 e 480 falam do ESTADO de um
+     destino que existe. Trocar um pelo outro manda o técnico investigar a
+     coisa errada — 404 é problema de plano de numeração ou de rota, 486/480
+     são problema do aparelho ou do registro. -->
+<scenario name="UAS que não conhece o número (404)">
+
+  <recv request="INVITE" crlf="true">
+  </recv>
+
+  <send>
+    <![CDATA[
+
+      SIP/2.0 404 Not Found
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv request="ACK" crlf="true">
+  </recv>
+
+  <timewait milliseconds="1000"/>
+
+</scenario>

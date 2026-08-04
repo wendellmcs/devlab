@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<!-- 486 Busy Here — o destino existe, atende chamadas, e agora está ocupado.
+
+     Por que este cenário é um arquivo próprio e não um parâmetro:
+
+     O SIPp valida o código da resposta ao CARREGAR o cenário, antes de
+     substituir palavra-chave alguma. Um `SIP/2.0 [codigo] [motivo]` com
+     `-key codigo 486` morre no parse com "Response codes must be in the range
+     of 100-700" — e o sintoma aparente é um UAS que sobe e nunca responde.
+     Medido. Por isso cada código de resposta tem seu arquivo, com o número
+     literal onde o parser o encontra. -->
+<scenario name="UAS ocupado (486)">
+
+  <recv request="INVITE" crlf="true">
+  </recv>
+
+  <send>
+    <![CDATA[
+
+      SIP/2.0 486 Busy Here
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <!-- Resposta final não-2xx é confirmada com ACK pela camada de transação,
+       e não pelo diálogo: o ACK vai para o mesmo destino da resposta. Sem
+       receber este ACK o UAS ficaria retransmitindo o 486. -->
+  <recv request="ACK" crlf="true">
+  </recv>
+
+  <timewait milliseconds="1000"/>
+
+</scenario>

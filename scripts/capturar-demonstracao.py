@@ -9,11 +9,17 @@ enquanto o terminal mostra outra. O aluno conclui que errou.
 Este script tira a saída das mãos de quem escreve. Para cada lição:
 
   1. sobe um container da imagem declarada em `lab.imagem`;
-  2. roda `lab.setup` como root, se houver;
+  2. roda `lab.setup` e depois `lab.break` como root, se houver;
   3. executa os comandos de `ensino.demonstracao` NA ORDEM, numa única sessão
      de shell — então `cd` e arquivos criados persistem de um passo ao outro,
      como aconteceria com o aluno;
   4. grava a saída real de volta no YAML.
+
+O passo 2 inclui o `break` pelo mesmo motivo que inclui o perfil de segurança
+do lab: a demonstração tem de mostrar o lab que o ALUNO recebe. Numa lição de
+quebra/conserta o defeito já está injetado quando ele abre o terminal, e uma
+demonstração gravada no lab saudável mostraria uma saída que ele nunca vai ver
+— justamente no arquivo que existe para impedir esse tipo de deriva.
 
 Uso:
     python3 scripts/capturar-demonstracao.py                 # todas as lições
@@ -108,10 +114,11 @@ def executar(licao: dict, comandos: list[str]) -> list[str]:
     cid = criado.stdout.strip()
 
     try:
-        if lab.get("setup"):
-            r = docker(["exec", "-i", "-u", "root", cid, "bash", "-s"], entrada=lab["setup"])
-            if r.returncode != 0:
-                raise RuntimeError(f"setup falhou: {r.stderr.strip()[:400]}")
+        for etapa in ("setup", "break"):
+            if lab.get(etapa):
+                r = docker(["exec", "-i", "-u", "root", cid, "bash", "-s"], entrada=lab[etapa])
+                if r.returncode != 0:
+                    raise RuntimeError(f"{etapa} falhou: {r.stderr.strip()[:400]}")
 
         r = docker(
             ["exec", "-i", "-u", usuario, cid, "bash", "-s"],

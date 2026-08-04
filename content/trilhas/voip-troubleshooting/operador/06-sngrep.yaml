@@ -1,0 +1,291 @@
+id: voip-op-06-sngrep
+trilha: voip-troubleshooting
+nivel: operador
+ordem: 6
+titulo: "Separar uma chamada de dentro de mil"
+capacidade: "Sei isolar uma chamada específica de uma captura cheia e entregá-la como prova."
+xp: 30
+prereqs: [voip-op-05-rtp]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+
+ensina:
+  conceitos:
+    - id: call-id-identifica-a-chamada
+      titulo: "toda mensagem de uma mesma chamada carrega o mesmo Call-ID — é ele que agrupa"
+    - id: sngrep-mostra-chamada-nao-pacote
+      titulo: "o sngrep exibe CHAMADAS; o tshark exibe pacotes"
+    - id: isolar-antes-de-analisar
+      titulo: "numa captura de central, separar a chamada é o primeiro passo, antes de qualquer análise"
+  comandos: [sngrep]
+
+ensino:
+  gancho: |
+    Até agora toda captura deste curso tinha uma chamada só. A vida real não é
+    assim.
+
+    Você grava dez minutos numa central e leva embora um arquivo com duzentas
+    chamadas entrelaçadas — os `INVITE` de umas no meio dos `BYE` de outras,
+    tudo em ordem cronológica. Listar isso com `tshark` devolve uma parede de
+    mensagens em que a conversa que interessa está picada em pedaços
+    espalhados.
+
+    Antes de analisar, é preciso **separar**. E a ferramenta que os técnicos de
+    telefonia abrem primeiro, todo dia, faz exatamente isso.
+
+  objetivos:
+    - verbo: explicar
+      texto: "explicar o que agrupa mensagens soltas numa mesma chamada"
+    - verbo: executar
+      texto: "isolar uma chamada específica de uma captura com várias"
+    - verbo: escolher
+      texto: "escolher entre ver chamadas agrupadas e ver pacotes em sequência"
+
+  modelo_mental: |
+    ### O que costura as mensagens
+
+    Cada mensagem SIP carrega um cabeçalho `Call-ID`, e ele é o mesmo em todas
+    as mensagens **daquela** chamada — do `INVITE` ao último `200`. Chamadas
+    diferentes têm `Call-ID` diferentes.
+
+    É só isso que existe para agrupar. As mensagens não vêm juntas no arquivo,
+    não vêm em ordem, e não têm nada além desse identificador dizendo que fazem
+    parte da mesma história.
+
+    ### Duas maneiras de olhar o mesmo arquivo
+
+    | | o que mostra | serve para |
+    |---|---|---|
+    | `tshark` | um pacote por linha, em ordem de chegada | ver detalhe, campo, filtro fino |
+    | `sngrep` | uma linha por CHAMADA, já agrupada | achar a chamada no meio de muitas |
+
+    O `sngrep` faz o agrupamento por `Call-ID` sozinho e mostra o que importa
+    de cada chamada: quem ligou, para quem, em que estado terminou.
+
+    ### O modo que você vai usar todo dia
+
+    O `sngrep` é, antes de tudo, uma tela. Rodando `sngrep -d lo` ele fica ao
+    vivo, listando as chamadas conforme acontecem — e essa é a forma como ele é
+    usado no dia a dia.
+
+    A navegação é toda por teclado:
+
+    | tecla | faz |
+    |---|---|
+    | `↑` `↓` (ou `k` `j`) | anda pela lista de chamadas |
+    | `Enter` | abre o diagrama daquela chamada, mensagem a mensagem |
+    | `Esc` ou `q` | volta uma tela |
+    | `F2` (ou `s`) | salva o que está selecionado num arquivo |
+    | `F1`, `h` ou `?` | ajuda com todas as teclas |
+
+    Vale abrir agora, no seu terminal, e navegar: ver o diagrama de uma chamada
+    subir e descer entre os dois lados ensina mais sobre a ordem do diálogo do
+    que qualquer lista.
+
+    ### O modo que deixa prova
+
+    A tela não gera arquivo, e chamado se resolve com anexo. Por isso o
+    `sngrep` também roda **sem interface**: lê uma captura grande, escolhe as
+    chamadas que casam com um texto, e grava só elas num arquivo novo.
+
+    É esse recorte que se manda para a operadora — em vez do arquivo de 200 MB
+    com a central inteira, o pedacinho que prova o problema.
+
+    Um detalhe que economiza confusão: o texto de busca é comparado com a
+    mensagem que **abre** a chamada, o `INVITE`. Procurar por `486` não acha a
+    chamada que terminou em 486, porque o `486` está na resposta, não no
+    `INVITE`. Procure pelo que identifica a chamada — o número discado.
+
+  anatomia:
+    - linha: "sngrep -N -q -I /usr/share/devlab/central.pcap -O /root/chamada-2002.pcap 2002"
+      partes:
+        - trecho: "sngrep"
+          papel: comando
+          explica: "o leitor de chamadas: agrupa por Call-ID em vez de listar pacote"
+        - trecho: "-N"
+          papel: opcao
+          explica: "sem interface — não abre a tela, só processa e sai; é o que permite usá-lo dentro de um script"
+        - trecho: "-q"
+          papel: opcao
+          explica: "silencioso: não imprime as chamadas achadas, porque o resultado aqui é o arquivo"
+        - trecho: "-I"
+          papel: opcao
+          explica: "lê de uma captura já gravada (é o `-r` do tshark, com outra letra)"
+        - trecho: "-O"
+          papel: opcao
+          explica: "grava as chamadas selecionadas num arquivo novo; o original não é tocado"
+        - trecho: "2002"
+          papel: argumento
+          explica: "o texto procurado na mensagem que ABRE cada chamada; aqui, o número discado"
+
+  demonstracao:
+    - comando: "tshark -r /usr/share/devlab/central.pcap -Y sip -T fields -e _ws.col.Info -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        Request: INVITE sip:2001@127.0.0.1:5060 |
+        Status: 180 Ringing |
+        Status: 200 OK (INVITE) |
+        Request: ACK sip:2001@127.0.0.1:5060 |
+        Request: BYE sip:2001@127.0.0.1:5060 |
+        Status: 200 OK (BYE) |
+        Request: INVITE sip:2002@127.0.0.1:5060 |
+        Status: 486 Busy Here |
+        Request: ACK sip:2002@127.0.0.1:5060 |
+        Request: INVITE sip:2003@127.0.0.1:5060 |
+        Status: 480 Temporarily Unavailable |
+        Request: ACK sip:2003@127.0.0.1:5060 |
+      nota: "A captura que veio da central: três chamadas misturadas, doze mensagens em ordem cronológica. Repare que dá para acompanhar porque são só três — com duzentas, essa mesma lista é ilegível."
+    - comando: "tshark -r /usr/share/devlab/central.pcap -Y sip -T fields -e sip.Call-ID -n | sort -u"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        1-21@127.0.0.1
+        1-37@127.0.0.1
+        1-50@127.0.0.1
+      nota: "Três Call-ID distintos: é o que diz que há três chamadas ali, e é a única costura entre as mensagens de cada uma. Todo o agrupamento do sngrep sai daqui."
+    - comando: "sngrep -N -q -I /usr/share/devlab/central.pcap -O /root/chamada-2002.pcap 2002"
+      saida: ""
+      nota: "Sem interface e silencioso: ele não tem nada a dizer na tela, porque o resultado é o arquivo novo. O `2002` é procurado no INVITE de cada chamada."
+    - comando: "tshark -r /root/chamada-2002.pcap -Y sip -T fields -e _ws.col.Info -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        Request: INVITE sip:2002@127.0.0.1:5060 |
+        Status: 486 Busy Here |
+        Request: ACK sip:2002@127.0.0.1:5060 |
+      nota: "O arquivo novo tem uma chamada só, inteira: o pedido, a resposta e o ACK. É isto que se anexa a um chamado — o recorte que prova, e não a captura inteira da central."
+
+  pratica_guiada:
+    - instrucao: "Conte quantas chamadas distintas existem na captura da central, pelo que as agrupa."
+      modelo: "tshark -r /usr/share/devlab/central.pcap -Y sip -T fields -e ____ -n | sort -u"
+      resposta: "tshark -r /usr/share/devlab/central.pcap -Y sip -T fields -e sip.Call-ID -n | sort -u"
+    - instrucao: "Separe a chamada do ramal 2001 para /root/t2001.pcap, sem abrir a tela."
+      modelo: "sngrep -N -q -I /usr/share/devlab/central.pcap -O /root/t2001.pcap ____"
+      resposta: "sngrep -N -q -I /usr/share/devlab/central.pcap -O /root/t2001.pcap 2001"
+    - instrucao: "Confira que no recorte sobrou só aquela chamada."
+      modelo: "tshark -r ____ -Y sip -T fields -e _ws.col.Info -n"
+      resposta: "tshark -r /root/t2001.pcap -Y sip -T fields -e _ws.col.Info -n"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você procura por `486` para achar a chamada que deu ocupado, e o sngrep não devolve nada. Por quê?"
+      resposta: |
+        Porque o texto é comparado com a mensagem que **abre** a chamada, e o
+        `486` não está lá — está na resposta que veio depois. Do ponto de vista
+        do filtro, aquela chamada começa com um `INVITE` que não contém `486`
+        em lugar nenhum.
+
+        O que identifica uma chamada no momento em que ela começa é o que está
+        no `INVITE`: o número discado, o ramal de origem, o domínio. Filtre por
+        isso, e leia o desfecho depois de separar.
+    - tipo: transferencia
+      pergunta: "A operadora pede a captura de uma reclamação. Você tem 40 minutos de central gravados. O que envia?"
+      resposta: |
+        O recorte, nunca o arquivo inteiro. Isole a chamada reclamada pelo
+        número e mande só ela.
+
+        Não é só cortesia de tamanho: a captura da central contém as chamadas
+        de **todos os outros clientes**, com números, ramais e horários. Mandar
+        o arquivo bruto para um terceiro entrega dado de quem não tem nada a
+        ver com o chamado.
+    - tipo: predicao
+      pergunta: "Você isola uma chamada com áudio e o arquivo sai com poucos kilobytes, sem RTP. O que aconteceu?"
+      resposta: |
+        O `sngrep` trabalha com a sinalização: por padrão ele separa o diálogo
+        SIP e não leva junto os pacotes de mídia daquela chamada.
+
+        Para um chamado sobre "não completa", isso basta e é até desejável.
+        Para um chamado sobre áudio, não: aí é preciso pedir a mídia também
+        (`-r`) ou recortar o RTP pelas portas do SDP com o `tshark`.
+
+objetivo_md: |
+  Captura de central vem com tudo junto. Antes de analisar, separe — e o que
+  costura as mensagens de uma mesma chamada é o `Call-ID`.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `sngrep -d lo` | ao vivo, com tela: o uso do dia a dia |
+  | `-I arquivo` | lê de uma captura já gravada |
+  | `-O arquivo` | grava as chamadas selecionadas num arquivo novo |
+  | `-N` | sem interface, para usar em script |
+  | `-q` | não imprime nada; o resultado é o arquivo |
+  | `texto` | procurado na mensagem que ABRE a chamada |
+
+  ### Sua tarefa
+
+  A captura `/usr/share/devlab/central.pcap` veio da central e tem várias
+  chamadas misturadas. Um chamado foi aberto sobre o ramal **2003**.
+
+  Separe **apenas** a chamada do 2003 para `/root/chamada-2003.pcap`, do jeito
+  que ela seria anexada ao chamado: a chamada inteira, e nenhuma outra.
+
+verificar:
+  - descricao: "/root/chamada-2003.pcap tem a chamada do 2003 inteira"
+    script: |
+      #!/bin/bash
+      ARQ=/root/chamada-2003.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"chamada-2003.pcap nao existe","dica_diagnostica":"o sngrep grava o recorte no caminho passado em -O"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"confira se o -O recebeu o caminho certo e se o -I apontou para a captura da central"}'
+        exit 1
+      fi
+      N=$(tshark -r "$ARQ" -Y 'sip.Method==INVITE' -T fields -e sip.Request-Line -n 2>/dev/null | grep -c 'sip:2003@')
+      if [ "${N:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o recorte nao contem o INVITE para o 2003","dica_diagnostica":"o texto procurado e comparado com o INVITE; procure pelo numero discado"}'
+        exit 1
+      fi
+      # A chamada INTEIRA: sem a resposta, o anexo nao prova o desfecho.
+      N=$(tshark -r "$ARQ" -Y 'sip.Status-Code==480' 2>/dev/null | grep -c .)
+      if [ "${N:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o recorte tem o pedido mas nao a resposta do destino","dica_diagnostica":"o sngrep leva a chamada inteira quando ela casa; se so veio o INVITE, confira o arquivo de entrada"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "no recorte não sobrou nenhuma outra chamada"
+    script: |
+      #!/bin/bash
+      ARQ=/root/chamada-2003.pcap
+      [ -f "$ARQ" ] || exit 1
+      # Copiar a captura da central inteira passaria no check anterior. Este
+      # cobra o que a tarefa realmente pede: SEPARAR.
+      INTRUSOS=$(tshark -r "$ARQ" -Y 'sip.Method==INVITE' -T fields -e sip.Request-Line -n 2>/dev/null \
+                 | grep -cE 'sip:(2001|2002)@')
+      if [ "${INTRUSOS:-0}" -gt 0 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o recorte ainda tem $INTRUSOS chamada(s) de outros ramais\",\"dica_diagnostica\":\"passe o numero procurado ao sngrep para que ele selecione so aquela chamada, em vez de gravar o arquivo inteiro\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  sngrep -N -q -I /usr/share/devlab/central.pcap -O /root/chamada-2003.pcap 2003
+
+dicas:
+  - "O `sngrep` lê uma captura com `-I` e grava o recorte com `-O`. Para rodar sem abrir a tela, use `-N`."
+  - "O último argumento, solto, é o texto procurado na mensagem que abre cada chamada — e o que identifica a chamada do chamado é o número discado."
+  - "sngrep -N -q -I /usr/share/devlab/central.pcap -O /root/chamada-2003.pcap 2003"
+
+erros_comuns:
+  - match: "can't parse filter expression|syntax error"
+    digita: "sngrep -N -I /usr/share/devlab/central.pcap -T /root/saida.txt 2003"
+    mensagem: "Couldn't install filter /root/saida.txt 2003 : can't parse filter expression: syntax error"
+    causa: "`-T` não recebe caminho de arquivo: é uma chave sem argumento. O caminho foi então lido como texto de busca, e o `2003` que sobrou virou filtro de captura — que não entende essa sintaxe"
+    conserto: "o arquivo de saída se indica com `-O`; deixe o texto procurado como último argumento solto"
+    categoria: flag_errada
+  - match: "Couldn't open pcap file"
+    digita: "sngrep -N -q -I /root/naoexiste.pcap -O /root/chamada-2003.pcap 2003"
+    mensagem: "Couldn't open pcap file /root/naoexiste.pcap: /root/naoexiste.pcap: No such file or directory"
+    causa: "o arquivo de ENTRADA não está nesse caminho — e repare que o sngrep ainda assim termina como se tivesse dado certo, sem criar o arquivo de saída"
+    conserto: "confira o caminho do `-I`; a captura da central deste lab está em `/usr/share/devlab/central.pcap`"
+    categoria: flag_errada
+
+cards_revisao:
+  - call-id-identifica-a-chamada
+  - sngrep-mostra-chamada-nao-pacote
+  - isolar-antes-de-analisar

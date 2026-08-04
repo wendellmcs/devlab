@@ -16,6 +16,11 @@
 # saber se a chamada completou. Atenção: é um veredito de SINALIZAÇÃO. Uma
 # chamada muda continua contando como bem-sucedida aqui, e é justamente por isso
 # que "completou" e "tem áudio" são duas perguntas diferentes.
+#
+# `--destino` troca o COMPORTAMENTO de quem atende. Os nomes são sintomas ("o
+# ramal deu ocupado"), nunca códigos: quem liga para um telefone descobre o
+# código lendo a resposta, e é isso que a trilha ensina. Um `--destino 486`
+# entregaria de graça a resposta do exercício na própria linha de comando.
 set -uo pipefail
 
 PORTA_SIP=5060
@@ -24,20 +29,62 @@ RTP_DESTINO=6000
 RTP_ORIGEM=6100
 REGISTRO=/var/lib/devlab/ultima-chamada
 CENARIOS=/usr/share/sipp/cenarios
+# Escrito pelo `lab.break` da lição que quer que a chamada JÁ nasça com defeito.
+# Sem ele o destino é `atende`, e é isso que mantém a lição 1 inalterada.
+DESTINO_PADRAO=/var/lib/devlab/destino-padrao
 
 duracao=1        # quantas chamadas
 silencioso=0
+destino=""
+# O número discado, que vira o usuário da Request-URI (`INVITE sip:NUMERO@...`).
+# `service` é o padrão do SIPp e fica como padrão aqui para não mudar a chamada
+# que a lição 1 já gravou. Trocá-lo é o que permite ter, numa captura só, várias
+# chamadas distinguíveis — que é como se isola uma chamada no dia a dia.
+numero=service
+
+# Nome do sintoma → cenário de quem atende. Só `atende` completa a chamada e
+# devolve áudio; os outros recusam, cada um com o seu código final.
+cenario_de() {
+  case "$1" in
+    atende)       echo "uas-com-audio.xml" ;;
+    ocupado)      echo "uas-ocupado.xml" ;;
+    desconhecido) echo "uas-desconhecido.xml" ;;
+    ausente)      echo "uas-ausente.xml" ;;
+    sem-codec)    echo "uas-sem-codec.xml" ;;
+    sobrecarga)   echo "uas-sobrecarga.xml" ;;
+    *) return 1 ;;
+  esac
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
     -n|--chamadas)  duracao="$2"; shift 2 ;;
     -q|--silencioso) silencioso=1; shift ;;
+    -d|--destino)   destino="$2"; shift 2 ;;
+    -N|--numero)    numero="$2"; shift 2 ;;
     -h|--ajuda)
-      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+      echo
+      echo "  --destino atende|ocupado|desconhecido|ausente|sem-codec|sobrecarga"
+      echo "  --numero  NUMERO discado (padrão: service)"
       exit 0 ;;
     *) echo "opção desconhecida: $1" >&2; exit 2 ;;
   esac
 done
+
+if [ -z "$destino" ]; then
+  if [ -r "$DESTINO_PADRAO" ]; then
+    destino=$(tr -d '[:space:]' < "$DESTINO_PADRAO")
+  else
+    destino=atende
+  fi
+fi
+
+if ! CENARIO_UAS=$(cenario_de "$destino"); then
+  echo "destino desconhecido: $destino" >&2
+  echo "use um de: atende ocupado desconhecido ausente sem-codec sobrecarga" >&2
+  exit 2
+fi
 
 dizer() { [ "$silencioso" -eq 1 ] || echo "$@"; }
 
@@ -56,7 +103,7 @@ dizer "→ atendendo em 127.0.0.1:$PORTA_SIP (aguardando INVITE)"
 # faria o lado que atende mandar mídia duas vezes — inclusive antes de quem
 # ligou ter aberto a porta de RTP, o que enchia toda captura de "ICMP port
 # unreachable". Ruído que o aluno não tem como explicar na primeira lição.
-sipp -sf "$CENARIOS/uas-com-audio.xml" \
+sipp -sf "$CENARIOS/$CENARIO_UAS" \
      -p "$PORTA_SIP" -i 127.0.0.1 \
      -min_rtp_port "$RTP_DESTINO" -max_rtp_port "$((RTP_DESTINO + 8))" \
      -trace_stat -stf "$REGISTRO/quem-atendeu.csv" \
@@ -64,7 +111,7 @@ sipp -sf "$CENARIOS/uas-com-audio.xml" \
 sleep 1
 
 dizer "→ ligando de 127.0.0.1:$PORTA_SIP_ORIGEM"
-sipp -sn uac_pcap "127.0.0.1:$PORTA_SIP" -i 127.0.0.1 -p "$PORTA_SIP_ORIGEM" \
+sipp -sn uac_pcap "127.0.0.1:$PORTA_SIP" -s "$numero" -i 127.0.0.1 -p "$PORTA_SIP_ORIGEM" \
      -min_rtp_port "$RTP_ORIGEM" -max_rtp_port "$((RTP_ORIGEM + 8))" \
      -m "$duracao" -r 1 -timeout 30 \
      -trace_stat -stf "$REGISTRO/quem-ligou.csv" \

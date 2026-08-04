@@ -1,0 +1,286 @@
+id: voip-op-02-dialogo
+trilha: voip-troubleshooting
+nivel: operador
+ordem: 2
+titulo: "A chamada inteira cabe em seis mensagens"
+capacidade: "Sei achar as mensagens SIP dentro de uma gravação e dizer, na ordem, o que cada lado falou."
+xp: 25
+prereqs: [voip-op-01-capturar]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  # root pelo mesmo motivo da lição 1: capturar exige CAP_NET_RAW. Decisão 20.
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+
+ensina:
+  conceitos:
+    - id: sip-e-pedido-e-resposta
+      titulo: "SIP é conversa: um lado faz um pedido com nome, o outro devolve um número"
+    - id: dialogo-tem-ordem
+      titulo: "as mensagens têm ordem obrigatória, e o ponto onde ela para é o diagnóstico"
+    - id: filtro-de-exibicao
+      titulo: "o filtro de exibição escolhe o que se lê da gravação, sem alterar o arquivo"
+  comandos: [tshark]
+
+ensino:
+  gancho: |
+    Você fez o que a lição 1 ensinou: a chamada está gravada. Abre o arquivo e
+    são **mais de mil pacotes**.
+
+    Só seis interessam.
+
+    Os outros mil são o áudio — e áudio não explica por que a chamada não
+    completou. A conversa que decide tudo (quem ligou, se tocou, se atenderam,
+    quem desligou) são seis mensagens de texto no meio daquilo. Esta lição é
+    sobre achá-las e lê-las na ordem.
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar as mensagens SIP dentro de uma captura com milhares de pacotes"
+    - verbo: descrever
+      texto: "descrever, na ordem, o que cada lado disse durante a chamada"
+    - verbo: diagnosticar
+      texto: "diagnosticar em que ponto do diálogo uma chamada parou"
+
+  modelo_mental: |
+    SIP é uma conversa por escrito, e ela tem só dois tipos de fala:
+
+    - **Pedido** — tem NOME: `INVITE` (quero falar com você), `ACK` (recebi),
+      `BYE` (estou desligando).
+    - **Resposta** — tem NÚMERO: `180` (está tocando), `200` (deu certo).
+
+    Uma chamada normal e completa são seis falas, sempre nesta ordem:
+
+    | # | quem fala | mensagem | o que significa |
+    |---|---|---|---|
+    | 1 | quem liga | `INVITE` | quero abrir uma chamada com você |
+    | 2 | quem atende | `180` | achei o destino, está tocando |
+    | 3 | quem atende | `200` | atenderam — pode falar |
+    | 4 | quem liga | `ACK` | recebi o "atenderam", combinado |
+    | 5 | quem desliga | `BYE` | acabou |
+    | 6 | o outro lado | `200` | recebi, encerrado |
+
+    **É a ordem que diagnostica.** Onde a conversa para diz o que investigar:
+
+    - Parou no `INVITE`, sem resposta nenhuma → o outro lado não recebeu ou não
+      respondeu. Problema de caminho: rede, endereço, porta.
+    - Parou depois do `180` → chegou lá, tocou, e ninguém atendeu.
+    - Chegou ao `200` e ao `ACK` → a **sinalização funcionou**. Se ainda assim
+      o cliente reclama, o problema não está aqui: está no áudio, que é outro
+      assunto e outro fluxo.
+
+    A ferramenta para ler isso é o `tshark`: é o mesmo motor do Wireshark, sem
+    janela. E a peça que o torna utilizável é o **filtro de exibição** (`-Y`):
+    ele escolhe o que aparece na tela e **não altera o arquivo**. Filtrar não
+    apaga nada — a gravação continua inteira, com os mil pacotes de áudio
+    esperando a hora deles.
+
+  anatomia:
+    - linha: "tshark -r /root/chamada.pcap -Y sip -n"
+      partes:
+        - trecho: "tshark"
+          papel: comando
+          explica: "o leitor de captura: decodifica o que o gravador gravou e explica o protocolo"
+        - trecho: "-r"
+          papel: opcao
+          explica: "lê de um arquivo já gravado, em vez de escutar a rede"
+        - trecho: "/root/chamada.pcap"
+          papel: argumento
+          explica: "a gravação feita antes; ela não é modificada em momento algum"
+        - trecho: "-Y"
+          papel: opcao
+          explica: "filtro de EXIBIÇÃO: escolhe o que mostrar depois de decodificar tudo"
+        - trecho: "sip"
+          papel: argumento
+          explica: "o filtro em si — só as mensagens do protocolo SIP, escondendo o áudio"
+        - trecho: "-n"
+          papel: opcao
+          explica: "não traduz endereço nem porta em nome; em telefonia, sempre"
+
+  demonstracao:
+    - comando: "tcpdump -i lo -w /root/exemplo.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Os três tempos da lição 1, numa linha só: gravador de pé, chamada, gravador parado. Agora existe o que ler."
+    - comando: "tshark -r /root/exemplo.pcap -Y sip -T fields -e _ws.col.Info -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        Request: INVITE sip:service@127.0.0.1:5060 |
+        Status: 180 Ringing |
+        Status: 200 OK (INVITE) |
+        Request: ACK sip:service@127.0.0.1:5060 |
+        Request: BYE sip:service@127.0.0.1:5060 |
+        Status: 200 OK (BYE) |
+      nota: "As seis mensagens, na ordem. O `-T fields -e _ws.col.Info` pede só a coluna de resumo — sem número de pacote, sem horário e sem tamanho, que mudam a cada execução e atrapalham a leitura. Repare no aviso do tshark sobre rodar como root: ele é normal aqui (decisão 20) e não é erro."
+    - comando: "tcpdump -i lo -w /root/recusada.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --destino ocupado; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Agora uma chamada que NÃO completa. `--destino ocupado` faz o outro lado se comportar como um ramal ocupado — o mesmo que o cliente relata quando diz 'não consigo falar com o fulano'."
+    - comando: "tshark -r /root/recusada.pcap -Y sip -T fields -e _ws.col.Info -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        Request: INVITE sip:service@127.0.0.1:5060 |
+        Status: 486 Busy Here |
+        Request: ACK sip:service@127.0.0.1:5060 |
+      nota: "Três mensagens, não seis. A conversa morre logo depois do pedido: não houve `180`, não houve `200`, não houve `BYE` — porque nunca houve chamada para desligar. O número da resposta diz o motivo, e é o assunto da próxima lição; o que esta lição cobra é enxergar que o diálogo PAROU, e onde."
+
+  pratica_guiada:
+    - instrucao: "Grave uma chamada nova em /root/treino.pcap — os três tempos da lição 1, numa linha só."
+      modelo: "tcpdump -i lo -w /root/treino.pcap -q 2>/dev/null & sleep 2; ____ -q; sleep 2; pkill -x tcpdump"
+      resposta: "tcpdump -i lo -w /root/treino.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump"
+    - instrucao: "Mostre só as mensagens SIP dessa gravação, sem traduzir porta em nome."
+      modelo: "tshark -r /root/treino.pcap -Y ____ -n"
+      resposta: "tshark -r /root/treino.pcap -Y sip -n"
+    - instrucao: "Peça só a coluna de resumo, uma mensagem por linha."
+      modelo: "tshark -r /root/treino.pcap -Y sip -T fields -e ____ -n"
+      resposta: "tshark -r /root/treino.pcap -Y sip -T fields -e _ws.col.Info -n"
+    - instrucao: "Guarde essa lista num arquivo, para anexar ao chamado."
+      modelo: "tshark -r /root/treino.pcap -Y sip -T fields -e _ws.col.Info -n > ____"
+      resposta: "tshark -r /root/treino.pcap -Y sip -T fields -e _ws.col.Info -n > /root/treino.txt"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "O arquivo tem milhares de pacotes, mas `-Y sip` não mostra nada. O que isso sugere?"
+      resposta: |
+        Que há tráfego, e que o tshark não o reconheceu como SIP. O motivo mais
+        comum é a **porta**: o tshark decide o decodificador pela porta, e
+        assume SIP na 5060/5061. Um tronco em 5080 aparece como UDP genérico e
+        o filtro `sip` não casa com nada — o diálogo está no arquivo, mas
+        rotulado como dado bruto.
+
+        Ou seja: "não achei SIP" quase nunca quer dizer "não houve SIP".
+    - tipo: diagnostico
+      pergunta: "O diálogo tem `INVITE` e `180`, e para aí. O que aconteceu, e para que lado você olha?"
+      resposta: |
+        O pedido chegou ao destino e o destino tocou — então caminho, endereço
+        e porta estão bons, e não adianta procurar problema de rede. O que
+        faltou foi o `200`: ninguém atendeu, ou o aparelho tocou e a chamada
+        foi abandonada antes.
+
+        Repare no que a ordem já eliminou: com um `180` na mão, "não chega
+        nada lá" deixou de ser hipótese.
+    - tipo: transferencia
+      pergunta: "Numa central de verdade há 40 chamadas ao mesmo tempo. `-Y sip` mostra as 40 misturadas. Como separar uma?"
+      resposta: |
+        Toda mensagem de uma mesma chamada carrega o mesmo `Call-ID` — é o
+        número do processo daquela conversa, e ele não se repete entre
+        chamadas. Filtrando por ele, sobram só as mensagens de uma chamada.
+
+        É exatamente isso que o `sngrep` faz sozinho, agrupando a tela por
+        `Call-ID` em vez de listar pacote a pacote.
+
+objetivo_md: |
+  Uma gravação de chamada é quase toda áudio. O diagnóstico está nas poucas
+  mensagens de texto no meio dela — e lê-las na ordem é o que transforma
+  "não funciona" em "parou aqui".
+
+  | Peça | Para que serve |
+  |---|---|
+  | `-r arquivo` | lê uma gravação em vez de escutar a rede |
+  | `-Y sip` | mostra só as mensagens SIP; não altera o arquivo |
+  | `-T fields` | imprime campos escolhidos, em vez da linha completa |
+  | `-e _ws.col.Info` | o campo "resumo da mensagem" — o que interessa aqui |
+  | `-n` | não traduz endereço nem porta em nome |
+  | `>` | manda a saída para um arquivo |
+
+  ### Sua tarefa
+
+  Grave uma chamada completa em `/root/chamada.pcap` e escreva em
+  `/root/dialogo.txt` a lista das mensagens SIP dessa chamada, **uma por
+  linha e na ordem em que aconteceram**.
+
+  A chamada precisa ser inteira: começar no `INVITE` e terminar no `BYE`. Se
+  você parar a gravação cedo demais, o final da conversa não estará lá.
+
+verificar:
+  - descricao: "/root/chamada.pcap contém uma chamada inteira, do INVITE ao BYE"
+    script: |
+      #!/bin/bash
+      ARQ=/root/chamada.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"chamada.pcap nao existe","dica_diagnostica":"grave a chamada com tcpdump -i lo -w /root/chamada.pcap antes de ler"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      # Cada extremo do dialogo, separadamente: sem o BYE a gravacao parou no
+      # meio, e o aluno nao teria como listar as seis mensagens.
+      falta() {
+        N=$(tshark -r "$ARQ" -Y "$1" 2>/dev/null | grep -c .)
+        [ "${N:-0}" -lt 1 ]
+      }
+      if falta "sip.Method==INVITE"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem INVITE","dica_diagnostica":"a captura precisa estar de pe ANTES de devlab-chamada"}'
+        exit 1
+      fi
+      if falta "sip.Method==BYE"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura tem o comeco da chamada mas nao o fim","dica_diagnostica":"so pare o tcpdump DEPOIS que devlab-chamada terminar; o BYE e a ultima mensagem"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/dialogo.txt lista as seis mensagens na ordem certa"
+    script: |
+      #!/bin/bash
+      ARQ=/root/dialogo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"dialogo.txt nao existe","dica_diagnostica":"redirecione a saida do tshark para o arquivo com >"}'
+        exit 1
+      fi
+      # Uma mensagem por linha, e de cada linha vale o PRIMEIRO indicador que
+      # aparece. Assim tanto `-e _ws.col.Info` ("Status: 200 OK (INVITE)")
+      # quanto `-e sip.Method -e sip.Status-Code` normalizam para a mesma
+      # sequencia, e o aluno nao e reprovado por ter escolhido outra projecao.
+      SEQ=""
+      while IFS= read -r linha; do
+        token=$(printf '%s' "$linha" | grep -oE 'INVITE|ACK|BYE|[0-9]{3}' | head -1)
+        [ -n "$token" ] && SEQ="$SEQ $token"
+      done < "$ARQ"
+      SEQ="${SEQ# }"
+      if [ "$SEQ" != "INVITE 180 200 ACK BYE 200" ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a ordem lida foi [$SEQ], e a de uma chamada completa e [INVITE 180 200 ACK BYE 200]\",\"dica_diagnostica\":\"o arquivo precisa ter uma mensagem por linha, so as mensagens SIP e nenhuma linha a mais; confira se filtrou com -Y sip\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/chamada.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  tshark -r /root/chamada.pcap -Y sip -T fields -e _ws.col.Info -n > /root/dialogo.txt
+
+dicas:
+  - "São duas etapas: primeiro gravar a chamada inteira (lição 1), depois ler a gravação. O filtro que esconde o áudio e deixa só a conversa é `-Y sip`."
+  - "Para uma mensagem por linha, sem número de pacote nem horário, peça só a coluna de resumo: `-T fields -e _ws.col.Info`. O `>` grava a saída no arquivo."
+  - "tshark -r /root/chamada.pcap -Y sip -T fields -e _ws.col.Info -n > /root/dialogo.txt"
+
+erros_comuns:
+  - match: "doesn't exist|No such file or directory"
+    digita: "tshark -r /root/chamada.pcap -Y sip"
+    mensagem: "tshark: The file \"/root/chamada.pcap\" doesn't exist."
+    causa: "o leitor procurou uma gravação que não está nesse caminho — normalmente porque a captura foi feita com outro nome, ou nunca foi feita"
+    conserto: "confira o caminho que você passou para o `-w` na hora de gravar; é ele que o `-r` tem de receber"
+    categoria: flag_errada
+  - match: "Filter .* isn't a valid|neither a field nor a protocol name"
+    digita: "tshark -r /root/chamada.pcap -Y \"port 5060\""
+    mensagem: "tshark: \"port\" is neither a field nor a protocol name."
+    causa: "`port 5060` é sintaxe de filtro de CAPTURA (a do tcpdump), e o `-Y` é filtro de EXIBIÇÃO, que fala outra língua"
+    conserto: "no `-Y` use nome de protocolo ou campo, como `sip` ou `udp.port == 5060`"
+    categoria: sintaxe
+  - match: "Running as user \"root\""
+    digita: "tshark -r /root/chamada.pcap -Y sip"
+    mensagem: "Running as user \"root\" and group \"root\". This could be dangerous."
+    causa: "não é erro: é um aviso que o tshark dá sempre que roda como root, e nestes labs ele roda como root de propósito, porque capturar exige privilégio"
+    conserto: "ignore o aviso; se quiser a saída limpa, mande a mensagem para o lixo com `2>/dev/null`"
+    categoria: conceitual
+
+cards_revisao:
+  - sip-e-pedido-e-resposta
+  - dialogo-tem-ordem
+  - filtro-de-exibicao

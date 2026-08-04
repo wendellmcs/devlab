@@ -115,6 +115,31 @@ Dois corolários que economizam depuração:
   correspondem ao que foi enviado; compare **sentidos entre si**, ou use
   `tshark -z rtp,streams`.
 
+### Refinamento medido ao escrever as lições 5 e 7
+
+A tabela acima diz o essencial e a contagem merece uma correção. Medido com a
+chamada real do lab (o lado que atende toca 5 s de G.711, ou seja 250 pacotes
+de 20 ms), contando UDP cru por sentido:
+
+| | pacotes enviados | pacotes na captura |
+|---|---|---|
+| sem regra | 250 | **500** (2×) |
+| DROP em INPUT na porta de destino | 250 | **250** (1×) |
+
+Ou seja: em `lo` a duplicação **só acontece quando o pacote é entregue**. O
+descartado é gravado uma vez (na saída) e não chega a ser gravado na entrada.
+A consequência prática tem dois lados:
+
+- O que a decisão 21 afirma continua de pé, e é o que importa: **os pacotes
+  aparecem na captura, no sentido certo, e a aplicação não recebe nenhum.** A
+  lista de sentidos de uma chamada muda é idêntica à de uma chamada boa —
+  verificado, e é a demonstração central da lição 5.
+- Mas **não se pode ensinar "a contagem caiu pela metade" como técnica.** Isso
+  é artefato da loopback. Numa interface real não há duplicação nenhuma, o
+  descarte em INPUT não muda a contagem, e o mesmo defeito ficaria invisível
+  também no número. Por isso as lições comparam **presença de sentido** e
+  consultam o contador do firewall — nunca o total de pacotes.
+
 ## 22. A mídia RTP é sintetizada no build, não baixada
 
 O pacote `sip-tester` do Debian/Ubuntu instala o cenário `uac_pcap`, que
@@ -128,6 +153,61 @@ A-law e um dígito RFC 4733). É a mesma razão pela qual a saída das demonstra
 é capturada de container real e não escrita de cabeça (decisão 14): um blob
 binário baixado de terceiro no build envelhece em silêncio e ninguém consegue
 dizer o que tem dentro.
+
+## 23. Cada código de recusa é um cenário próprio, e o aluno pede por SINTOMA
+
+As lições 3 e 4 precisam de chamadas que terminem em 404, 480, 486, 488 e 503.
+A forma econômica seria um cenário só, parametrizado — e ela **não funciona**:
+o SIPp valida o código ao CARREGAR o cenário, antes de substituir palavra-chave
+alguma. Medido:
+
+```
+$ sipp -sf uas-recusa.xml -key codigo 486 -key motivo "Busy Here" ...
+Response codes must be in the range of 100-700
+```
+
+Pior que falhar, falha em silêncio para quem está olhando: a mensagem vai para
+o log do processo em segundo plano, e o sintoma aparente é um UAS que sobe e
+nunca responde — quem liga só vê `ICMP port unreachable`. Por isso são cinco
+arquivos, cada um com o número literal onde o parser o encontra.
+
+A segunda metade da decisão é de conteúdo: `devlab-chamada --destino` recebe
+**nome de sintoma** (`ocupado`, `ausente`, `sem-codec`, `sobrecarga`,
+`desconhecido`), nunca o código. Um `--destino 486` publicaria a resposta do
+exercício na própria linha de comando — o aluno leria o que ele mesmo digitou
+em vez de ler a captura. Pelo mesmo motivo, nas lições em que a tarefa é
+descobrir o código, quem escolhe o destino é o `lab.break`, e o aluno roda
+`devlab-chamada` sem opção nenhuma: ele reproduz a chamada do cliente, não a
+resposta do gabarito.
+
+## 24. A captura com várias chamadas é gerada no BUILD, não no `lab.setup`
+
+A lição 6 (sngrep) precisa de uma captura com várias chamadas misturadas, que é
+o que existe numa central de verdade. Produzi-la são três chamadas reais:
+**~30 s medidos**, contra um teto de 60 s para o setup de um lab. Metade do
+orçamento gasto em toda criação de lab, e numa máquina mais lenta a lição
+simplesmente não abriria.
+
+Ela passou a ser gerada no build da imagem (`gerar-captura-central.sh`), o que
+resolve três coisas de uma vez: o lab nasce instantâneo, o arquivo fica
+**congelado** — e portanto a demonstração da lição tem saída estável entre
+execuções, que é o que `capturar-demonstracao.py --conferir` exige — e o
+cenário fica mais realista, porque o técnico de verdade recebe um arquivo
+pronto, gravado por outra pessoa.
+
+O script falha o build se qualquer uma das três chamadas não estiver na captura.
+Entregar ao aluno uma lição cuja matéria-prima veio pela metade é pior do que
+não construir a imagem.
+
+## 25. `capturar-demonstracao.py` passou a rodar o `lab.break`
+
+Ele já rodava o `lab.setup` e ignorava o `break`. Enquanto nenhuma lição usava
+injeção de falha isso não tinha sintoma; a partir da lição 3 tem. Uma lição de
+quebra/conserta entrega ao aluno um lab **já defeituoso**, e a demonstração
+gravada num lab saudável mostraria uma saída que ele nunca vai ver — deriva
+inventada justamente pelo arquivo que existe para impedir deriva.
+
+O validador já rodava os dois. Agora os dois motores reproduzem o mesmo lab.
 
 ---
 

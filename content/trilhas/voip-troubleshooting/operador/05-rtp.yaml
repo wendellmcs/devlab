@@ -1,0 +1,295 @@
+id: voip-op-05-rtp
+trilha: voip-troubleshooting
+nivel: operador
+ordem: 5
+titulo: "A voz vai por fora, e tem dois sentidos"
+capacidade: "Sei provar, numa gravação, que existe áudio em cada sentido — e sei o que essa prova não prova."
+xp: 30
+prereqs: [voip-op-04-sdp]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # NET_ADMIN além do NET_RAW: a lição precisa DESCARTAR pacote para mostrar
+  # que a captura continua igual quando o áudio não chega. Sem isso o aluno
+  # teria de acreditar na afirmação em vez de vê-la.
+  capacidades: [NET_RAW, NET_ADMIN]
+
+ensina:
+  conceitos:
+    - id: midia-e-outro-fluxo
+      titulo: "o áudio não passa pelas portas do SIP: é outro fluxo, em outras portas"
+    - id: cada-sentido-e-um-fluxo
+      titulo: "ida e volta são fluxos independentes; um pode existir sem o outro"
+    - id: captura-nao-prova-entrega
+      titulo: "a captura prova que o pacote passou pelo ponto de captura, não que a aplicação o recebeu"
+  comandos: [iptables]
+
+ensino:
+  gancho: |
+    "A chamada completa, atende, e eu não ouço nada."
+
+    Você já sabe que a sinalização está boa: teve `200 OK`, teve `ACK`, os dois
+    lados fecharam codec. E o cliente continua sem ouvir. Se você insistir em
+    olhar SIP, vai passar a tarde confirmando que está tudo certo.
+
+    Não está no SIP porque a voz **não vai pelo SIP**. Ela vai por fora, em
+    outro fluxo, em outras portas — e tem **dois sentidos, independentes**. Um
+    pode funcionar e o outro não, e é isso que produz o clássico "eu ouço ele,
+    ele não me ouve".
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar o fluxo de áudio de uma chamada e as portas que ele usa"
+    - verbo: executar
+      texto: "provar, numa gravação, que existe áudio em cada um dos dois sentidos"
+    - verbo: explicar
+      texto: "explicar por que ver o pacote na captura não prova que a aplicação o recebeu"
+
+  modelo_mental: |
+    Uma chamada são **dois assuntos** que andam separados:
+
+    | | protocolo | portas | o que carrega |
+    |---|---|---|---|
+    | sinalização | SIP | 5060, 5061 | quem liga, se toca, quem desliga |
+    | mídia | RTP | as portas do `m=audio` | a voz |
+
+    As portas da mídia foram combinadas no SDP (lição 4): quem ligou pediu
+    `6100`, quem atendeu pediu `6000`. É nelas que a voz trafega — e nenhuma
+    delas é 5060.
+
+    **Cada sentido é um fluxo próprio.** De 6100 para 6000 vai a voz de quem
+    ligou; de 6000 para 6100 vai a voz de quem atendeu. São independentes: um
+    firewall, uma rota ou um NAT podem quebrar só um deles. Daí os sintomas
+    assimétricos que todo mundo já ouviu — "só eu escuto", "ele me ouve mas eu
+    não ouço ele".
+
+    Por isso a pergunta certa nunca é "tem áudio?", e sim **"tem áudio em cada
+    sentido?"**.
+
+    ### O que a captura NÃO prova
+
+    Aqui mora a armadilha mais cara do troubleshooting de VoIP, e ela é
+    contraintuitiva.
+
+    O gravador se enxerta na **placa**, antes do firewall. Um pacote que chega
+    à máquina e é descartado pelo firewall **aparece na captura assim mesmo** —
+    inteiro, bonito, no sentido certo. A aplicação nunca o vê.
+
+    Ou seja: "capturei no servidor e estou vendo o RTP chegar, então a rede
+    está boa" é uma conclusão **falsa**. Ver na captura prova que o pacote
+    chegou até o ponto de captura. Não prova entrega.
+
+    E uma advertência sobre contagem, específica deste lab: em `lo` um pacote
+    entregue é gravado **duas vezes** (uma na saída, outra na entrada), e um
+    pacote descartado, só uma. Medido. Então número absoluto de pacote na
+    loopback não corresponde ao que foi enviado — **compare os sentidos entre
+    si**, não os totais.
+
+  anatomia:
+    - linha: "tshark -r /root/chamada.pcap -Y \"rtp and not icmp\" -n"
+      partes:
+        - trecho: "tshark"
+          papel: comando
+          explica: "o mesmo leitor das lições anteriores"
+        - trecho: "-r"
+          papel: opcao
+          explica: "lê a gravação"
+        - trecho: "-Y"
+          papel: opcao
+          explica: "filtro de exibição"
+        - trecho: "rtp and not icmp"
+          papel: argumento
+          explica: "só a mídia. O `not icmp` tira um ruído legítimo: quando um lado manda áudio antes de o outro abrir a porta, volta um aviso de porta fechada que CARREGA dentro dele uma cópia do pacote de áudio — e sem esse pedaço ele apareceria na lista como se fosse fluxo"
+        - trecho: "-n"
+          papel: opcao
+          explica: "não traduz endereço nem porta em nome"
+
+  demonstracao:
+    - comando: "tcpdump -i lo -w /root/ok.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Uma chamada normal, gravada como sempre."
+    - comando: "tshark -r /root/ok.pcap -Y \"rtp and not icmp\" -T fields -e ip.src -e udp.srcport -e ip.dst -e udp.dstport -n | sort -u"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        127.0.0.1	6000	127.0.0.1	6100
+        127.0.0.1	6100	127.0.0.1	6000
+      nota: "Duas linhas, e é isso que se quer ver: uma de 6100 para 6000 e outra de 6000 para 6100. Cada linha é um SENTIDO. O `sort -u` colapsa os milhares de pacotes nos poucos pares distintos — a pergunta é quais fluxos existem, não quantos pacotes vieram."
+    - comando: "iptables -A INPUT -p udp --dport 6100 -j DROP; iptables -Z INPUT; tcpdump -i lo -w /root/mudo.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Agora a chamada acontece com uma regra de firewall que DESCARTA tudo que chega na porta 6100 — ou seja, a voz de quem atendeu não vai ser entregue a quem ligou. Repare que a chamada completa mesmo assim: a sinalização não passa por essa porta. É exatamente o chamado 'atende e não ouço nada'."
+    - comando: "tshark -r /root/mudo.pcap -Y \"rtp and not icmp\" -T fields -e ip.src -e udp.srcport -e ip.dst -e udp.dstport -n | sort -u"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        127.0.0.1	6000	127.0.0.1	6100
+        127.0.0.1	6100	127.0.0.1	6000
+      nota: "**As mesmas duas linhas.** A captura de uma chamada muda é indistinguível da captura de uma chamada boa, nesta leitura. Quem parasse aqui diria ao cliente que o áudio está chegando nos dois sentidos — e estaria olhando para a prova de que ele foi descartado sem enxergá-la."
+    - comando: "iptables -L INPUT -v -n --line-numbers | grep DROP"
+      saida: |-2
+        1      250 50000 DROP       17   --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:6100
+      nota: "A prova de verdade, e ela não está na captura: o contador da regra. O firewall diz quantos pacotes ele jogou fora nessa porta. Enquanto a captura mostrava fluxo nos dois sentidos, 250 pacotes de voz eram descartados antes de chegar à aplicação."
+    - comando: "iptables -D INPUT -p udp --dport 6100 -j DROP; iptables -L INPUT -n"
+      saida: |-2
+        Chain INPUT (policy ACCEPT)
+        target     prot opt source               destination
+      nota: "Regra removida — o lab volta ao normal. `-A` acrescenta, `-D` remove a mesma regra, `-L` lista, `-Z` zera os contadores."
+
+  pratica_guiada:
+    - instrucao: "Grave uma chamada em /root/t1.pcap."
+      modelo: "tcpdump -i lo -w /root/t1.pcap -q 2>/dev/null & sleep 2; ____ -q; sleep 2; pkill -x tcpdump"
+      resposta: "tcpdump -i lo -w /root/t1.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump"
+    - instrucao: "Mostre só a mídia dessa gravação, sem o ruído das mensagens de porta fechada."
+      modelo: "tshark -r /root/t1.pcap -Y \"____ and not icmp\" -n"
+      resposta: "tshark -r /root/t1.pcap -Y \"rtp and not icmp\" -n"
+    - instrucao: "Reduza a lista aos pares de portas distintos — um por sentido."
+      modelo: "tshark -r /root/t1.pcap -Y \"rtp and not icmp\" -T fields -e udp.srcport -e udp.dstport -n | ____ -u"
+      resposta: "tshark -r /root/t1.pcap -Y \"rtp and not icmp\" -T fields -e udp.srcport -e udp.dstport -n | sort -u"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "A gravação mostra RTP só de 6000 para 6100, e nada no sentido inverso. Quem não está sendo ouvido?"
+      resposta: |
+        Quem ligou não está sendo ouvido: a voz dele sairia de 6100 e não
+        aparece. Quem ligou **ouve** normalmente, porque o fluxo de 6000 para
+        6100 existe.
+
+        É o sintoma "ele fala e eu não escuto" visto do lado certo. E repare
+        que a chamada completou e continua de pé: sinalização perfeita, mídia
+        pela metade.
+    - tipo: predicao
+      pergunta: "Você captura no servidor, vê RTP chegando nos dois sentidos, e o cliente continua sem ouvir. O que isso permite concluir?"
+      resposta: |
+        Que os pacotes chegaram **até o ponto de captura**. Só isso.
+
+        Como o gravador fica antes do firewall, um descarte local produz
+        exatamente essa cena: captura cheia, aplicação surda. A conclusão "a
+        rede está boa, o problema é o PABX" não se sustenta — ela pula do que
+        foi capturado para o que foi entregue, e são coisas diferentes.
+
+        O passo seguinte é perguntar ao software, não à captura: contador de
+        firewall, estatística do endpoint, log da aplicação.
+    - tipo: transferencia
+      pergunta: "Numa chamada pela internet, o cliente ouve a operadora e a operadora não ouve o cliente. Onde procurar?"
+      resposta: |
+        No sentido que falta — o que sai do cliente para a operadora — e nos
+        pontos que tratam os sentidos de forma assimétrica: NAT e firewall.
+
+        É o caso clássico de NAT: o equipamento do cliente anuncia no SDP um
+        endereço interno, e a operadora manda o áudio para um endereço que não
+        existe fora dali. O sentido que funciona é o que "abriu caminho"
+        primeiro. Sinalização inteira, áudio de um lado só.
+
+objetivo_md: |
+  A voz não anda pelo SIP: anda em RTP, em outras portas, e em dois fluxos
+  independentes. Provar cada sentido separadamente é o que transforma "não
+  ouço nada" num lado identificado.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `-Y "rtp and not icmp"` | só a mídia, sem o ruído de porta fechada |
+  | `-e udp.srcport` | de qual porta o pacote saiu |
+  | `-e udp.dstport` | para qual porta ele foi |
+  | `sort -u` | colapsa milhares de pacotes nos pares distintos |
+  | `iptables -L -v -n` | lista as regras COM o contador de cada uma |
+  | `iptables -Z` | zera os contadores antes de um teste |
+
+  ### Sua tarefa
+
+  Grave uma chamada completa em `/root/chamada.pcap` e escreva em
+  `/root/fluxos.txt` a prova de que houve áudio **nos dois sentidos**: uma
+  linha por sentido, mostrando de qual porta para qual porta o áudio foi.
+
+  Duas linhas bastam, e é isso que se quer: um resumo de sentidos, não a lista
+  dos milhares de pacotes.
+
+verificar:
+  - descricao: "/root/chamada.pcap tem uma chamada com áudio nos dois sentidos"
+    script: |
+      #!/bin/bash
+      ARQ=/root/chamada.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"chamada.pcap nao existe","dica_diagnostica":"grave com tcpdump -i lo -w /root/chamada.pcap antes de rodar devlab-chamada"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      # Cada sentido separadamente: uma captura que so pegou o comeco da
+      # chamada tem sinalizacao e nenhuma midia.
+      IDA=$(tshark -r "$ARQ" -Y "rtp and not icmp and udp.dstport==6000" 2>/dev/null | grep -c .)
+      VOLTA=$(tshark -r "$ARQ" -Y "rtp and not icmp and udp.dstport==6100" 2>/dev/null | grep -c .)
+      if [ "${IDA:-0}" -lt 1 ] || [ "${VOLTA:-0}" -lt 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura nao tem audio nos dois sentidos (para 6000: $IDA, para 6100: $VOLTA)\",\"dica_diagnostica\":\"deixe a captura de pe durante a chamada INTEIRA: a midia so comeca depois do ACK, alguns segundos apos o inicio\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/fluxos.txt mostra um sentido em cada linha, e os dois sentidos"
+    script: |
+      #!/bin/bash
+      ARQ=/root/fluxos.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"fluxos.txt nao existe","dica_diagnostica":"redirecione para o arquivo a lista de pares de porta, com >"}'
+        exit 1
+      fi
+      LINHAS=$(grep -c . "$ARQ")
+      if [ "${LINHAS:-0}" -gt 8 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo tem $LINHAS linhas; o que se pede e um resumo de sentidos\",\"dica_diagnostica\":\"colapse os pacotes nos pares distintos com sort -u antes de gravar\"}"
+        exit 1
+      fi
+      # Um sentido e um par ORDENADO: a porta de origem aparece antes da de
+      # destino na linha. Assim `6100 ... 6000` e `6000 ... 6100` sao lidos
+      # como sentidos opostos, sem depender do formato exato da projecao.
+      IDA=$(grep -cE '(^|[^0-9])6100([^0-9].*[^0-9]|[^0-9])6000([^0-9]|$)' "$ARQ")
+      VOLTA=$(grep -cE '(^|[^0-9])6000([^0-9].*[^0-9]|[^0-9])6100([^0-9]|$)' "$ARQ")
+      if [ "${IDA:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"falta o sentido de quem ligou para quem atendeu (6100 -> 6000)","dica_diagnostica":"a linha precisa trazer a porta de ORIGEM antes da de destino; peca -e udp.srcport -e udp.dstport nessa ordem"}'
+        exit 1
+      fi
+      if [ "${VOLTA:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"falta o sentido de quem atendeu para quem ligou (6000 -> 6100)","dica_diagnostica":"se so aparece um sentido, a captura provavelmente parou antes de a midia de volta comecar"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/chamada.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  tshark -r /root/chamada.pcap -Y "rtp and not icmp" -T fields -e udp.srcport -e udp.dstport -n 2>/dev/null | sort -u > /root/fluxos.txt
+
+dicas:
+  - "A mídia não está nas portas do SIP. Filtre por `rtp` — e acrescente `and not icmp`, senão entram na conta os avisos de porta fechada, que carregam uma cópia do pacote de áudio dentro deles."
+  - "Peça as duas portas com `-T fields -e udp.srcport -e udp.dstport`, nessa ordem, e colapse os milhares de pacotes nos pares distintos com `| sort -u`."
+  - "tshark -r /root/chamada.pcap -Y \"rtp and not icmp\" -T fields -e udp.srcport -e udp.dstport -n | sort -u > /root/fluxos.txt"
+
+erros_comuns:
+  - match: "iptables.*Permission denied|Operation not permitted.*iptables|can't initialize iptables"
+    digita: "iptables -A INPUT -p udp --dport 6100 -j DROP"
+    mensagem: "iptables v1.8.10 (nf_tables): Could not fetch rule set generation id: Permission denied (you must be root)"
+    causa: "mexer em firewall exige CAP_NET_ADMIN, que só as lições que declaram essa capacidade recebem"
+    conserto: "nesta lição o lab já tem NET_ADMIN e o shell é root; se você trocou de usuário, volte para root"
+    categoria: permissao
+  - match: "Bad rule \\(does a matching rule exist in that chain"
+    digita: "iptables -D INPUT -p udp --dport 6000 -j DROP"
+    mensagem: "iptables: Bad rule (does a matching rule exist in that chain?)."
+    causa: "o `-D` remove uma regra IDÊNTICA à descrita; qualquer diferença (a porta, o protocolo, o alvo) faz com que ele não ache nada para remover"
+    conserto: "liste antes com `iptables -L INPUT -n --line-numbers` e remova exatamente a regra que está lá"
+    categoria: flag_errada
+  - match: "Some fields aren't valid"
+    digita: "tshark -r /root/chamada.pcap -Y \"rtp and not icmp\" -T fields -e udp.port.src -n"
+    mensagem: "tshark: Some fields aren't valid:\n\tudp.port.src"
+    causa: "os campos de porta são `udp.srcport` e `udp.dstport`; `udp.port` existe, mas casa qualquer uma das duas e não distingue sentido"
+    conserto: "use `-e udp.srcport -e udp.dstport`, que é o que separa ida de volta"
+    categoria: sintaxe
+
+cards_revisao:
+  - midia-e-outro-fluxo
+  - cada-sentido-e-um-fluxo
+  - captura-nao-prova-entrega

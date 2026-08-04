@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<!-- 488 Not Acceptable Here — a negociação de MÍDIA falhou.
+
+     Este é o código que prova que SIP e áudio são duas coisas: o endereço
+     estava certo, o destino existe e está livre, e mesmo assim a chamada não
+     completa — porque os dois lados não acharam um codec em comum.
+
+     O `Warning: 399` não é enfeite. É onde o lado que recusa pode dizer em
+     texto o que o número não diz, e num troubleshooting real é a primeira
+     linha que se procura depois de ver um 488. Vem da RFC 3261 §20.43. -->
+<scenario name="UAS sem codec em comum (488)">
+
+  <recv request="INVITE" crlf="true">
+  </recv>
+
+  <send>
+    <![CDATA[
+
+      SIP/2.0 488 Not Acceptable Here
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Warning: 399 devlab "Incompatible media format: only G729 (18) offered here"
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv request="ACK" crlf="true">
+  </recv>
+
+  <timewait milliseconds="1000"/>
+
+</scenario>
