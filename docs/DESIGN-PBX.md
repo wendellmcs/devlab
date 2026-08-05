@@ -35,8 +35,17 @@ outra. Num laptop de 4 núcleos espere algo em torno de 8 a 10 minutos.
 E o portão não paga isso repetidamente: `scripts/build-imagens.sh` compara uma
 impressão digital do contexto com o label `devlab.contexto` da imagem e **não
 chama o `docker build`** quando nada mudou. O custo é uma vez por máquina e uma
-vez por mudança na imagem — a verificação por worktree (decisão 15) passa
-batido, porque o checkout tem os mesmos bytes.
+vez por mudança na imagem.
+
+Isso quase não foi verdade, e a imagem do FreeSWITCH é o que expôs. A digital
+era calculada com `find … | xargs sha256sum` **sem entrar no diretório**, e o
+`sha256sum` imprime o nome junto do hash: os nomes saíam com o caminho
+absoluto, então a digital dependia de onde o repositório estava. O mesmo commit
+conferido num `git worktree` sob `/tmp` reconstruía tudo, com `diff -r`
+acusando zero diferença. Enquanto reconstruir custava segundos ninguém notou;
+com um build de quatro minutos, a verificação da decisão 15 passaria a parecer
+lenta em vez de errada. Corrigido — as três imagens dão a mesma digital nos
+dois caminhos.
 
 O que isso preserva: a promessa do PRD §4.8, *"o primeiro build exige internet;
 depois disso, offline"*, continua literalmente verdadeira. Era o token da
