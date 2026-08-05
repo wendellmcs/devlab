@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# devlab-ramal — registra um ramal no PBX do lab e, se pedido, disca.
+#
+# Por que existe, e a razão é uma medição: o softphone `pjsua` aceita um destino
+# na linha de comando, mas quando recebe um ele DISCA ANTES DE TERMINAR O
+# REGISTRO. O PBX então responde `407 Proxy Authentication Required` a um INVITE
+# de um ramal que ainda não existe para ele, e a chamada morre ali. O sintoma é
+# cruel para quem está aprendendo: o registro aparece bem-sucedido no log, a
+# chamada some sem erro nenhum, e nada na tela liga uma coisa à outra.
+#
+# Este script impõe a ordem: registra, ESPERA o `200 OK` do REGISTER, e só então
+# disca. É a mesma razão pela qual o `devlab-chamada` existe na trilha G — o
+# aluno deve gastar o raciocínio no protocolo, não na corrida entre dois passos.
+#
+# O que ele produz é real: um REGISTER autenticado por digest (401 → REGISTER →
+# 200), e, quando há destino, INVITE → 407 → INVITE → 100 → 200 → ACK → RTP →
+# BYE. O áudio é `--null-audio`: sem placa de som o pjsua sintetiza os dois
+# sentidos, e o RTP na captura é RTP de verdade.
+#
+# O ORÁCULO para um check é o PBX, não este script — `devlab-pbx cli "sofia
+# status profile internal reg"` e o CDR em var/log/freeswitch/cdr-csv/. É a
+# mesma decisão 21 da trilha G: quem sabe se a chamada completou é o endpoint,
+# não quem observa. O arquivo de estado abaixo existe para o ALUNO ler, e para
+# distinguir "falhou o registro" de "falhou a chamada" sem abrir log de softphone.
+set -uo pipefail
+
+CLI=/usr/local/freeswitch/bin/fs_cli
+PBX=127.0.0.1
+SENHA_PADRAO=devlab
+ESTADO=/var/lib/devlab
+# A primeira porta local dos softphones. O ramal define a sua somando o próprio
+# número, então dois ramais nunca disputam porta — e a porta é PREVISÍVEL, o que
+# permite a um filtro de captura isolar um ramal específico.
+PORTA_BASE=6000
+
+uso() {
+  cat <<'FIM'
+uso: devlab-ramal <numero> [opções]
+     devlab-ramal --listar
+     devlab-ramal --parar [numero]
+
+  --discar <destino>   liga para um número depois de registrar
+  --duracao <s>        quanto tempo a chamada fica de pé (padrão: 10)
+  --senha <senha>      senha do ramal (padrão: devlab)
+  --atender            fica registrado e atende o que chegar
+  --silencioso         não imprime o andamento
+
+  --listar             mostra os ramais que este lab tem no ar
+  --parar [numero]     desliga um ramal, ou todos se nenhum for dito
+FIM
+}
+
+numero=""
+destino=""
+duracao=10
+senha=$SENHA_PADRAO
+atender=0
+silencioso=0
+acao=registrar
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --discar)     destino="${2:-}"; shift 2 ;;
+    --duracao)    duracao="${2:-}"; shift 2 ;;
+    --senha)      senha="${2:-}"; shift 2 ;;
+    --atender)    atender=1; shift ;;
+    --silencioso) silencioso=1; shift ;;
+    --listar)     acao=listar; shift ;;
+    --parar)      acao=parar; numero="${2:-}"; [ -n "$numero" ] && shift; shift ;;
+    -h|--ajuda)   uso; exit 0 ;;
+    -*)           echo "erro: opção desconhecida '$1'." >&2; uso >&2; exit 2 ;;
+    *)            numero="$1"; shift ;;
+  esac
+done
+
+diga() { [ "$silencioso" = 1 ] || echo "$@"; }
+
+mkdir -p "$ESTADO"
+
+case "$acao" in
+  listar)
+    achou=0
+    for p in "$ESTADO"/ramal-*.pid; do
+      [ -e "$p" ] || continue
+      n=$(basename "$p" .pid); n=${n#ramal-}
+      if kill -0 "$(cat "$p")" 2>/dev/null; then
+        echo "ramal $n: no ar (pid $(cat "$p"))"
+        achou=1
+      else
+        rm -f "$p"
+      fi
+    done
+    [ "$achou" = 1 ] || echo "nenhum ramal no ar."
+    exit 0
+    ;;
+  parar)
+    for p in "$ESTADO"/ramal-${numero:-*}.pid; do
+      [ -e "$p" ] || continue
+      n=$(basename "$p" .pid); n=${n#ramal-}
+      pid=$(cat "$p")
+      # 'q' pelo stdin faria o pjsua sair limpo, mas o stdin dele já foi
+      # fechado pelo subshell que o alimentou. O TERM basta: o pjsua manda o
+      # REGISTER com Expires: 0 ao receber, e o PBX vê o ramal sair.
+      kill "$pid" 2>/dev/null && diga "ramal $n: desligado"
+      rm -f "$p"
+    done
+    exit 0
+    ;;
+esac
+
+[ -n "$numero" ] || { echo "erro: diga o número do ramal." >&2; uso >&2; exit 2; }
+case "$numero" in
+  ''|*[!0-9]*) echo "erro: '$numero' não é um número de ramal." >&2; exit 2 ;;
+esac
+
+$CLI -x status >/dev/null 2>&1 || {
+  echo "erro: o FreeSWITCH não está de pé. Rode: devlab-pbx iniciar" >&2
+  exit 1
+}
+
+LOG="$ESTADO/ramal-$numero.log"
+RESUMO="$ESTADO/ramal-$numero.estado"
+PID="$ESTADO/ramal-$numero.pid"
+porta=$((PORTA_BASE + numero % 1000))
+
+: >"$LOG"
+: >"$RESUMO"
+
+# Quem responde "o ramal registrou?" é o PBX, e a razão é uma medição.
+#
+# A primeira versão esperava a linha `registration success` aparecer no log do
+# pjsua. Ela aparece — mas o pjsua escreve o stdout COM BUFFER DE BLOCO quando
+# a saída é arquivo, então a linha só chega ao disco quando o buffer enche ou o
+# processo termina. O resultado era um veredito que dependia de quantos bytes o
+# softphone tinha logado até ali: o mesmo comando dava `registro=ok` numa
+# execução e `registro=falhou` na seguinte, com o log final, nos dois casos,
+# mostrando `registration success, status=200 (OK)`.
+#
+# Um check que falha sozinho às vezes é pior do que um check que falha sempre.
+# E o oráculo certo já existia: o registro é um fato do PBX, e o PBX responde.
+registrado() {
+  $CLI -x "sofia status profile internal reg" 2>/dev/null \
+    | grep -q "^User:[[:space:]]*$numero@"
+}
+
+esperar_registro() {
+  local i=0
+  while [ $i -lt 200 ]; do   # 20 s de folga; no lab isto leva menos de 1 s
+    registrado && return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# O roteiro que vai pelo stdin do pjsua. Ele roda em PARALELO ao softphone (é
+# um pipe), e é isso que lhe permite esperar por um fato que o pjsua ainda vai
+# produzir.
+#
+# `m` abre uma chamada e a URL vem na linha seguinte; `h` desliga; `q` sai.
+roteiro() {
+  if esperar_registro; then
+    echo "registro=ok" >>"$RESUMO"
+  else
+    echo "registro=falhou" >>"$RESUMO"
+    echo "q"
+    return
+  fi
+
+  if [ -n "$destino" ]; then
+    echo "m"
+    echo "sip:$destino@$PBX"
+    sleep "$duracao"
+    echo "h"
+    sleep 1
+    echo "q"
+  elif [ "$atender" = 1 ]; then
+    # Fica de pé até alguém mandar parar. Sem isto o pjsua sairia na hora e o
+    # ramal que deveria ATENDER não estaria lá quando a chamada chegasse.
+    while :; do sleep 3600; done
+  else
+    sleep 2
+    echo "q"
+  fi
+}
+
+diga "ramal $numero: registrando em $PBX (porta local $porta)..."
+
+# `stdbuf -oL` não é o que garante o veredito — quem garante é o PBX, acima.
+# Ele está aqui para o ALUNO: sem isso o log do softphone fica vazio enquanto a
+# chamada acontece e só se materializa no fim, e um `tail -f` durante o
+# exercício não mostra nada.
+roteiro | stdbuf -oL pjsua \
+  --null-audio --no-tcp \
+  --id "sip:$numero@$PBX" \
+  --registrar "sip:$PBX" \
+  --realm '*' --username "$numero" --password "$senha" \
+  --local-port "$porta" \
+  ${atender:+--auto-answer 200} \
+  >>"$LOG" 2>&1 &
+
+pjpid=$!
+echo "$pjpid" >"$PID"
+
+if [ "$atender" = 1 ] && [ -z "$destino" ]; then
+  # Devolve o terminal ao aluno com o ramal no ar por trás — e só depois que o
+  # PBX confirma o registro, senão a próxima linha da lição chamaria um ramal
+  # que ainda não existe para ele.
+  if esperar_registro; then
+    diga "ramal $numero: registrado e atendendo. Para desligar: devlab-ramal --parar $numero"
+    exit 0
+  fi
+  diga "ramal $numero: NÃO registrou. Veja $LOG"
+  exit 1
+fi
+
+wait "$pjpid" 2>/dev/null
+rm -f "$PID"
+
+# O veredito, e ele veio de uma medição depois de uma versão ERRADA.
+#
+# A primeira versão perguntava "existe um 200 OK no log?", e isso aprova toda
+# chamada que falhou: o REGISTER que veio ANTES dela também é respondido com
+# 200 OK. Um ramal cujo INVITE morreu em `487 Request Terminated` era relatado
+# como `chamada=completou`. Num projeto em que check automático é o que diz ao
+# aluno se ele acertou, um oráculo assim é pior do que nenhum.
+#
+# O que vale é o estado da chamada no softphone. `CONFIRMED` é o estado em que
+# o 200 OK do INVITE foi recebido e o ACK saiu — só ele significa atendida:
+#
+#   Call 0 state changed to CALLING → CONNECTING → CONFIRMED
+#   Call 0 is DISCONNECTED [reason=200 (OK)]
+if [ -n "$destino" ]; then
+  if grep -q 'state changed to CONFIRMED' "$LOG" 2>/dev/null; then
+    echo "chamada=atendida" >>"$RESUMO"
+  else
+    echo "chamada=nao_atendida" >>"$RESUMO"
+  fi
+  # A razão do desligamento, como o softphone a recebeu. Num destino que não
+  # existe isto é o `404` que a lição vai cobrar; numa chamada normal, `200`.
+  razao=$(grep -oE 'reason=[0-9]+ \([^)]*\)' "$LOG" 2>/dev/null | tail -1)
+  [ -n "$razao" ] && echo "motivo_do_fim=${razao#reason=}" >>"$RESUMO"
+fi
+
+diga "--- ramal $numero ---"
+[ "$silencioso" = 1 ] || cat "$RESUMO"
+diga "log completo: $LOG"
+
+grep -q 'registro=ok' "$RESUMO" 2>/dev/null || exit 1
+[ -z "$destino" ] || grep -q 'chamada=atendida' "$RESUMO" 2>/dev/null || exit 1
+exit 0

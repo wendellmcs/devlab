@@ -18,11 +18,16 @@ nesta máquina (10 núcleos):
 
 | | medido |
 |---|---|
-| build a frio, ponta a ponta | **221 s** |
+| build a frio, ponta a ponta | **221 s** no protótipo, **235 s** na imagem final |
 | só o FreeSWITCH (`configure` + `make -j10` + `install`) | ~60 s, 407 unidades compiladas |
 | instalação em disco | **83 MB** (22 MB módulos, 57 MB áudios, 1,5 MB config) |
-| imagem single-stage, com o builder dentro | 1,92 GB — o multi-stage descarta quase tudo |
+| imagem single-stage, com o builder dentro | 1,92 GB |
+| **imagem final, multi-stage** | **661 MB** |
 | módulos compilados | 34, contra os ~100 do `modules.conf` padrão |
+
+Os 14 s a mais da imagem final pagam o pjproject e o teste de fumaça, e não os
+1,26 GB que o multi-stage descartou. Medido de novo com `--no-cache` depois de
+a imagem estar pronta: **3m55s**.
 
 A lista reduzida de módulos é metade da explicação do tempo; os núcleos são a
 outra. Num laptop de 4 núcleos espere algo em torno de 8 a 10 minutos.
@@ -93,22 +98,142 @@ Dois avisos aparecem no log e são inofensivos:
 `Failed to set SCHED_FIFO scheduler` e `Could not set nice level` — ambos por
 falta de `CAP_SYS_NICE`, que o lab não concede e o FreeSWITCH não exige.
 
-## 42. `pjsua` não está empacotado, e o PRD conta com ele
+## 42. O softphone é o `pjsua`, compilado — RESOLVIDO
 
 O PRD nomeia `pjsua` em §7 F.3 e G.4 ("softphone `pjsua` real"). Medido: nem
 `pjsua`, nem `pjproject`, nem `libpjproject-dev`, nem `python3-pjsua2` existem
-nos repositórios do Ubuntu 24.04.
+nos repositórios do Ubuntu 24.04. O que existe empacotado: `linphone-cli`
+5.2.0, `baresip` 1.0.0, `twinkle` 1.10.2 — os três presentes e instaláveis,
+confirmado.
 
-O que existe empacotado: `linphone-cli` 5.2.0, `baresip` 1.0.0, `twinkle`
-1.10.2. As saídas são três, e a escolha ainda não foi feita:
+**Decidido em 2026-08-05: compilar o `pjproject` 2.15.1 junto**, num estágio
+separado do Dockerfile. O que decidiu foi o custo medido contra o que só o
+pjsua entrega:
 
-| saída | custo |
+| | medido |
 |---|---|
-| compilar `pjproject` junto | mais um build de fonte na mesma imagem |
-| trocar por `linphone-cli` | `linphonec`/`linphonecsh`, roteirizável |
-| trocar por `baresip` | CLI mais simples, boa para script |
+| build do pjproject (sem vídeo) | **52 s** |
+| binário, depois do `strip` | **2,1 MB** |
+| peso que soma à imagem | ~5 MB, com a `libasound2t64` |
 
-A decisão só é urgente na lição de registro do softphone (F.3).
+E o que ele dá e as alternativas não dão de graça: `--null-audio` (roda sem
+placa de som), `--auto-answer 200` e `--duration` — ou seja, **um softphone que
+termina sozinho**. Num projeto em que todo check é automático e determinístico,
+um softphone que exige interação não serviria. De quebra, o PRD continua
+literal.
+
+O estágio é separado de propósito: ele não depende do FreeSWITCH, então o
+BuildKit constrói os dois em paralelo e mexer num não invalida o cache do outro.
+
+Provado no perfil de segurança completo do lab (`--network none`, `--cap-drop
+ALL`, `no-new-privileges`, 512 MB, 256 pids): REGISTER autenticado por digest
+(`401` → REGISTER → `200`), INVITE → `407` → INVITE → `100` → `200` → ACK,
+BYE → `200`, e **RTP nos dois sentidos** entre dois ramais, com o FreeSWITCH no
+meio da mídia. O CDR grava `NORMAL_CLEARING` com `billsec` igual à duração.
+
+## 43. O `modules.conf` não é um arquivo comentável
+
+Custou um build inteiro. O `configure.ac` do FreeSWITCH monta duas listas a
+partir do mesmo arquivo (linhas 2300 e 2301):
+
+```sh
+CONF_MODULES='$$(grep -v "\#" modules.conf | ...)'                       # os ativos
+CONF_DISABLED_MODULES='$$(grep "\#" modules.conf | grep -v "\#\#" | ...)' # os desligados
+```
+
+Ou seja: neste arquivo `#` **não abre comentário — desliga um módulo**. Um
+cabeçalho de prosa com `#`, como qualquer outro arquivo de configuração
+aceitaria, faz cada linha de texto virar um "módulo desabilitado" de nome
+arbitrário, e o `src/mod/Makefile` gerado sai quebrado:
+
+```
+Makefile:730: *** missing separator.  Stop.
+```
+
+O escape é `##`, que os dois greps descartam — e é o que o cabeçalho do nosso
+arquivo usa. Mesmo assim, **não escreva prosa livre ali**: `src/mod/Makefile.am`
+faz `grep "$$modname$$"` sobre o arquivo INTEIRO, então um comentário que
+termine com o nome de um módulo casa e envenena o `confmoddir` daquele módulo.
+O cabeçalho seguro tem três linhas, nenhum nome de módulo e nenhum `|`. A
+explicação de cada ausência mora no Dockerfile e aqui.
+
+## 44. Um log de subida limpo é requisito de ENSINO, não estética
+
+A config vanilla manda carregar ~50 módulos; a lista reduzida compila 34. Os
+que sobram gritam ao subir:
+
+```
+[CRIT] switch_loadable_module.c:1754 Error Loading module .../mod_av.so
+```
+
+Nove deles: `mod_av`, `mod_dialplan_asterisk`, `mod_enum`, `mod_fsv`,
+`mod_png`, `mod_rtc`, `mod_signalwire`, `mod_spandsp`, `mod_verto`. Nenhum é
+defeito — e é exatamente por isso que precisam sumir. **A trilha F ensina a ler
+o log de subida de um PBX.** Um aluno que aprende a ignorar nove `[CRIT]` de
+rotina é um aluno treinado a ignorar o décimo, que seria real.
+
+O passo é derivado, não uma lista escrita à mão: para cada `<load>` ativo cujo
+`.so` não existe, a linha vira um comentário que diz o porquê. Quem abrir o
+`modules.conf.xml` aprende alguma coisa em vez de achar um buraco.
+
+Quem verifica isso é o **teste de fumaça dentro do build**: o Dockerfile sobe o
+FreeSWITCH ainda no estágio final, conta os `[CRIT]`, exige 2 perfis SIP e
+falha o build se algo escapar. Uma segunda varredura estática existiu e foi
+removida — dentro de `"$(...)"` o shell come o `\K` do PCRE, o grep passa a
+procurar `K` literal e a verificação aprovava qualquer coisa. Verificação que
+não pode falhar é pior que nenhuma: dá o mesmo verde nos dois casos.
+
+## 45. A senha padrão custa dez segundos em toda chamada
+
+Esta é a parede mais cara desta rodada, porque o sintoma aponta para o lado
+errado. O dialplan vanilla **pune** quem deixa `default_password=1234`:
+
+```xml
+<condition field="${default_password}" expression="^1234$" break="never">
+  <action application="log" data="CRIT ... change the default_password."/>
+  <action application="sleep" data="10000"/>
+</condition>
+```
+
+Quatro `[CRIT]` no log **e dez segundos de espera em toda chamada**, antes de
+qualquer coisa do dialplan. O que isso produz num lab: uma chamada curta é
+cancelada pelo próprio chamador antes de ser atendida, e o CDR registra
+`ORIGINATOR_CANCEL` — que descreve o chamador, não a causa. Medido: com
+`--duracao 5` a chamada morre com `billsec=0`; com `--duracao 12` ela completa
+com `billsec=2`, ou seja, dez segundos depois.
+
+A senha do lab passou a ser `devlab`. O aviso não se perde: **vira material**.
+Uma lição da trilha F devolve `1234` pelo `lab.break` e manda o aluno explicar
+por que as chamadas ficaram lentas — que é o defeito real de um PBX que alguém
+subiu com a config de exemplo.
+
+## 46. O oráculo é o PBX, porque o log do softphone tem buffer
+
+Duas versões erradas do `devlab-ramal`, as duas úteis de registrar.
+
+**A primeira perguntava "existe um 200 OK no log?"** — e isso aprova toda
+chamada que falhou, porque o REGISTER que veio antes também é respondido com
+200 OK. Um INVITE morto em `487 Request Terminated` era relatado como
+`chamada=completou`. O certo é o estado da chamada no softphone: só
+`state changed to CONFIRMED` significa atendida.
+
+**A segunda esperava a linha `registration success` aparecer no log.** Ela
+aparece — mas o pjsua escreve o stdout com **buffer de bloco** quando a saída é
+arquivo, então a linha só chega ao disco quando o buffer enche ou o processo
+morre. O mesmo comando dava `registro=ok` numa execução e `registro=falhou` na
+seguinte, com o log final, nos dois casos, mostrando `registration success,
+status=200 (OK)`. Um check que falha sozinho às vezes é pior do que um que
+falha sempre.
+
+O oráculo certo já existia: **o registro é um fato do PBX, e o PBX responde** —
+`sofia status profile internal reg`. O `stdbuf -oL` no pjsua ficou, mas para o
+ALUNO: sem ele um `tail -f` durante o exercício não mostra nada até o fim.
+
+Corolário para conteúdo: **o `billsec` do CDR não é determinístico.** Três
+execuções do mesmo ciclo deram `2s` numa e `3s` nas outras duas, para a mesma
+chamada de 3 segundos — é arredondamento de segundo inteiro. Os vereditos
+(`registro=`, `chamada=`, `motivo_do_fim=`, código de saída) foram idênticos
+nas três. Vale a decisão 27: campo de tempo não entra em saída de demonstração.
 
 ## A receita medida, verbatim
 
@@ -196,14 +321,32 @@ como a documentação mais antiga sugere.
 
 ---
 
+## As duas ferramentas do lab
+
+`devlab-pbx` e `devlab-ramal` são para a trilha F o que o `devlab-chamada` é
+para a G, e cada uma existe por uma corrida medida:
+
+- **`devlab-pbx iniciar`** só volta quando o `fs_cli` responde. O binário volta
+  na hora, mas o PBX leva ~4 s para atender; sem a espera o primeiro comando do
+  aluno falha com "Error Connecting to ... 8021" e ele conclui que o PBX não
+  subiu. A lição viraria uma aula sobre a corrida.
+- **`devlab-ramal`** registra e **só então** disca. O pjsua aceita um destino na
+  linha de comando, mas quando recebe um ele disca antes de terminar o
+  registro: o PBX responde `407` a um INVITE de um ramal que ainda não existe
+  para ele, e a chamada morre sem erro visível.
+
+Medido, com os limites padrão de um lab (1 CPU, 512 MB, 256 pids): o PBX sobe
+em ~4 s, ocupa **29 pids dos 256** e **54 MB dos 512**. A trilha F não precisa
+mexer nos limites nem pedir capacidade nenhuma além do que a G já pede.
+
 ## O que ainda não foi decidido
 
-- **O softphone** (decisão 42).
 - **Multi-container ou um só.** O PRD §4.2 prevê `compose.yaml` para labs de
   VoIP, e o `GerenciadorDeLabs` hoje só sabe subir uma imagem. Com FreeSWITCH e
   softphone na mesma imagem, conversando por `127.0.0.1`, a trilha F cabe no
-  gerenciador atual — como coube a G. É o caminho de menor risco, e vale
-  medi-lo antes de mexer no agente.
+  gerenciador atual — como coube a G. Isso está agora **medido, não suposto**:
+  dois ramais registrados e uma chamada com RTP bidirecional, tudo dentro de um
+  container só, sem rede. Não mexa no agente por causa da trilha F.
 - **Se o Asterisk entra.** Ele está nos repos (1:20.6.0), sobe em container e
   tem PJSIP completo — provado em 2026-08-05. O PRD reserva a trilha I para
   ele, e a comparação direta FreeSWITCH × Asterisk é conteúdo do currículo.

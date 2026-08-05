@@ -6,6 +6,14 @@
 #   bash scripts/build-imagens.sh linux-base   # constrói apenas uma
 #
 # Princípio 4 (offline após o primeiro build): este é o único passo que exige internet.
+#
+# Aviso de tempo, porque uma delas é diferente das outras: a `freeswitch-lab`
+# COMPILA o FreeSWITCH, a sofia-sip, a spandsp e o pjproject do fonte. São ~4
+# minutos numa máquina de 10 núcleos e mais em máquinas menores, contra segundos
+# das demais. É uma vez por máquina, e uma vez por mudança na imagem: a
+# impressão digital do contexto abaixo evita o resto. Por que do fonte, e não do
+# pacote: os repositórios oficiais do FreeSWITCH exigem token da SignalWire —
+# ver docs/DESIGN-PBX.md, decisão 39.
 set -euo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,6 +28,7 @@ DIR_IMAGENS="$RAIZ/images"
 IMAGENS=(
   "linux-base:devlab/linux-base:1.0.0"
   "voip-tools:devlab/voip-tools:1.0.0"
+  "freeswitch-lab:devlab/freeswitch-lab:1.0.0"
 )
 
 # Base das imagens de lab. O padrão é fixo de propósito: o container traz o

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# devlab-pbx — sobe, para e interroga o FreeSWITCH do lab.
+#
+# Por que existe: subir o FreeSWITCH à mão é `freeswitch -nc -nonat` seguido de
+# um laço de espera, porque o comando volta na hora e o PBX leva ~4 s para
+# atender no `fs_cli`. Sem a espera, o primeiro comando do aluno falha com
+# "Error Connecting to ... 8021" e ele conclui que o PBX não subiu. A lição
+# viraria uma aula sobre a corrida, não sobre o PBX.
+#
+# `-nonat` está aqui de propósito e não é detalhe: sem ele o FreeSWITCH procura
+# um gateway para descobrir o próprio endereço externo. Num lab `--network
+# none` isso só gasta tempo de subida.
+#
+# Este script NÃO decide se o PBX deve estar de pé — as lições em que subir o
+# PBX e ler o que ele diz ao subir É a tarefa chamam `iniciar` do próprio texto
+# da lição; as outras chamam do `lab.setup`.
+set -uo pipefail
+
+FS=/usr/local/freeswitch
+BIN=$FS/bin/freeswitch
+CLI=$FS/bin/fs_cli
+LOG=$FS/var/log/freeswitch/freeswitch.log
+ESPERA_MAX=60
+
+uso() {
+  cat <<'FIM'
+uso: devlab-pbx <comando>
+
+  iniciar          sobe o FreeSWITCH e só volta quando ele responde
+  parar            desliga o FreeSWITCH
+  estado           diz se está de pé, com perfis, ramais registrados e chamadas
+  cli "<comando>"  manda um comando para o console do FreeSWITCH
+  log [n]          mostra as últimas n linhas do log (padrão: 20)
+  erros            só os [ERR] e [CRIT] do log, sem repetição
+FIM
+}
+
+esta_de_pe() { $CLI -x status >/dev/null 2>&1; }
+
+case "${1:-}" in
+  iniciar)
+    if esta_de_pe; then
+      echo "o FreeSWITCH já está de pé."
+      exit 0
+    fi
+    $BIN -nc -nonat >/dev/null 2>&1
+    for _ in $(seq 1 $ESPERA_MAX); do
+      esta_de_pe && break
+      sleep 1
+    done
+    if ! esta_de_pe; then
+      echo "erro: o FreeSWITCH não respondeu em ${ESPERA_MAX}s." >&2
+      echo "veja o que ele disse ao subir:  devlab-pbx log" >&2
+      exit 1
+    fi
+    echo "FreeSWITCH de pé."
+    # O aluno tem de VER isto: são os dois perfis SIP, e é neles que ele vai
+    # registrar ramal e receber chamada.
+    $CLI -x "sofia status" 2>/dev/null | grep -E 'profile|Name' | sed 's/[[:space:]]\+/ /g'
+    ;;
+
+  parar)
+    if ! esta_de_pe; then
+      echo "o FreeSWITCH não está de pé."
+      exit 0
+    fi
+    $CLI -x "shutdown" >/dev/null 2>&1
+    for _ in $(seq 1 20); do
+      esta_de_pe || break
+      sleep 1
+    done
+    esta_de_pe && { echo "erro: o FreeSWITCH não desligou." >&2; exit 1; }
+    echo "FreeSWITCH desligado."
+    ;;
+
+  estado)
+    if ! esta_de_pe; then
+      echo "FreeSWITCH: DESLIGADO"
+      exit 1
+    fi
+    # `grep -c` imprime `0` E SAI COM STATUS 1 quando não acha nada, então um
+    # `$(grep -c ... || echo 0)` imprimiria "0" duas vezes. A variável resolve.
+    graves=$(grep -cE '\[ERR\]|\[CRIT\]' "$LOG" 2>/dev/null)
+    echo "FreeSWITCH: DE PÉ"
+    echo "perfis SIP:  $($CLI -x 'sofia status' 2>/dev/null | grep -c 'RUNNING')"
+    echo "ramais registrados: $($CLI -x 'sofia status profile internal reg' 2>/dev/null | grep -c '^User:')"
+    echo "chamadas agora: $($CLI -x 'show calls count' 2>/dev/null | grep -oE '^[0-9]+')"
+    echo "erros graves no log: ${graves:-0}"
+    ;;
+
+  cli)
+    [ $# -ge 2 ] || { echo "erro: 'cli' precisa de um comando entre aspas." >&2; uso >&2; exit 2; }
+    esta_de_pe || { echo "erro: o FreeSWITCH não está de pé. Rode: devlab-pbx iniciar" >&2; exit 1; }
+    shift
+    $CLI -x "$*"
+    ;;
+
+  log)
+    tail -n "${2:-20}" "$LOG" 2>/dev/null || { echo "erro: log ainda não existe." >&2; exit 1; }
+    ;;
+
+  erros)
+    # O `\r` do log do FreeSWITCH suja qualquer comparação e qualquer `sort -u`.
+    grep -oE '\[(ERR|CRIT)\].*' "$LOG" 2>/dev/null | tr -d '\r' | sort -u
+    ;;
+
+  ''|-h|--ajuda|ajuda) uso ;;
+  *) echo "erro: comando desconhecido '$1'." >&2; uso >&2; exit 2 ;;
+esac
