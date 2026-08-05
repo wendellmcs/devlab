@@ -102,6 +102,17 @@ ensino:
     Os dois últimos formatos pegam quase todo mundo uma vez. A fração é um
     byte, não um percentual; o jitter está na escala do relógio do codec.
 
+    ### Uma limitação deste lab, dita na cara
+
+    As chamadas que você reproduz aqui **não emitem RTCP**: quem faz o papel dos
+    dois telefones é um gerador de tráfego, e ele não manda relatório nenhum.
+    Se você capturar a sua própria chamada e procurar RTCP, não vai achar — e
+    não é erro seu.
+
+    Por isso esta lição trabalha sobre uma **gravação de referência** que já vem
+    no lab, com os relatórios dentro. Os aparelhos de verdade mandam RTCP; o
+    substituto deles aqui, não.
+
   anatomia:
     - linha: "tshark -r captura.pcap -Y rtcp -T fields -e rtcp.senderssrc -e rtcp.ssrc.identifier -e rtcp.ssrc.fraction -n"
       partes:
