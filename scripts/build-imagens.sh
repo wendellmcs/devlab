@@ -50,9 +50,17 @@ fi
 # veria a tag presente e pularia o build.
 digital_do_contexto() {
   # A base entra na digital: trocar de distro tem de forçar reconstrução.
+  #
+  # O `cd` não é estilo: `sha256sum` imprime o NOME junto do hash, e a digital é
+  # o hash dessa saída inteira. Sem entrar no diretório, os nomes saem com o
+  # caminho ABSOLUTO e a digital passa a depender de onde o repositório está.
+  # Efeito medido: o mesmo commit, conferido num `git worktree` sob /tmp, dava
+  # digital diferente e reconstruía tudo, com os arquivos byte a byte idênticos.
+  # Passava despercebido enquanto reconstruir custava segundos — a imagem do
+  # FreeSWITCH, que compila do fonte, faz isso custar quatro minutos por clone.
   {
     echo "base=$BASE"
-    find "$1" -type f -print0 | sort -z | xargs -0 sha256sum
+    ( cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha256sum )
   } | sha256sum | cut -c1-16
 }
 
