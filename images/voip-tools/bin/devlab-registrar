@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""Registrar SIP mínimo do lab: desafia com 401 e confere o digest.
+
+Por que existe
+--------------
+A trilha G do PRD (§7 G.5) pede "registro falhando (401/403, realm errado,
+`a1-hash`)" como lab quebra/conserta, e a decisão 18 já resolveu que a trilha
+não tem PBX. Sem um registrar, o aluno não tem contra o que registrar, e a
+lição viraria leitura de uma captura gravada por outra pessoa — que é
+exatamente o que o nível Engenheiro deveria ter parado de fazer.
+
+O SIPp não serve aqui. Ele consegue MANDAR um REGISTER autenticado (é o que o
+`[authentication]` faz do lado do cliente), mas do lado do servidor ele só sabe
+responder um texto fixo: não calcula digest nenhum, e portanto não distingue a
+senha certa da errada. Um "registrar" que aceita qualquer credencial não tem
+como ensinar por que uma credencial é recusada.
+
+O que ele faz
+-------------
+- `REGISTER` sem `Authorization`  → **401** com `WWW-Authenticate`.
+- `REGISTER` com `Authorization`  → confere o digest do RFC 2617:
+
+      HA1      = MD5(usuario : realm : senha)      ← é ISTO o "a1-hash"
+      HA2      = MD5(metodo  : uri)
+      response = MD5(HA1 : nonce : HA2)
+
+  Confere → **200 OK**, e a ligação vira uma linha no arquivo de registros.
+  Não confere → **403 Forbidden**.
+- Usuário que não existe no arquivo de ramais → **403**, como faz o FreeSWITCH.
+
+O `nonce` é FIXO, e isso é decisão, não descuido
+------------------------------------------------
+Um registrar de verdade sorteia o nonce a cada desafio — é o que impede um
+ataque de repetição. Aqui ele é constante porque é o que torna o `response`
+um valor LITERAL: com usuário, realm, senha, método, URI e nonce fixos, o
+digest é sempre o mesmo hexadecimal. Isso é o que permite que uma lição mostre
+o hash na tela, que o aluno o recalcule com `printf | md5sum` e compare, e que
+a saída de demonstração sobreviva ao `--conferir` (decisão 27).
+
+O arquivo de ramais guarda o A1-HASH, não a senha
+-------------------------------------------------
+É o que fazem os PBX de verdade (o `a1-hash` do FreeSWITCH, o `md5secret` do
+Asterisk): guardar `MD5(usuario:realm:senha)` em vez do texto da senha. A
+consequência é o defeito que a lição ensina — **o realm está dentro do hash**.
+Trocar o realm anunciado pelo servidor invalida, em silêncio, todo hash já
+armazenado: a senha continua certa e o registro passa a dar 403.
+
+Formato de `/etc/devlab/ramais`, uma linha por ramal:
+
+    1001:a1=5e3f1c...      # hash pronto (o caso do PBX de verdade)
+    1002:senha=segredo     # texto claro; o hash é calculado com o realm ATUAL
+
+O oráculo é o registro, não a captura
+-------------------------------------
+Decisão 21: quem diz se o ramal registrou é o servidor, não o pcap. Por isso
+todo registro aceito vira uma linha em `--registros`, e é esse arquivo que um
+check deve consultar. A captura é o instrumento do aluno.
+
+O que ele NÃO é
+---------------
+Não é um registrar de verdade: uma transação por vez, sem `qop`, sem
+`nonce-count`, sem expiração real das ligações, sem banco. Quem quiser isso
+está na trilha F (FreeSWITCH) ou na H (Kamailio). Aqui o objeto de estudo é o
+desafio e a resposta — e esses são os do RFC.
+"""
+import argparse
+import hashlib
+import re
+import socket
+import sys
+import time
+
+# Fixo de propósito — ver o cabeçalho.
+NONCE = "devlabnonce0000000000000000devl"
+
+# O realm anunciado sai daqui quando o arquivo existe. É o que permite que uma
+# lição troque o realm do servidor sem que o aluno digite a troca na linha de
+# comando: ele sobe o registrar como sempre e recebe o 403 que o cliente dele
+# recebeu — em vez de ler a causa no próprio comando (decisão 26).
+REALM_DO_SERVIDOR = "/etc/devlab/realm"
+REALM_PADRAO = "devlab.local"
+
+CABECALHOS_ECOADOS = ("Via", "From", "To", "Call-ID", "CSeq")
+
+
+def md5(texto: str) -> str:
+    return hashlib.md5(texto.encode("utf-8")).hexdigest()
+
+
+def endereco(texto: str) -> tuple[str, int]:
+    ip, _, porta = texto.partition(":")
+    return ip, int(porta or 5060)
+
+
+def cabecalho(mensagem: str, nome: str) -> str | None:
+    """Primeira ocorrência de um cabeçalho, com o valor já sem espaços nas pontas."""
+    for linha in mensagem.split("\r\n"):
+        if not linha.strip():
+            break  # fim dos cabeçalhos
+        chave, _, valor = linha.partition(":")
+        if chave.strip().lower() == nome.lower():
+            return valor.strip()
+    return None
+
+
+def campos_do_digest(valor: str) -> dict[str, str]:
+    """Os pares `chave=valor` de um Authorization, com ou sem aspas."""
+    return {
+        m.group(1).lower(): (m.group(2) if m.group(2) is not None else m.group(3))
+        for m in re.finditer(r'(\w+)\s*=\s*(?:"([^"]*)"|([^,\s]+))', valor)
+    }
+
+
+def carregar_ramais(caminho: str, realm: str) -> dict[str, str]:
+    """Ramal → HA1. A senha em texto claro vira hash com o realm ATUAL."""
+    ramais: dict[str, str] = {}
+    try:
+        with open(caminho, encoding="utf-8") as f:
+            conteudo = f.read()
+    except OSError:
+        return ramais
+
+    for linha in conteudo.splitlines():
+        linha = linha.split("#", 1)[0].strip()
+        if not linha:
+            continue
+        usuario, _, resto = linha.partition(":")
+        chave, _, valor = resto.partition("=")
+        usuario, chave, valor = usuario.strip(), chave.strip(), valor.strip()
+        if chave == "a1":
+            ramais[usuario] = valor.lower()
+        elif chave == "senha":
+            ramais[usuario] = md5(f"{usuario}:{realm}:{valor}")
+    return ramais
+
+
+def resposta(pedido: str, linha_de_status: str, extra: str = "") -> bytes:
+    """Monta a resposta ecoando os cabeçalhos que identificam a transação."""
+    linhas = [f"SIP/2.0 {linha_de_status}"]
+    for nome in CABECALHOS_ECOADOS:
+        valor = cabecalho(pedido, nome)
+        if valor is None:
+            continue
+        # A tag do To é do servidor; sem ela o cliente trata a resposta como
+        # de um diálogo diferente.
+        if nome == "To" and ";tag=" not in valor:
+            valor += ";tag=devlabregistrar"
+        linhas.append(f"{nome}: {valor}")
+    if extra:
+        linhas.append(extra)
+    linhas.append("Content-Length: 0")
+    return ("\r\n".join(linhas) + "\r\n\r\n").encode("utf-8")
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="registrar SIP mínimo do lab")
+    p.add_argument("--escuta", default="127.0.0.1:5060")
+    p.add_argument("--realm", default=None,
+                   help=f"o realm anunciado no desafio; é ele que entra no "
+                        f"a1-hash. Sem esta opção vem de {REALM_DO_SERVIDOR}, "
+                        f"ou \"{REALM_PADRAO}\" se o arquivo não existir")
+    p.add_argument("--ramais", default="/etc/devlab/ramais")
+    p.add_argument("--registros", default="/var/lib/devlab/registros",
+                   help="onde o servidor anota quem registrou — o oráculo do check")
+    p.add_argument("--segundos", type=float, default=60.0,
+                   help="tempo de vida; ele sai sozinho, sem precisar ser morto")
+    args = p.parse_args()
+
+    realm = args.realm
+    if realm is None:
+        try:
+            with open(REALM_DO_SERVIDOR, encoding="utf-8") as f:
+                realm = f.read().strip() or REALM_PADRAO
+        except OSError:
+            realm = REALM_PADRAO
+
+    ramais = carregar_ramais(args.ramais, realm)
+
+    # Sem SO_REUSEADDR, de propósito, e isto foi medido: em UDP no Linux essa
+    # opção deixa DOIS sockets escutarem o mesmo endereço:porta, e os
+    # datagramas vão para um ou para o outro sem regra que se possa prever. Um
+    # registrar esquecido de uma execução anterior passaria a responder metade
+    # dos desafios com o realm antigo — a lição inteira viraria loteria, e o
+    # aluno não teria como descobrir por quê. Aqui a segunda instância morre na
+    # cara, dizendo o que fazer.
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.bind(endereco(args.escuta))
+    except OSError as erro:
+        print(f"não consegui escutar em {args.escuta}: {erro}\n"
+              f"já há um processo nessa porta — veja com: ss -unap | grep 5060",
+              file=sys.stderr)
+        return 1
+    s.settimeout(1.0)
+
+    # O arquivo nasce vazio: "ninguém registrado" precisa ser um estado
+    # legível, e não a ausência do arquivo.
+    with open(args.registros, "w", encoding="utf-8"):
+        pass
+
+    print(f"registrar em {args.escuta}, realm \"{realm}\", "
+          f"{len(ramais)} ramal(is)", file=sys.stderr)
+
+    fim = time.monotonic() + args.segundos
+    while time.monotonic() < fim:
+        try:
+            dados, origem = s.recvfrom(65535)
+        except socket.timeout:
+            continue
+
+        pedido = dados.decode("utf-8", "replace")
+        metodo = pedido.split(" ", 1)[0]
+        if metodo != "REGISTER":
+            s.sendto(resposta(pedido, "405 Method Not Allowed"), origem)
+            continue
+
+        autorizacao = cabecalho(pedido, "Authorization")
+        if not autorizacao:
+            desafio = (f'WWW-Authenticate: Digest realm="{realm}", '
+                       f'nonce="{NONCE}", algorithm=MD5')
+            s.sendto(resposta(pedido, "401 Unauthorized", desafio), origem)
+            print("401 (sem credencial)", file=sys.stderr)
+            continue
+
+        campos = campos_do_digest(autorizacao)
+        usuario = campos.get("username", "")
+        ha1 = ramais.get(usuario)
+        if ha1 is None:
+            s.sendto(resposta(pedido, "403 Forbidden"), origem)
+            print(f"403 ({usuario}: ramal inexistente)", file=sys.stderr)
+            continue
+
+        ha2 = md5(f"{metodo}:{campos.get('uri', '')}")
+        esperado = md5(f"{ha1}:{campos.get('nonce', '')}:{ha2}")
+        if campos.get("response", "").lower() != esperado:
+            s.sendto(resposta(pedido, "403 Forbidden"), origem)
+            print(f"403 ({usuario}: digest não confere; "
+                  f"o cliente calculou com realm \"{campos.get('realm', '')}\")",
+                  file=sys.stderr)
+            continue
+
+        contato = cabecalho(pedido, "Contact") or ""
+        expira = cabecalho(pedido, "Expires") or "3600"
+        s.sendto(resposta(pedido, "200 OK", f"Expires: {expira}"), origem)
+        with open(args.registros, "a", encoding="utf-8") as f:
+            f.write(f"{usuario} {contato} expires={expira}\n")
+        print(f"200 ({usuario} registrado)", file=sys.stderr)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

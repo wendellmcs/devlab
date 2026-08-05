@@ -24,6 +24,15 @@
 #
 # `--por-proxy` põe um proxy de sinalização no meio do caminho. A mídia continua
 # indo direta de ponta a ponta — é o que dá ao lab pontos de captura diferentes.
+#
+# `--cenario-uas` troca quem atende pelo cenário que o ALUNO escreveu. É o que o
+# nível Engenheiro precisa: até o Construtor ele lia chamadas que o lab produziu,
+# e a partir daqui ele produz a chamada que reproduz o defeito. Sem isto ele
+# teria de montar o par UAC/UAS na mão — e o `pkill -x sipp` que este script roda
+# antes de originar mataria o UAS dele no mesmo instante.
+#
+# `--em-anel` põe DOIS proxies apontando um para o outro entre quem liga e o
+# destino. Não há quem atenda: a requisição não chega ao fim, e é esse o ponto.
 set -uo pipefail
 
 PORTA_SIP=5060
@@ -39,15 +48,24 @@ CENARIOS=/usr/share/sipp/cenarios
 IP_QUEM_LIGA=127.0.0.1
 IP_PROXY=127.0.0.2
 IP_QUEM_ATENDE=127.0.0.3
+# Os dois saltos do anel de roteamento. Ficam longe de .1/.2/.3 para que um
+# filtro por endereço distinga o anel do resto da topologia sem ambiguidade.
+IP_ANEL_A=127.0.0.10
+IP_ANEL_B=127.0.0.11
 # Escrito pelo `lab.break` da lição que quer que a chamada JÁ nasça com defeito.
 # Sem ele o destino é `atende`, e é isso que mantém a lição 1 inalterada.
 DESTINO_PADRAO=/var/lib/devlab/destino-padrao
+# Mesma ideia, para a topologia: `anel` faz a chamada nascer dentro do loop.
+ROTA_PADRAO=/var/lib/devlab/rota-padrao
 PID_DO_PROXY=/var/lib/devlab/proxy.pid
+PID_DO_ANEL=/var/lib/devlab/anel.pid
 
 duracao=1        # quantas chamadas
 silencioso=0
 destino=""
 por_proxy=0
+em_anel=""
+cenario_uas=""
 # O número discado, que vira o usuário da Request-URI (`INVITE sip:NUMERO@...`).
 # `service` é o padrão do SIPp e fica como padrão aqui para não mudar a chamada
 # que a lição 1 já gravou. Trocá-lo é o que permite ter, numa captura só, várias
@@ -76,13 +94,21 @@ while [ $# -gt 0 ]; do
     -d|--destino)   destino="$2"; shift 2 ;;
     -N|--numero)    numero="$2"; shift 2 ;;
     -p|--por-proxy) por_proxy=1; shift ;;
+    -a|--em-anel)   em_anel=1; shift ;;
+    -c|--cenario-uas) cenario_uas="$2"; shift 2 ;;
     -h|--ajuda)
-      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+      # Do começo do cabeçalho até a primeira linha de código, que é o `set`.
+      # Uma faixa de linhas fixa envelhece em silêncio: basta alguém explicar
+      # uma opção nova acima e a ajuda passa a despejar código na tela.
+      sed -n '2,/^set /p' "$0" | sed '$d; s/^# \{0,1\}//'
       echo
       echo "  --destino atende|ocupado|desconhecido|ausente|sem-codec|sobrecarga|picotado"
       echo "  --numero  NUMERO discado (padrão: service)"
       echo "  --por-proxy  a sinalização passa por um proxy em $IP_PROXY;"
       echo "               a mídia vai direta entre as pontas"
+      echo "  --em-anel    a chamada entra num anel de roteamento"
+      echo "               ($IP_ANEL_A ⇄ $IP_ANEL_B); não há quem atenda"
+      echo "  --cenario-uas ARQUIVO  quem atende passa a ser o SEU cenário"
       exit 0 ;;
     *) echo "opção desconhecida: $1" >&2; exit 2 ;;
   esac
@@ -96,15 +122,34 @@ if [ -z "$destino" ]; then
   fi
 fi
 
-if ! CENARIO_UAS=$(cenario_de "$destino"); then
+if [ -z "$em_anel" ] && [ -r "$ROTA_PADRAO" ]; then
+  [ "$(tr -d '[:space:]' < "$ROTA_PADRAO")" = "anel" ] && em_anel=1
+fi
+em_anel=${em_anel:-0}
+
+# O cenário do aluno entra no lugar da tabela de sintomas: quem escreveu o
+# arquivo já sabe o que ele faz, então `--destino` deixa de ter função aqui.
+if [ -n "$cenario_uas" ]; then
+  if [ ! -r "$cenario_uas" ]; then
+    echo "cenário não encontrado ou ilegível: $cenario_uas" >&2
+    exit 2
+  fi
+  CAMINHO_UAS="$cenario_uas"
+elif ! CENARIO_UAS=$(cenario_de "$destino"); then
   echo "destino desconhecido: $destino" >&2
   echo "use um de: atende ocupado desconhecido ausente sem-codec sobrecarga picotado" >&2
   exit 2
+else
+  CAMINHO_UAS="$CENARIOS/$CENARIO_UAS"
 fi
 
 # Sem proxy os dois lados moram em 127.0.0.1, como sempre foi; com proxy cada
 # papel ganha um endereço, e é o que dá ao aluno pontos de captura distintos.
-if [ "$por_proxy" -eq 1 ]; then
+# No anel o alvo é o primeiro salto, e não existe quem atenda.
+if [ "$em_anel" -eq 1 ]; then
+  IP_UAS=""
+  IP_ALVO="$IP_ANEL_A"
+elif [ "$por_proxy" -eq 1 ]; then
   IP_UAS="$IP_QUEM_ATENDE"
   IP_ALVO="$IP_PROXY"
 else
@@ -124,17 +169,31 @@ cd /usr/share/sipp || exit 1
 # que o problema é dele ter rodado duas vezes.
 pkill -x sipp 2>/dev/null && sleep 1
 
-dizer "→ atendendo em $IP_UAS:$PORTA_SIP (aguardando INVITE)"
-# Sem -rtp_echo de propósito: o cenário já toca áudio de volta, e somar o eco
-# faria o lado que atende mandar mídia duas vezes — inclusive antes de quem
-# ligou ter aberto a porta de RTP, o que enchia toda captura de "ICMP port
-# unreachable". Ruído que o aluno não tem como explicar na primeira lição.
-sipp -sf "$CENARIOS/$CENARIO_UAS" \
-     -p "$PORTA_SIP" -i "$IP_UAS" \
-     -min_rtp_port "$RTP_DESTINO" -max_rtp_port "$((RTP_DESTINO + 8))" \
-     -trace_stat -stf "$REGISTRO/quem-atendeu.csv" \
-     -bg >"$REGISTRO/quem-atendeu.log" 2>&1
-sleep 1
+if [ "$em_anel" -eq 1 ]; then
+  # Um anel esquecido de uma execução interrompida seguraria as portas.
+  if [ -r "$PID_DO_ANEL" ]; then
+    kill "$(cat "$PID_DO_ANEL")" 2>/dev/null
+    sleep 1
+  fi
+  dizer "→ anel de roteamento: $IP_ANEL_A ⇄ $IP_ANEL_B (não há quem atenda)"
+  devlab-anel-sip --enderecos "$IP_ANEL_A,$IP_ANEL_B" \
+                  --porta "$PORTA_SIP" --segundos 40 >"$REGISTRO/anel.log" 2>&1 &
+  anel_pid=$!
+  echo "$anel_pid" > "$PID_DO_ANEL"
+  sleep 1
+else
+  dizer "→ atendendo em $IP_UAS:$PORTA_SIP (aguardando INVITE)"
+  # Sem -rtp_echo de propósito: o cenário já toca áudio de volta, e somar o eco
+  # faria o lado que atende mandar mídia duas vezes — inclusive antes de quem
+  # ligou ter aberto a porta de RTP, o que enchia toda captura de "ICMP port
+  # unreachable". Ruído que o aluno não tem como explicar na primeira lição.
+  sipp -sf "$CAMINHO_UAS" \
+       -p "$PORTA_SIP" -i "$IP_UAS" \
+       -min_rtp_port "$RTP_DESTINO" -max_rtp_port "$((RTP_DESTINO + 8))" \
+       -trace_stat -stf "$REGISTRO/quem-atendeu.csv" \
+       -bg >"$REGISTRO/quem-atendeu.log" 2>&1
+  sleep 1
+fi
 
 if [ "$por_proxy" -eq 1 ]; then
   # Um relay esquecido de uma execução interrompida seguraria a porta e a
@@ -175,6 +234,10 @@ pkill -x sipp 2>/dev/null
 if [ "$por_proxy" -eq 1 ]; then
   kill "$proxy_pid" 2>/dev/null
   wait "$proxy_pid" 2>/dev/null
+fi
+if [ "$em_anel" -eq 1 ]; then
+  kill "$anel_pid" 2>/dev/null
+  wait "$anel_pid" 2>/dev/null
 fi
 sleep 1
 

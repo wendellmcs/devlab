@@ -1,0 +1,334 @@
+id: voip-eng-04-loop
+trilha: voip-troubleshooting
+nivel: engenheiro
+ordem: 4
+titulo: "A mesma mensagem 71 vezes: loop de roteamento e Max-Forwards"
+capacidade: "Sei reconhecer um loop de roteamento numa captura, dizer entre quais equipamentos ele acontece e provar com o contador de saltos."
+xp: 70
+prereqs: [voip-eng-03-retransmissao]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+  # Decisão 26: a topologia defeituosa é escolhida aqui. O aluno roda
+  # `devlab-chamada` sem opção, como o cliente, e descobre o que ela tem.
+  break: |
+    printf 'anel\n' > /var/lib/devlab/rota-padrao
+
+ensina:
+  conceitos:
+    - id: max-forwards-conta-saltos
+      titulo: "Max-Forwards é um contador que cada proxy decrementa; ele existe para que um loop termine"
+    - id: loop-se-le-pela-repeticao-entre-os-mesmos
+      titulo: "loop se reconhece pela mesma mensagem passando entre os MESMOS endereços, com um só campo mudando"
+    - id: quatrocentos-e-oitenta-e-tres-encerra
+      titulo: "483 Too Many Hops é o proxy dizendo que o contador zerou nas mãos dele"
+  comandos: []
+
+ensino:
+  gancho: |
+    Outro chamado, e desta vez o sintoma é rápido:
+
+    > "Liga para o parceiro e cai na hora. Nem chega a tocar."
+
+    Você reproduz, captura, e o arquivo tem **duzentas e treze mensagens SIP**
+    para uma chamada que durou três milésimos de segundo. Abrir isso no
+    `sngrep` não ajuda: é tudo a mesma chamada, o mesmo Call-ID, o mesmo
+    INVITE.
+
+    Uma captura assim assusta na primeira vez e é uma das mais fáceis de
+    fechar — porque existe um campo, e um só, que muda de uma mensagem para a
+    seguinte. Ele conta quantos saltos ainda restam antes de o protocolo
+    desistir, e a sequência que ele desenha diz, sozinha, o que está
+    acontecendo e entre quem.
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar um loop de roteamento numa captura com centenas de mensagens repetidas"
+    - verbo: explicar
+      texto: "explicar o papel do Max-Forwards e por que o 483 encerra a chamada"
+    - verbo: construir
+      texto: "construir um laudo que nomeia os equipamentos entre os quais o loop acontece"
+
+  modelo_mental: |
+    ### Por que existe um contador
+
+    Um proxy SIP encaminha para o próximo salto. Se dois equipamentos se
+    apontam mutuamente como próximo salto — por erro de rota, de dialplan ou
+    de um `default gateway` copiado —, a mensagem passa a circular entre eles
+    para sempre. Sem nada que a pare, um único INVITE consumiria a máquina.
+
+    O RFC 3261 põe um contador no cabeçalho de toda requisição:
+
+    ```
+    Max-Forwards: 70
+    ```
+
+    E manda cada proxy fazer duas coisas (§16.6 e §16.3):
+
+    1. **decrementar** o contador antes de encaminhar;
+    2. se receber uma requisição com o contador **em zero**, não encaminhar —
+       responder `483 Too Many Hops`.
+
+    O 70 é convenção, não regra: é um número grande o bastante para qualquer
+    topologia real e pequeno o bastante para um loop terminar rápido.
+
+    ### O desenho de um loop
+
+    Numa captura, um loop tem uma assinatura que não se confunde com nada:
+
+    | o que fica igual | o que muda |
+    |---|---|
+    | o método, o Call-ID, o CSeq | o `Max-Forwards`, caindo de 1 em 1 |
+    | o par de endereços, alternando | (e mais nada) |
+
+    > Retransmissão é a MESMA mensagem repetida no tempo, com intervalos que
+    > dobram. Loop é a mesma mensagem repetida no ESPAÇO, entre os mesmos
+    > equipamentos, em milissegundos. As duas se parecem numa listagem
+    > apressada, e o `Max-Forwards` separa as duas na primeira olhada: na
+    > retransmissão ele não muda; no loop ele desce.
+
+    ### O que o 483 diz, e a quem culpar
+
+    O `483` não vem do destino: vem do proxy em cujas mãos o contador zerou.
+    Ele é o sintoma, não o culpado — quem tem o defeito são os dois
+    equipamentos que se apontam. Por isso o laudo de um loop não nomeia quem
+    respondeu: nomeia o **par** entre o qual a mensagem circulou, que é o que
+    a coluna de endereços mostra.
+
+    E a conta fecha: se a mensagem entrou com 70 e o `483` apareceu, houve 70
+    encaminhamentos. Num loop entre dois equipamentos, isso é cada um deles
+    tendo encaminhado 35 vezes.
+
+  anatomia:
+    - linha: "tshark -r /root/loop.pcap -Y 'sip.Method==INVITE and not icmp' -T fields -e ip.src -e ip.dst -e sip.Max-Forwards -n"
+      partes:
+        - trecho: "-Y 'sip.Method==INVITE and not icmp'"
+          papel: opcao
+          explica: "só as requisições que estão circulando; o `not icmp` evita contar o aviso que carrega uma cópia do pacote dentro dele"
+        - trecho: "-e ip.src -e ip.dst"
+          papel: opcao
+          explica: "o par de endereços — é o que revela ENTRE QUEM o loop acontece"
+        - trecho: "-e sip.Max-Forwards"
+          papel: opcao
+          explica: "o contador de saltos; é o único campo que muda de uma passagem para a seguinte"
+
+  demonstracao:
+    - comando: "tcpdump -i lo -w /root/exemplo.pcap -q 2>/dev/null & sleep 2; devlab-chamada; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: |-2
+        → anel de roteamento: 127.0.0.10 ⇄ 127.0.0.11 (não há quem atenda)
+        → ligando de 127.0.0.1:5061
+        ✘ a chamada NÃO completou (sipp saiu com 1, 0 bem-sucedida(s))
+          o registro de cada lado está em /var/lib/devlab/ultima-chamada/
+      nota: "A chamada do chamado, reproduzida. Ela termina em segundos — bem diferente da lição anterior, em que o prazo do protocolo se esgotava. Um sintoma rápido já diz que ALGUÉM respondeu alguma coisa; o que falta é descobrir o quê."
+    - comando: "tshark -r /root/exemplo.pcap -Y 'sip and not icmp' -T fields -e sip.CSeq.method -e sip.Status-Code -n | sort | uniq -c"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+             71 ACK
+             71 INVITE
+             71 INVITE	483
+      nota: "A captura colapsada por tipo de mensagem. Três linhas para explicar uma chamada de três milissegundos: 71 INVITEs, 71 respostas 483 e 71 ACKs. Nenhum 180, nenhum 200 — a chamada nunca chegou a tocar em lugar nenhum. E o número 71 vai voltar a aparecer daqui a pouco, o que não é coincidência."
+    - comando: "tshark -r /root/exemplo.pcap -Y 'sip.Method==INVITE and not icmp' -T fields -e ip.src -e ip.dst -n | sort | uniq -c"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+              1 127.0.0.1	127.0.0.10
+             35 127.0.0.10	127.0.0.11
+             35 127.0.0.11	127.0.0.10
+      nota: "Aqui o loop aparece inteiro em três linhas. Quem ligou (127.0.0.1) mandou o INVITE **uma vez**. Depois disso ele fez 35 viagens de 127.0.0.10 para 127.0.0.11 e outras 35 de volta — sempre entre os mesmos dois endereços. Um par que troca a mesma mensagem dezenas de vezes é a definição operacional de loop, e essas duas linhas são o que o laudo precisa nomear."
+    - comando: "tshark -r /root/exemplo.pcap -Y 'sip.Method==INVITE and not icmp' -T fields -e ip.src -e ip.dst -e sip.Max-Forwards -n | awk 'NR <= 5 || NR >= 69'"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        127.0.0.1	127.0.0.10	70
+        127.0.0.10	127.0.0.11	69
+        127.0.0.11	127.0.0.10	68
+        127.0.0.10	127.0.0.11	67
+        127.0.0.11	127.0.0.10	66
+        127.0.0.11	127.0.0.10	2
+        127.0.0.10	127.0.0.11	1
+        127.0.0.11	127.0.0.10	0
+      nota: "As cinco primeiras passagens e as três últimas, com o contador. Ele entra em 127.0.0.10 valendo 70, sai para 127.0.0.11 valendo 69, volta valendo 68 — cada proxy tira um. No fim da lista ele chega a 0, e aquela é a última passagem: quem receber essa mensagem não vai encaminhá-la. Numa retransmissão esse campo seria idêntico em todas as linhas; é ele que separa os dois sintomas."
+    - comando: "tshark -r /root/exemplo.pcap -Y 'sip.Status-Code==483 and not icmp' -T fields -e ip.src -e ip.dst -n | sort | uniq -c"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+              1 127.0.0.10	127.0.0.1
+             35 127.0.0.10	127.0.0.11
+             35 127.0.0.11	127.0.0.10
+      nota: "E o fim: o `483 Too Many Hops`, nascido no proxy em que o contador chegou a zero, desfazendo o caminho de volta salto a salto até quem ligou. Repare que ele NÃO acusa quem errou — o proxy que responde é apenas o que estava com a batata quente. Quem tem o defeito são os dois que se apontam, e são eles que o laudo tem de nomear."
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Uma captura mostra o mesmo INVITE dezenas de vezes. Como você separa, em uma olhada, um loop de roteamento de uma retransmissão?"
+      resposta: |
+        Por dois campos, e nenhum deles exige abrir a mensagem.
+
+        O **`Max-Forwards`**: na retransmissão ele é idêntico em todas as
+        cópias — é literalmente a mesma mensagem sendo reenviada. No loop ele
+        desce de 1 em 1, porque cada proxy o decrementa.
+
+        O **tempo**: retransmissão tem intervalos que dobram e ocupa dezenas
+        de segundos. Loop acontece em milissegundos, tantas vezes quantas o
+        contador permitir.
+
+        E há um terceiro, se ainda restar dúvida: os endereços. A retransmissão
+        vai sempre do mesmo remetente para o mesmo destino. O loop alterna
+        entre um par.
+    - tipo: predicao
+      pergunta: "Um equipamento no meio do caminho não decrementa o `Max-Forwards` ao encaminhar. O que muda?"
+      resposta: |
+        O loop deixa de terminar.
+
+        O contador só existe porque todo mundo o decrementa; um único
+        equipamento que o repasse intacto zera a garantia para o caminho
+        inteiro. A mensagem passa a circular indefinidamente, e o que estava
+        limitado a 70 passagens vira tráfego permanente entre os dois
+        equipamentos — com CPU, memória de transação e log crescendo até
+        alguém perceber.
+
+        É por isso que "não mexer no `Max-Forwards`" é uma regra e não uma
+        recomendação, e é a primeira coisa a conferir num equipamento
+        intermediário caseiro ou num script que reescreve mensagem.
+    - tipo: transferencia
+      pergunta: "Você prova o loop entre dois equipamentos e o `483`. Qual é a ação, e por que ela não é \"aumentar o Max-Forwards\"?"
+      resposta: |
+        A ação é corrigir a rota: um dos dois equipamentos está apontando de
+        volta para quem lhe mandou a chamada, em vez de apontar para o destino
+        — normalmente uma rota de saída padrão que ficou de uma configuração
+        anterior, ou dois nós que se elegeram mutuamente como próximo salto.
+
+        Aumentar o contador seria trocar um sintoma rápido por um lento. A
+        chamada continuaria sem chegar a lugar nenhum; só demoraria mais para
+        falhar, e passaria a gastar mais tráfego e mais CPU fazendo isso. O
+        `483` não é o problema: é o mecanismo que impediu o problema de virar
+        um incidente maior, e ele fez exatamente o que devia.
+
+objetivo_md: |
+  Reproduza o chamado com `devlab-chamada` — sem opção nenhuma, como o cliente
+  faz.
+
+  ### Sua tarefa
+
+  1. Grave a chamada em **`/root/loop.pcap`**, do começo ao fim.
+  2. Escreva em **`/root/saltos.txt`** a evidência do percurso: para cada par
+     de endereços, quantas vezes o INVITE passou por ali.
+  3. Escreva em **`/root/laudo.txt`** o laudo: **entre quais dois endereços** a
+     mensagem está circulando, **quantas passagens** houve, qual campo prova
+     isso e **com que código** a chamada terminou.
+
+  Não há dicas nesta lição.
+
+verificar:
+  - descricao: "/root/loop.pcap tem o INVITE circulando e o 483 no fim"
+    script: |
+      #!/bin/bash
+      ARQ=/root/loop.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"loop.pcap nao existe","dica_diagnostica":"suba o tcpdump antes de originar e grave em /root/loop.pcap"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      N=$(tshark -r "$ARQ" -Y "sip.Method==INVITE and not icmp" 2>/dev/null | grep -c .)
+      if [ "${N:-0}" -lt 60 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura tem so $N INVITE(s); o percurso do loop nao esta inteiro\",\"dica_diagnostica\":\"a captura precisa comecar ANTES da chamada: o loop inteiro acontece em milissegundos, e quem sobe o tcpdump depois perde tudo\"}"
+        exit 1
+      fi
+      if [ "$(tshark -r "$ARQ" -Y "sip.Status-Code==483 and not icmp" 2>/dev/null | grep -c .)" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem o 483 que encerra o loop","dica_diagnostica":"a captura precisa cobrir tambem o fim: o 483 nasce quando o contador zera e volta desfazendo o caminho"}'
+        exit 1
+      fi
+      # O contador tem de aparecer descendo: e isso que distingue loop de
+      # retransmissao, e e o que o aluno precisa ter capturado.
+      for valor in 70 0; do
+        if [ "$(tshark -r "$ARQ" -Y "sip.Max-Forwards==$valor and sip.Method==INVITE and not icmp" 2>/dev/null | grep -c .)" -lt 1 ]; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"nao ha INVITE com Max-Forwards igual a $valor na captura\",\"dica_diagnostica\":\"o percurso vai de 70 a 0; se uma das pontas falta, a captura comecou tarde ou terminou cedo\"}"
+          exit 1
+        fi
+      done
+      exit 0
+
+  - descricao: "/root/saltos.txt traz a contagem por par de endereços, com os dois do anel"
+    script: |
+      #!/bin/bash
+      ARQ=/root/saltos.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"saltos.txt nao existe","dica_diagnostica":"projete ip.src e ip.dst dos INVITEs e conte quantas vezes cada par aparece"}'
+        exit 1
+      fi
+      for ip in 127.0.0.10 127.0.0.11; do
+        if ! grep -q "$ip" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo nao traz o endereco $ip\",\"dica_diagnostica\":\"os DOIS lados do loop precisam aparecer: e o par que identifica entre quem a mensagem circula\"}"
+          exit 1
+        fi
+      done
+      # Sem contagem nao e evidencia de percurso, e sim lista de enderecos.
+      if ! grep -qE '(^|[^0-9])3[0-9]([^0-9]|$)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao traz a contagem de passagens por par","dica_diagnostica":"cada sentido do anel foi percorrido dezenas de vezes; a contagem e o que transforma a lista em evidencia (sort | uniq -c resolve)"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/laudo.txt nomeia o par, a contagem, o campo e o código"
+    script: |
+      #!/bin/bash
+      ARQ=/root/laudo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"laudo.txt nao existe","dica_diagnostica":"escreva entre quais enderecos a mensagem circula, quantas passagens houve, qual campo prova e com que codigo terminou"}'
+        exit 1
+      fi
+      for ip in 127.0.0.10 127.0.0.11; do
+        if ! grep -q "$ip" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"o laudo nao nomeia o endereco $ip\",\"dica_diagnostica\":\"o defeito nao e de um equipamento: e do PAR que se aponta mutuamente. Os dois precisam estar no laudo\"}"
+          exit 1
+        fi
+      done
+      if ! grep -qiE 'max.?forwards' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao cita o campo que prova o loop","dica_diagnostica":"e o Max-Forwards descendo de 1 em 1 que distingue um loop de uma retransmissao"}'
+        exit 1
+      fi
+      if ! grep -q '483' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao diz com que codigo a chamada terminou","dica_diagnostica":"o codigo e o 483 Too Many Hops, emitido pelo proxy em que o contador zerou"}'
+        exit 1
+      fi
+      if ! grep -qE '(^|[^0-9])(7[0-9]|6[0-9])([^0-9]|$)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao traz o numero de passagens","dica_diagnostica":"conte os INVITEs da captura, ou leia a conta pelo contador: ele entrou em 70 e chegou a 0"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/loop.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  tshark -r /root/loop.pcap -Y 'sip.Method==INVITE and not icmp' \
+         -T fields -e ip.src -e ip.dst -n 2>/dev/null \
+    | sort | uniq -c > /root/saltos.txt
+  printf 'A chamada entra num loop de roteamento entre 127.0.0.10 e 127.0.0.11, que se apontam mutuamente como proximo salto. O mesmo INVITE (mesmo Call-ID, mesmo CSeq) passa 71 vezes entre os dois, e o campo que prova o loop e o Max-Forwards: ele entra em 70 e desce de 1 em 1 ate chegar a 0. Ao receber a requisicao com o contador zerado, o proxy responde 483 Too Many Hops, que volta desfazendo o caminho ate quem ligou. O 483 e o mecanismo funcionando; o defeito esta na rota dos dois equipamentos.\n' > /root/laudo.txt
+
+dicas: []
+
+erros_comuns:
+  - match: "não consegui montar o anel|Address already in use"
+    digita: "devlab-chamada"
+    mensagem: "não consegui montar o anel: [Errno 98] Address already in use"
+    causa: "sobrou um proxy de uma execução anterior segurando a porta; ele encaminharia junto com o novo, e a contagem de saltos deixaria de fazer sentido"
+    conserto: "veja quem está nas portas com `ss -unap` e encerre o processo antes de originar de novo"
+    categoria: ferramenta_errada
+  - match: "0 packets captured"
+    digita: "devlab-chamada; tcpdump -i lo -w /root/loop.pcap -q"
+    mensagem: "0 packets captured"
+    causa: "a captura subiu depois da chamada, e o loop inteiro acontece em milissegundos"
+    conserto: "suba o `tcpdump` primeiro, espere um instante e só então origine — aqui a janela é muito menor do que nas lições anteriores"
+    categoria: conceitual
+
+cards_revisao:
+  - max-forwards-conta-saltos
+  - loop-se-le-pela-repeticao-entre-os-mesmos
+  - quatrocentos-e-oitenta-e-tres-encerra

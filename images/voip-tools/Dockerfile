@@ -97,10 +97,14 @@ RUN chmod 0755 /usr/local/bin/devlab-gerar-midia \
 # isso que /usr/share/sipp é o workdir dos labs desta trilha.
 COPY cenarios/ /usr/share/sipp/cenarios/
 
-# A chamada reproduzível que as lições mandam originar.
+# A chamada reproduzível que as lições mandam originar, o proxy de sinalização
+# do nível Construtor, e as duas peças que o nível Engenheiro exigiu: o
+# registrar que desafia com 401 e confere o digest, e o anel de dois proxies
+# que decrementam `Max-Forwards`. As razões de cada um estão no cabeçalho do
+# próprio arquivo.
 COPY bin/ /usr/local/bin/
 RUN chmod 0755 /usr/local/bin/devlab-* \
- && mkdir -p /var/lib/devlab
+ && mkdir -p /var/lib/devlab /etc/devlab
 
 # A captura com várias chamadas misturadas, que a lição de sngrep manda separar.
 # Fica pronta na imagem porque gerá-la custa ~30 s — metade do teto do setup de

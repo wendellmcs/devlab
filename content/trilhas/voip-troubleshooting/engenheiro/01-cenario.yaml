@@ -1,0 +1,359 @@
+id: voip-eng-01-cenario
+trilha: voip-troubleshooting
+nivel: engenheiro
+ordem: 1
+titulo: "O cenário é o relatório de bug"
+capacidade: "Sei escrever um cenário SIPp que reproduz o defeito e serve de prova para quem vai consertá-lo."
+xp: 60
+prereqs: [voip-con-06-capstone]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+  # O molde chega pronto em /root. Uma folha em branco mediria memória de
+  # sintaxe XML; o que a lição cobra é decidir o que a mensagem diz.
+  setup: |
+    cp /usr/share/sipp/cenarios/molde-uas.xml /root/meu-cenario.xml
+
+ensina:
+  conceitos:
+    - id: cenario-e-roteiro-reproduzivel
+      titulo: "um cenário é um roteiro: a mesma sequência de mensagens, sempre"
+    - id: resposta-escolhe-dentro-da-oferta
+      titulo: "o SDP da resposta escolhe DENTRO da oferta; anunciar o que não foi oferecido é o defeito"
+    - id: reproducao-vale-mais-que-descricao
+      titulo: "um defeito reproduzível vira tarefa de quem tem de consertá-lo; um defeito descrito vira discussão"
+  comandos: []
+
+ensino:
+  gancho: |
+    O fornecedor respondeu ao seu chamado assim:
+
+    > "Não conseguimos reproduzir. Nosso equipamento está operando
+    > normalmente. Favor enviar mais detalhes."
+
+    Você já mandou a captura. Mandou o horário, o número, o Call-ID. E do
+    outro lado tem uma pessoa como você, com trinta chamados abertos, que não
+    vai reconstruir a sua rede para investigar o seu.
+
+    O que quebra esse impasse não é mais texto. É um **arquivo que roda**: um
+    roteiro que, executado na máquina dela, faz o defeito acontecer na frente
+    dela em dez segundos. Aí não há mais o que discutir — e o chamado deixa de
+    ser sua palavra contra a dela.
+
+  objetivos:
+    - verbo: construir
+      texto: "construir um cenário SIPp que reproduz um defeito de negociação de mídia"
+    - verbo: executar
+      texto: "rodar o próprio cenário dentro do lab e capturar a chamada que ele produz"
+    - verbo: explicar
+      texto: "explicar por que a resposta de um SDP não pode anunciar o que a oferta não trouxe"
+
+  modelo_mental: |
+    Até aqui você leu chamadas que o lab produziu. Deste nível em diante você
+    **produz** a chamada — e quem descreve o que vai acontecer é um arquivo.
+
+    ### O que é um cenário
+
+    Um cenário do SIPp é uma lista de dois verbos, na ordem:
+
+    | verbo | significa |
+    |---|---|
+    | `<recv>` | espere chegar uma mensagem deste tipo |
+    | `<send>` | mande esta mensagem, com este texto exato |
+
+    É só isso. Um UAS — o lado que ATENDE — é `recv INVITE`, `send 180`,
+    `send 200`, `recv ACK`, `recv BYE`, `send 200`. A ordem do arquivo é a
+    ordem do diálogo, e é por isso que ele é reproduzível: não há decisão em
+    tempo de execução, não há estado acumulado, não há sorteio. Rodou duas
+    vezes, saiu igual.
+
+    ### O que se copia da requisição, e por quê
+
+    Dentro de um `<send>`, `[last_Via:]`, `[last_From:]`, `[last_Call-ID:]` e
+    `[last_CSeq:]` copiam da última requisição recebida o valor que ela
+    trouxe. Não é economia de digitação: são **esses** campos que dizem a quem
+    ligou que aquela resposta é do diálogo dele. Uma resposta com Call-ID
+    diferente não é uma resposta errada — é uma resposta que ele descarta sem
+    contar.
+
+    O `To` leva ainda uma `tag` que é de quem responde. É ela que diz "existe
+    alguém aqui deste lado", e é o que o ACK usa para fechar o diálogo.
+
+    ### A oferta e a resposta
+
+    O SDP anda em par. Quem liga manda a **oferta**; quem atende manda a
+    **resposta**, dentro do `200 OK`:
+
+    | | quem liga (oferta) | quem atende (resposta) |
+    |---|---|---|
+    | o que declara | tudo o que eu sei falar | o que eu ESCOLHI, da sua lista |
+    | exemplo | `m=audio 6100 RTP/AVP 8 101` | `m=audio 6000 RTP/AVP 8` |
+
+    > A resposta escolhe **dentro** da oferta. Anunciar um codec que não estava
+    > lá não é uma negociação apertada — é uma resposta inválida (RFC 3264).
+
+    E é um defeito comum de gateway: o equipamento responde com o codec que
+    ELE prefere, ignorando o que foi oferecido. A chamada completa — há `200
+    OK`, há `ACK`, o telefone toca e alguém atende —, mas os dois lados passam
+    a codificar a voz de formas diferentes, e o resultado é silêncio ou
+    chiado. É o "atende e não tem áudio" que ninguém consegue culpar no NAT.
+
+    Os números de payload que aparecem em telefonia:
+
+    | número | codec |
+    |---|---|
+    | 0 | PCMU — G.711 µ-law |
+    | 8 | PCMA — G.711 A-law |
+    | 18 | G.729 |
+    | 101 | `telephone-event` (DTMF do RFC 4733), não é voz |
+
+  anatomia:
+    - linha: "devlab-chamada --cenario-uas /root/meu-cenario.xml"
+      partes:
+        - trecho: "devlab-chamada"
+          papel: comando
+          explica: "a chamada reproduzível do lab, a mesma de sempre"
+        - trecho: "--cenario-uas"
+          papel: opcao
+          explica: "quem atende deixa de ser um cenário do lab e passa a ser o SEU arquivo"
+        - trecho: "/root/meu-cenario.xml"
+          papel: argumento
+          explica: "o roteiro que você escreveu; quem liga continua sendo o lab"
+
+  demonstracao:
+    - comando: "grep -n -m1 -A11 'SIP/2.0 200 OK' /usr/share/sipp/cenarios/uas-com-audio.xml"
+      saida: |-2
+        43:      SIP/2.0 200 OK
+        44-      [last_Via:]
+        45-      [last_Record-Route:]
+        46-      [last_From:]
+        47-      [last_To:];tag=devlabSIPpTag01[call_number]
+        48-      [last_Call-ID:]
+        49-      [last_CSeq:]
+        50-      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+        51-      Content-Type: application/sdp
+        52-      Content-Length: [len]
+        53-
+        54-      v=0
+      nota: "O lado que atende, nas lições anteriores, sempre foi um arquivo como este. Repare no que o `200 OK` carrega: os quatro `[last_*]` que identificam o diálogo, a `tag` de quem responde, e um corpo SDP com `m=audio` — a resposta de mídia. `Content-Length: [len]` é calculado pelo SIPp a partir do corpo; escrever um número ali à mão é errar no instante seguinte."
+    - comando: "devlab-chamada --cenario-uas /usr/share/sipp/cenarios/uas-com-audio.xml"
+      saida: |-2
+        → atendendo em 127.0.0.1:5060 (aguardando INVITE)
+        → ligando de 127.0.0.1:5061
+        ✔ chamada concluída — quem ligou contabilizou 1 chamada(s) bem-sucedida(s)
+      nota: "E é assim que um arquivo vira uma chamada. `--cenario-uas` troca quem atende pelo cenário que você aponta — aqui apontei para o do próprio lab, que é o que ele já usava. Nada mudou, e é esse o ponto: o comportamento do lado que atende SEMPRE veio de um arquivo, e agora esse arquivo pode ser seu."
+    - comando: "tcpdump -i lo -w /root/base.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --cenario-uas /usr/share/sipp/cenarios/uas-com-audio.xml; sleep 2; pkill -x tcpdump; sleep 1; tshark -r /root/base.pcap -Y 'sdp and not icmp' -T fields -e sip.CSeq.method -e sip.Status-Code -e sdp.media -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        INVITE		audio 6100 RTP/AVP 8 101
+        INVITE	200	audio 6000 RTP/AVP 8
+      nota: "A oferta e a resposta lado a lado, que é a leitura que a tarefa vai cobrar. Quem liga ofereceu `8 101` — PCMA e DTMF. Quem atende respondeu `8`: escolheu um dos que foram oferecidos, e descartou o resto. É a negociação funcionando. Guarde este retrato: sem saber como é o normal, a resposta defeituosa não chama atenção nenhuma."
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você escreve um cenário de UAS e esquece o `[last_Call-ID:]` no `200 OK`. A chamada completa?"
+      resposta: |
+        Não, e o sintoma engana. Você vai ver na captura o `INVITE` chegando e
+        o `200 OK` saindo, tudo aparentemente certo.
+
+        Só que quem ligou indexa a chamada pelo Call-ID que ELE gerou. Uma
+        resposta com outro Call-ID não pertence a diálogo nenhum que ele
+        conheça, e ele a descarta como *out-of-call* — sem contar, sem
+        reclamar. Do ponto de vista dele, ninguém respondeu: ele retransmite o
+        INVITE e desiste no timeout.
+
+        A captura mostra as duas mensagens; o registro do endpoint mostra zero
+        chamadas concluídas. Quando as duas fontes divergem, a divergência é o
+        diagnóstico — e aqui ela aponta para o identificador, não para a rede.
+    - tipo: diagnostico
+      pergunta: "Uma chamada completa, há `200 OK` e `ACK`, e ninguém ouve nada. A oferta trazia `RTP/AVP 8 101` e a resposta trouxe `RTP/AVP 18`. O que aconteceu?"
+      resposta: |
+        O outro lado respondeu **G.729**, que não estava na oferta. Quem ligou
+        ofereceu PCMA e DTMF, e não sabe decodificar o que vai receber.
+
+        Isso não é uma negociação que deu em nada: é uma resposta inválida. O
+        RFC 3264 diz que a resposta escolhe dentro da oferta, e um lado que
+        anuncia o que não lhe foi oferecido está afirmando um acordo que não
+        existe. Se não houvesse codec em comum, o correto seria recusar com
+        `488 Not Acceptable Here` — que é honesto e diagnosticável — em vez de
+        aceitar e produzir silêncio.
+
+        Na prática o áudio vira ruído ou nada, e o chamado passa meses sendo
+        investigado como NAT, porque "a chamada completa".
+    - tipo: transferencia
+      pergunta: "Por que mandar ao fornecedor um cenário que roda vale mais do que mandar a captura do defeito?"
+      resposta: |
+        Porque muda quem tem trabalho a fazer, e muda o que se pode negar.
+
+        A captura é uma afirmação sobre o passado: aconteceu na sua rede, no
+        seu horário, com o seu tráfego. Quem recebe pode sempre responder
+        "não reproduzimos" — e pode até estar sendo honesto, porque não tem a
+        sua rede.
+
+        O cenário é um experimento. Roda na máquina dela, sem depender de nada
+        seu, e produz o defeito na frente dela. A partir daí "não conseguimos
+        reproduzir" deixa de ser uma resposta possível, e a conversa passa a
+        ser sobre a causa.
+
+        É a mesma diferença que existe, dentro do seu próprio trabalho, entre
+        "às vezes trava" e um comando que trava toda vez.
+
+objetivo_md: |
+  Um cliente relata: **a ligação para o parceiro completa, o telefone toca,
+  alguém atende — e nenhum dos dois ouve nada.** Você desconfia de que o
+  equipamento do outro lado responde com um codec que não foi oferecido, e
+  precisa de um arquivo que prove isso rodando.
+
+  O molde está em `/root/meu-cenario.xml`, com o esqueleto pronto e um
+  `COMPLETE AQUI` no lugar do corpo SDP do `200 OK`. Abra-o com `nano` (ou
+  `vim`) e leia os comentários: eles trazem a forma de um SDP de resposta e a
+  tabela de payloads.
+
+  ### Sua tarefa
+
+  1. Complete `/root/meu-cenario.xml` para que o `200 OK` responda com **G.729
+     (payload 18) e só ele** — um codec que a oferta de quem liga não traz.
+  2. Rode o seu cenário com `devlab-chamada --cenario-uas /root/meu-cenario.xml`,
+     gravando a chamada em **`/root/prova.pcap`**.
+  3. A captura precisa conter a chamada inteira: a oferta, a resposta e o
+     `ACK`.
+
+  Não há dicas nesta lição.
+
+verificar:
+  - descricao: "/root/meu-cenario.xml responde com G.729 e não é mais o molde"
+    script: |
+      #!/bin/bash
+      ARQ=/root/meu-cenario.xml
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"meu-cenario.xml nao existe","dica_diagnostica":"o molde deveria estar em /root/meu-cenario.xml; abra-o com nano e complete o corpo do 200 OK"}'
+        exit 1
+      fi
+      if ! python3 -c 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$ARQ" 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao e um XML bem formado","dica_diagnostica":"o SIPp recusa carregar um cenario mal formado e escreve o motivo no arquivo de erro, nao na tela; confira se nenhuma tag ficou aberta"}'
+        exit 1
+      fi
+      if grep -q 'COMPLETE AQUI' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o molde ainda esta com o COMPLETE AQUI no lugar do SDP","dica_diagnostica":"troque essa linha pelo corpo SDP da resposta; a forma dele esta nos comentarios do proprio arquivo"}'
+        exit 1
+      fi
+      # Uma resposta de midia sem `m=audio` nao e uma resposta de midia.
+      if ! grep -qE '^\s*m=audio .*RTP/AVP\b' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o cenario nao tem uma linha m=audio","dica_diagnostica":"e a linha m=audio que declara a porta e a lista de codecs da resposta"}'
+        exit 1
+      fi
+      if ! grep -qE '^\s*m=audio [^ ]+ RTP/AVP( 18)+\s*$' "$ARQ"; then
+        LINHA=$(grep -E '^\s*m=audio' "$ARQ" | head -1 | tr -s ' ')
+        echo "DEVLAB_JSON:{\"mensagem\":\"a linha de midia nao oferece G.729 sozinho (esta: $LINHA)\",\"dica_diagnostica\":\"o payload do G.729 e o 18, e ele tem de ser o UNICO da lista: o defeito a reproduzir e responder algo que a oferta nao trouxe\"}"
+        exit 1
+      fi
+      if ! grep -qE '^\s*a=rtpmap:18\b' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"falta o a=rtpmap:18 que nomeia o codec","dica_diagnostica":"todo payload declarado em m=audio precisa do a=rtpmap correspondente: a=rtpmap:18 G729/8000"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/prova.pcap mostra a oferta sem G.729 e a resposta com G.729"
+    script: |
+      #!/bin/bash
+      ARQ=/root/prova.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"prova.pcap nao existe","dica_diagnostica":"grave a chamada com tcpdump e reproduza-a com devlab-chamada --cenario-uas /root/meu-cenario.xml"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      OFERTA=$(tshark -r "$ARQ" -Y "sip.Method==INVITE and sdp and not icmp" -T fields -e sdp.media -n 2>/dev/null | head -1)
+      if [ -z "$OFERTA" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem o INVITE com a oferta de midia","dica_diagnostica":"a captura precisa comecar ANTES da chamada: suba o tcpdump primeiro e so entao origine"}'
+        exit 1
+      fi
+      RESPOSTA=$(tshark -r "$ARQ" -Y "sip.Status-Code==200 and sdp and not icmp" -T fields -e sdp.media -n 2>/dev/null | head -1)
+      if [ -z "$RESPOSTA" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem um 200 OK com corpo SDP","dica_diagnostica":"se o cenario nao carregou, o lado que atende sobe e nao responde nada; confira o arquivo de erro do sipp em /usr/share/sipp"}'
+        exit 1
+      fi
+      case "$RESPOSTA" in
+        *" 18"|*" 18 "*) ;;
+        *)
+          echo "DEVLAB_JSON:{\"mensagem\":\"a resposta na captura nao anuncia o payload 18 (veio: $RESPOSTA)\",\"dica_diagnostica\":\"a captura foi gravada antes de o cenario ficar pronto? reproduza a chamada de novo, ja com o seu cenario\"}"
+          exit 1 ;;
+      esac
+      case "$OFERTA" in
+        *" 18"|*" 18 "*)
+          echo "DEVLAB_JSON:{\"mensagem\":\"a OFERTA tambem traz o payload 18 (veio: $OFERTA); assim nao ha defeito para reproduzir\",\"dica_diagnostica\":\"quem oferta e o lado que liga, e ele e do lab: voce so mexe no cenario de quem ATENDE\"}"
+          exit 1 ;;
+      esac
+      if [ "$(tshark -r "$ARQ" -Y "sip.Method==ACK and not icmp" 2>/dev/null | grep -c .)" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem o ACK","dica_diagnostica":"a captura precisa cobrir a chamada inteira; o ACK vem depois do 200 OK"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o registro de quem ligou confirma que a chamada COMPLETOU"
+    script: |
+      #!/bin/bash
+      CSV=/var/lib/devlab/ultima-chamada/quem-ligou.csv
+      if [ ! -f "$CSV" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao ha registro de chamada nenhuma","dica_diagnostica":"origine a chamada com devlab-chamada --cenario-uas /root/meu-cenario.xml"}'
+        exit 1
+      fi
+      N=$(awk -F';' '
+        NR==1 { for (i = 1; i <= NF; i++) if ($i == "SuccessfulCall(C)") c = i; next }
+        c && $c != "" { v = $c }
+        END { print v + 0 }
+      ' "$CSV")
+      if [ "${N:-0}" -lt 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"quem ligou nao contabilizou nenhuma chamada concluida ($N)\",\"dica_diagnostica\":\"o defeito a reproduzir NAO e uma chamada que falha: ela tem de completar, com 200 OK e ACK, e sair muda. Se o cenario nao carrega, o lado que atende nunca responde\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import pathlib
+  arquivo = pathlib.Path('/root/meu-cenario.xml')
+  corpo = '\n'.join([
+      'v=0',
+      '      o=devlab 1 1 IN IP[local_ip_type] [local_ip]',
+      '      s=-',
+      '      c=IN IP[media_ip_type] [media_ip]',
+      '      t=0 0',
+      '      m=audio [media_port] RTP/AVP 18',
+      '      a=rtpmap:18 G729/8000',
+  ])
+  arquivo.write_text(arquivo.read_text().replace('COMPLETE AQUI', corpo))
+  PY
+  tcpdump -i lo -w /root/prova.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q --cenario-uas /root/meu-cenario.xml
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+
+dicas: []
+
+erros_comuns:
+  - match: "Unexpected [a-z]* message|Aborting call on unexpected message"
+    digita: "devlab-chamada --cenario-uas /root/meu-cenario.xml"
+    mensagem: "Aborting call on unexpected message for Call-Id"
+    causa: "o cenário respondeu algo fora da ordem que quem liga espera — uma resposta a mais, uma a menos, ou na hora errada"
+    conserto: "confira a sequência do seu arquivo contra a do diálogo: `recv INVITE`, `send 180`, `send 200`, `recv ACK`, `recv BYE`, `send 200`"
+    categoria: conceitual
+  - match: "Fatal error binding a socket"
+    digita: "devlab-chamada --cenario-uas /root/meu-cenario.xml"
+    mensagem: "Fatal error binding a socket"
+    causa: "há um processo anterior segurando a porta 5060 — um cenário que você subiu à mão e não morreu"
+    conserto: "veja quem está na porta com `ss -unap` e encerre o processo antes de originar de novo"
+    categoria: ferramenta_errada
+
+cards_revisao:
+  - cenario-e-roteiro-reproduzivel
+  - resposta-escolhe-dentro-da-oferta
+  - sdp-e-a-proposta-de-midia

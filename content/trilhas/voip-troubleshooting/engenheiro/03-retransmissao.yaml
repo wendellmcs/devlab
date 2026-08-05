@@ -1,0 +1,351 @@
+id: voip-eng-03-retransmissao
+trilha: voip-troubleshooting
+nivel: engenheiro
+ordem: 3
+titulo: "Seis INVITEs e nenhuma resposta: ler o relógio do protocolo"
+capacidade: "Sei ler um padrão de retransmissão para saber de que lado está o silêncio, e provar qual dos dois."
+xp: 70
+prereqs: [voip-eng-02-registro]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW, NET_ADMIN]
+  # Decisão 26: o defeito é escolhido aqui, não pelo aluno. Ele reproduz a
+  # chamada do cliente e descobre o que ela tem.
+  #
+  # Em INPUT, nunca em OUTPUT — decisão 21: um DROP em OUTPUT faria o próprio
+  # `send()` falhar com EPERM, e nenhum firewall do mundo real se comporta
+  # assim. O sintoma ensinado ficaria errado.
+  break: |
+    iptables -A INPUT -p udp --dport 5060 -j DROP
+
+ensina:
+  conceitos:
+    - id: retransmissao-e-do-remetente
+      titulo: "quem retransmite é quem não recebeu resposta; a repetição é sintoma dele, não do destino"
+    - id: intervalo-dobra-a-partir-de-t1
+      titulo: "o intervalo começa em T1 (500 ms) e dobra; no INVITE dobra sempre, fora dele trava em T2"
+    - id: repeticao-nao-diz-se-chegou
+      titulo: "o padrão diz que ninguém respondeu — não diz se a requisição chegou; quem sabe isso é o destinatário"
+  comandos: []
+
+ensino:
+  gancho: |
+    O chamado chega assim:
+
+    > "As ligações para o parceiro pararam. Não dá erro, não dá ocupado. Fica
+    > mudo uns trinta segundos e desiste."
+
+    Trinta segundos e desiste. Guarde esse número: ele não é aleatório, está
+    escrito num RFC de 2002, e é a assinatura de uma coisa muito específica
+    acontecendo — a transação inteira sendo tentada até o fim do prazo, sem
+    nunca receber resposta nenhuma.
+
+    A captura vai ter seis mensagens iguais. Quem nunca leu esse padrão acha
+    que a rede está duplicando pacote. Quem já leu sabe que aquilo é o outro
+    lado calado — e sabe que a captura, sozinha, ainda **não** diz se a
+    requisição chegou lá.
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar um padrão de retransmissão numa captura pelos intervalos entre as cópias"
+    - verbo: explicar
+      texto: "explicar por que os intervalos dobram e o que o valor final significa"
+    - verbo: diagnosticar
+      texto: "diagnosticar de que lado está o silêncio, usando o registro do destinatário e não só o pcap"
+
+  modelo_mental: |
+    UDP não confirma entrega. Quem garante que uma mensagem SIP chega é o
+    **próprio SIP**, e o mecanismo é simples: mandou e não teve resposta,
+    manda de novo.
+
+    ### O relógio
+
+    Tudo sai de uma constante, `T1`, que vale **500 ms** e é a estimativa de
+    ida e volta que o RFC 3261 adota como padrão. A partir dela:
+
+    | | INVITE | as outras requisições |
+    |---|---|---|
+    | 1ª retransmissão | 500 ms | 500 ms |
+    | depois | dobra **sempre** | dobra até `T2` (4 s) e fica |
+    | desiste em | 64 × T1 = **32 s** | 64 × T1 = **32 s** |
+
+    Um INVITE sem resposta nenhuma sai, então, nestes instantes:
+
+    ```
+    0,0   0,5   1,5   3,5   7,5   15,5   31,5     e o prazo estoura em 32 s
+    ```
+
+    Os intervalos entre uma cópia e a seguinte são `0,5 · 1 · 2 · 4 · 8 · 16`.
+    Essa progressão é a impressão digital: nenhuma duplicação de rede produz
+    intervalos que dobram com essa regularidade.
+
+    > "Fica mudo uns trinta segundos e desiste" é o `64 × T1` do RFC saindo
+    > pela boca do usuário.
+
+    ### O que a repetição prova, e o que não prova
+
+    A retransmissão é uma decisão de **quem envia**, tomada com a única
+    informação que ele tem: não voltou nada. Ela é compatível com três
+    mundos diferentes:
+
+    | mundo | a requisição chegou? | a resposta saiu? |
+    |---|---|---|
+    | o pedido se perde no caminho | não | não houve |
+    | a resposta se perde na volta | sim | sim, e sumiu |
+    | o destino recebeu e não respondeu | sim | não |
+
+    Da captura de quem envia, os três são idênticos. E — isto é o que já
+    apareceu três vezes nesta trilha — a captura local **também** não separa
+    os casos, porque ela se enxerta antes do firewall: um pacote descartado na
+    entrada aparece inteiro na gravação.
+
+    > A repetição prova que ninguém respondeu. Só o registro do DESTINATÁRIO
+    > prova se a requisição chegou até ele.
+
+    No lab, esse registro é o contador de chamadas recebidas do lado que
+    atende. Num PBX é o CDR ou o log de sinalização. É a mesma pergunta de
+    sempre, e a resposta continua não estando no pcap.
+
+    ### Onde ler o relógio na captura
+
+    `frame.time_relative` é o instante de cada quadro contado do começo do
+    arquivo. Projetando esse campo dos INVITEs, sai a coluna de instantes; a
+    diferença entre um e o anterior sai com uma linha de `awk`.
+
+  anatomia:
+    - linha: "tshark -r /root/mudo.pcap -Y 'sip.Method==INVITE and not icmp' -T fields -e frame.time_relative -n"
+      partes:
+        - trecho: "tshark"
+          papel: comando
+          explica: "o leitor de sempre"
+        - trecho: "-Y 'sip.Method==INVITE and not icmp'"
+          papel: opcao
+          explica: "só os INVITEs, e sem os avisos de ICMP — que carregam uma cópia do pacote dentro deles e seriam contados como se fossem o pacote"
+        - trecho: "-T fields -e frame.time_relative"
+          papel: opcao
+          explica: "projeta um campo só: o instante do quadro, contado do início do arquivo"
+        - trecho: "-n"
+          papel: opcao
+          explica: "sem resolver nomes; aqui é só velocidade, mas em captura grande faz diferença"
+
+  demonstracao:
+    - comando: "tcpdump -i lo -w /root/exemplo.pcap -q 2>/dev/null & sleep 2; devlab-chamada; sleep 1; pkill -x tcpdump; sleep 1"
+      saida: |-2
+        → atendendo em 127.0.0.1:5060 (aguardando INVITE)
+        → ligando de 127.0.0.1:5061
+        ✘ a chamada NÃO completou (sipp saiu com 1, 0 bem-sucedida(s))
+          o registro de cada lado está em /var/lib/devlab/ultima-chamada/
+      nota: "A chamada de que o cliente reclama, reproduzida. Ela demora, e o final é o que ele descreveu: nada de código de erro, nada de ocupado — a chamada simplesmente não completa. Repare que o lab avisa que quem ligou contabilizou zero chamadas bem-sucedidas."
+    - comando: "tshark -r /root/exemplo.pcap -Y 'sip and not icmp' -T fields -e _ws.col.Info -n | sort | uniq -c"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+              6 Request: INVITE sip:service@127.0.0.1:5060 |
+      nota: "A captura inteira, colapsada. Um único tipo de mensagem, repetido — e **nenhuma resposta**. Não há 100, não há 180, não há código nenhum. Uma captura com seis mensagens iguais e zero respostas já elimina metade das hipóteses: não é codec, não é SDP, não é dialplan. Nada disso chegou a ser discutido."
+    - comando: "tshark -r /root/exemplo.pcap -Y 'sip.Method==INVITE and not icmp' -T fields -e frame.time_relative -n | awk 'NR>1 {printf \"%.1f\\n\", $1 - anterior} {anterior = $1}'"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        0.5
+        1.0
+        2.0
+        4.0
+        8.0
+      nota: "Os intervalos entre uma cópia e a seguinte, em segundos. `0,5 · 1 · 2 · 4 · 8`: cada um é o dobro do anterior, que é o relógio do RFC 3261 funcionando exatamente como está escrito. Não é a rede duplicando pacote — é o SIPp fazendo o que qualquer telefone faria. (Este lab para na quinta retransmissão: o SIPp tem um teto próprio de cinco, `-max_retrans`. Um telefone de verdade iria até os 32 s, com uma sexta em 31,5 s.)"
+    - comando: "iptables -L INPUT -v -n"
+      saida: |-2
+        Chain INPUT (policy ACCEPT 0 packets, 0 bytes)
+         pkts bytes target     prot opt in     out     source               destination
+            6  3630 DROP       17   --  *      *       0.0.0.0/0            0.0.0.0/0            udp dpt:5060
+      nota: "E aqui está o outro lado da história. A regra descartou seis pacotes — os mesmos seis que a captura mostrou saindo inteiros, porque o tcpdump se enxerta ANTES do firewall. A captura provou que ninguém respondeu; foi o contador da regra que provou que a requisição não chegou a ser entregue. Duas fontes, duas perguntas diferentes."
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você captura no SEU equipamento e vê seis INVITEs saindo e nada voltando. O parceiro captura no dele e vê os mesmos seis INVITEs chegando. Onde está o problema?"
+      resposta: |
+        No caminho de **volta**, ou no equipamento dele.
+
+        As duas capturas juntas eliminam a hipótese que a sua sozinha não
+        eliminava: a requisição chega. Então ou ele respondeu e a resposta se
+        perdeu no retorno, ou ele recebeu e não respondeu.
+
+        Para separar esses dois, a pergunta seguinte é para o registro dele,
+        não para a captura: o equipamento contabilizou aquelas chamadas? Se
+        sim, ele respondeu e a resposta sumiu — investigue o caminho de volta,
+        e desconfie de NAT ou de firewall com estado. Se não, ele recebeu
+        pacote e não fez nada com ele — e aí o problema é de configuração
+        dele, não de rede.
+    - tipo: predicao
+      pergunta: "Numa captura, um `REGISTER` aparece 11 vezes, com intervalos de 0,5 · 1 · 2 · 4 · 4 · 4 · 4 · 4 · 4 · 4 s. Por que ele para de dobrar no 4?"
+      resposta: |
+        Porque `REGISTER` não é `INVITE`, e as duas transações têm relógios
+        diferentes.
+
+        Fora do INVITE, o intervalo dobra a partir de `T1` **até o teto `T2`,
+        que é 4 s**, e daí em diante fica constante. O INVITE não tem esse
+        teto: ele dobra até o prazo estourar. A razão é que o INVITE espera um
+        ser humano atender, e insistir a cada 4 segundos durante meio minuto
+        seria só barulho.
+
+        Os dois desistem no mesmo lugar, `64 × T1` = 32 s — e é por isso que
+        as 11 cópias cabem exatamente nesse intervalo.
+    - tipo: transferencia
+      pergunta: "Um usuário diz que \"o telefone demora uns 30 segundos para dizer que não completou\". O que você já sabe antes de olhar qualquer captura?"
+      resposta: |
+        Que a resposta não é uma recusa — é ausência de resposta.
+
+        Um `486` ou um `404` chegariam em milissegundos: o outro lado teria
+        respondido, e o telefone mostraria o motivo na hora. Trinta segundos é
+        o prazo do protocolo esgotando, e o protocolo só espera até o fim
+        quando não recebe nada.
+
+        Isso já direciona a investigação antes de você capturar: o assunto é
+        alcançabilidade — rota, firewall, NAT, serviço parado —, e não
+        dialplan, codec ou permissão. Sintomas com essa duração raramente
+        precisam de análise de conteúdo; precisam de um segundo ponto de
+        captura.
+
+objetivo_md: |
+  Reproduza o chamado com `devlab-chamada` — sem opção nenhuma, como o cliente
+  faz. Ela vai demorar: é o prazo do protocolo se esgotando.
+
+  ### Sua tarefa
+
+  1. Grave a chamada de que o cliente reclama em **`/root/mudo.pcap`**, do
+     começo ao fim.
+  2. Escreva em **`/root/intervalos.txt`** os intervalos, em segundos, entre
+     uma transmissão do INVITE e a seguinte — um por linha.
+  3. Escreva em **`/root/laudo.txt`** a conclusão: quantas vezes o INVITE
+     saiu, quantas respostas voltaram, e **com que evidência** você afirma que
+     a requisição não chegou ao destino (a captura sozinha não basta).
+  4. Conserte o defeito e prove: depois do conserto, a chamada tem de
+     completar e o lado que atende tem de contabilizá-la.
+
+  Não há dicas nesta lição.
+
+verificar:
+  - descricao: "/root/mudo.pcap tem as retransmissões do INVITE e nenhuma resposta"
+    script: |
+      #!/bin/bash
+      ARQ=/root/mudo.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"mudo.pcap nao existe","dica_diagnostica":"suba o tcpdump antes de originar e grave em /root/mudo.pcap"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      N=$(tshark -r "$ARQ" -Y "sip.Method==INVITE and not icmp" 2>/dev/null | grep -c .)
+      if [ "${N:-0}" -lt 4 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura tem so $N INVITE(s); o padrao de retransmissao nao esta inteiro\",\"dica_diagnostica\":\"a captura precisa cobrir a chamada ATE O FIM: as ultimas retransmissoes acontecem depois de 15 segundos\"}"
+        exit 1
+      fi
+      R=$(tshark -r "$ARQ" -Y "sip.Status-Code and not icmp" 2>/dev/null | grep -c .)
+      if [ "${R:-0}" -gt 0 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura tem $R resposta(s) SIP; esta nao e a chamada do chamado\",\"dica_diagnostica\":\"grave a chamada ANTES de consertar o defeito: depois do conserto ela passa a ser respondida\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/intervalos.txt mostra os intervalos dobrando a partir de 0,5 s"
+    script: |
+      #!/bin/bash
+      ARQ=/root/intervalos.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"intervalos.txt nao existe","dica_diagnostica":"projete frame.time_relative dos INVITEs e escreva a diferenca entre um e o anterior"}'
+        exit 1
+      fi
+      # Normaliza virgula decimal e espacos: o que importa e a progressao.
+      VALORES=$(tr ',' '.' < "$ARQ" | grep -oE '[0-9]+\.?[0-9]*' | awk '{printf "%.1f ", $1}')
+      for esperado in 0.5 1.0 2.0 4.0 8.0; do
+        case " $VALORES" in
+          *" $esperado "*) ;;
+          *)
+            echo "DEVLAB_JSON:{\"mensagem\":\"nao encontrei o intervalo de $esperado s entre as retransmissoes (li: $VALORES)\",\"dica_diagnostica\":\"os intervalos sao a DIFERENCA entre um instante e o anterior, nao os instantes: 0.5, 1.0, 2.0, 4.0, 8.0\"}"
+            exit 1 ;;
+        esac
+      done
+      exit 0
+
+  - descricao: "/root/laudo.txt conclui, e diz com que evidência além da captura"
+    script: |
+      #!/bin/bash
+      ARQ=/root/laudo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"laudo.txt nao existe","dica_diagnostica":"escreva quantos INVITEs sairam, quantas respostas voltaram e como voce sabe que a requisicao nao chegou"}'
+        exit 1
+      fi
+      if ! grep -qE '(^|[^0-9])6([^0-9]|$)|seis' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao diz quantas vezes o INVITE saiu","dica_diagnostica":"conte as transmissoes do INVITE na captura: a original mais as retransmissoes"}'
+        exit 1
+      fi
+      if ! grep -qiE 'nenhuma resposta|zero resposta|sem resposta|nao (houve|voltou|veio)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao registra que nenhuma resposta voltou","dica_diagnostica":"e o fato central: a captura tem seis requisicoes e zero respostas"}'
+        exit 1
+      fi
+      if ! grep -qiE 'firewall|iptables|regra|drop|descart' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao nomeia a evidencia de que a requisicao nao chegou","dica_diagnostica":"a captura mostra o pacote mesmo quando ele e descartado, porque ela se enxerta antes do firewall; quem prova a nao-entrega e o contador da regra ou o registro de quem atende"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o defeito foi consertado: a chamada completa e quem atende a contabiliza"
+    script: |
+      #!/bin/bash
+      if iptables -C INPUT -p udp --dport 5060 -j DROP 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"a regra de DROP na porta 5060 continua ativa","dica_diagnostica":"remova a regra que descarta a sinalizacao e origine a chamada de novo"}'
+        exit 1
+      fi
+      CSV=/var/lib/devlab/ultima-chamada/quem-atendeu.csv
+      if [ ! -f "$CSV" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao ha registro do lado que atende","dica_diagnostica":"depois de consertar, origine a chamada de novo para provar que ela passou a completar"}'
+        exit 1
+      fi
+      N=$(awk -F';' '
+        NR==1 { for (i = 1; i <= NF; i++) if ($i == "IncomingCall(C)") c = i; next }
+        c && $c != "" { v = $c }
+        END { print v + 0 }
+      ' "$CSV")
+      if [ "${N:-0}" -lt 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o lado que atende continua sem contabilizar chamada nenhuma ($N)\",\"dica_diagnostica\":\"remover a regra nao basta: e preciso originar a chamada DEPOIS do conserto, para que o registro prove que ela chegou\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/mudo.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 1
+  pkill -x tcpdump
+  sleep 1
+  tshark -r /root/mudo.pcap -Y 'sip.Method==INVITE and not icmp' \
+         -T fields -e frame.time_relative -n 2>/dev/null \
+    | awk 'NR>1 {printf "%.1f\n", $1 - anterior} {anterior = $1}' > /root/intervalos.txt
+  printf 'O INVITE saiu 6 vezes (a original e cinco retransmissoes, com os intervalos dobrando: 0.5, 1.0, 2.0, 4.0, 8.0 s) e nenhuma resposta voltou. A captura sozinha nao prova que a requisicao nao chegou, porque o tcpdump se enxerta antes do netfilter e grava ate o pacote descartado; o que prova e o contador da regra de firewall (iptables -L INPUT -v -n), que mostra os mesmos 6 pacotes descartados em INPUT na porta 5060, e o registro do lado que atende, que nao contabilizou nenhuma chamada recebida.\n' > /root/laudo.txt
+  iptables -D INPUT -p udp --dport 5060 -j DROP
+  devlab-chamada -q
+
+dicas: []
+
+erros_comuns:
+  - match: "iptables: Bad rule \\(does a matching rule exist in that chain\\?\\)"
+    digita: "iptables -D INPUT -p udp --dport 5061 -j DROP"
+    mensagem: "iptables: Bad rule (does a matching rule exist in that chain?)."
+    causa: "o `-D` remove uma regra pela descrição EXATA; qualquer diferença — a porta, o protocolo, o alvo — e ele não acha nada para remover"
+    conserto: "liste as regras numeradas com `iptables -L INPUT --line-numbers` e remova pelo número, ou repita a descrição idêntica à que foi criada"
+    categoria: flag_errada
+  - match: "0 packets captured"
+    digita: "tcpdump -i lo -w /root/mudo.pcap -q port 5060"
+    mensagem: "0 packets captured"
+    causa: "o filtro de captura foi escrito depois do `-w`, e o tcpdump o tratou como parte do nome do arquivo em algumas formas de invocação — ou a chamada terminou antes de a captura subir"
+    conserto: "suba a captura primeiro, espere um instante e só então origine: o que ficar de fora não volta"
+    categoria: sintaxe
+
+cards_revisao:
+  - retransmissao-e-do-remetente
+  - intervalo-dobra-a-partir-de-t1
+  - captura-nao-prova-entrega

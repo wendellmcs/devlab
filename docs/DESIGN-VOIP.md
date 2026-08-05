@@ -365,6 +365,160 @@ ao resto".
 
 ---
 
+# As decisões do nível Engenheiro
+
+O nível vira a trilha do avesso: até o Construtor o aluno **lia** chamadas que
+o lab produziu; a partir daqui ele **produz** a chamada que reproduz o defeito.
+Isso exigiu duas peças novas na imagem, e as duas nasceram de uma medição que
+disse que o caminho óbvio não funcionava.
+
+## 33. O registrar é do DevLab porque o SIPp não sabe conferir digest
+
+O PRD §7 G.5 pede "registro falhando (401/403, realm errado, `a1-hash`)", e a
+decisão 18 já resolveu que a trilha não tem PBX. A tentativa natural era usar o
+SIPp dos dois lados, como em todo o resto da trilha — e ela não fecha.
+
+O SIPp sabe **mandar** um `REGISTER` autenticado (é o que o `[authentication]`
+faz do lado cliente). Do lado servidor ele só sabe responder um texto fixo: não
+calcula MD5 nenhum e portanto **não distingue a senha certa da errada**. Um
+registrar que aceita qualquer credencial não consegue ensinar por que uma
+credencial é recusada — e a lição inteira é sobre o porquê da recusa.
+
+`bin/devlab-registrar` implementa o desafio e a conferência do RFC 2617 em ~60
+linhas úteis: `401` sem `Authorization`, `403` quando o digest não bate ou o
+ramal não existe, `200 OK` quando bate. Ele é honesto sobre o que não é — uma
+transação por vez, sem `qop`, sem `nonce-count`, sem expiração real — e o que
+falta está na trilha F e na H.
+
+O oráculo do check é o **arquivo de registros que ele escreve**, nunca o pcap.
+É a decisão 21 aplicada a registro em vez de chamada, e ela não muda.
+
+## 34. O nonce é fixo e o ramal guarda `a1-hash` — as duas coisas por medida
+
+Um registrar de verdade sorteia o nonce a cada desafio; é o que impede repetição
+de credencial gravada. Aqui ele é constante, e isso é o que torna o `response`
+um **valor literal**: com usuário, realm, senha, método, URI e nonce fixos, o
+digest é sempre o mesmo hexadecimal. Sem isso, nenhuma saída de demonstração da
+lição sobreviveria ao `--conferir` (decisão 27), e o aluno não teria como
+recalcular na mão o que viu na tela.
+
+A segunda metade é o que produz o defeito. O cadastro guarda
+`MD5(usuario:realm:senha)` em vez da senha — o `a1-hash` do FreeSWITCH, o
+`md5secret` do Asterisk. **O realm está dentro do hash.** Trocar o realm
+anunciado pelo servidor invalida, em silêncio, todo hash já armazenado, e o
+sintoma é o pior que existe: `403` para quem digitou a senha certa. Medido:
+
+| realm anunciado | hash guardado (feito com `devlab.local`) | resultado |
+|---|---|---|
+| `devlab.local` | `7faf5fb0…` | **200 OK** |
+| `pbx.novodominio.com` | `7faf5fb0…` | **403** |
+| `pbx.novodominio.com` | `5086a539…` (refeito) | **200 OK** |
+
+Os dois consertos aparecem na tabela, e a escolha entre eles é de operação, não
+de técnica. A lição fixa a migração como irreversível de propósito: com o realm
+podendo voltar, o exercício viraria "desfaça o `break`" e nunca chegaria à
+conta.
+
+Um efeito colateral que virou conteúdo: o `sipsak` 0.9.8.1 monta o usuário de
+autenticação a partir do endereço e envia `username="1001@"` quando não se passa
+`-u`. Como o `@` entra no `HA1`, o registro dá `403` com tudo certo. Ficou como
+erro comum da lição — é exatamente a família de erro que ela ensina a ler.
+
+## 35. `SO_REUSEADDR` em UDP deixa dois processos na mesma porta — medido
+
+Descoberto pelo pior caminho: um roteiro de teste em que o registro **passava**
+com o realm trocado, o que era impossível. A captura mostrou dois `401`, cada
+um com um realm diferente, na mesma execução.
+
+A causa é que em UDP no Linux o `SO_REUSEADDR` permite dois sockets ligados ao
+**mesmo endereço:porta**, e o datagrama vai para um ou para o outro sem regra
+que se possa prever. Medido:
+
+```
+sem  SO_REUSEADDR: o segundo bind falhou — [Errno 98] Address already in use
+com  SO_REUSEADDR: o segundo bind PASSOU — duas escutas na mesma porta
+```
+
+Um registrar esquecido de uma execução anterior passaria a responder metade dos
+desafios com o realm antigo. A lição viraria loteria e o aluno não teria como
+descobrir por quê — o sintoma é indistinguível de um bug do próprio exercício.
+
+Por isso o `devlab-registrar` e o `devlab-anel-sip` **não** usam a opção, e
+morrem com uma mensagem que diz o que fazer. O `devlab-relay-sip` do nível
+Construtor continua como está, e a assimetria tem razão: ninguém o sobe à mão —
+quem o gerencia é o `devlab-chamada`, que mata o anterior pelo arquivo de PID.
+As duas peças novas o aluno sobe com o próprio dedo.
+
+## 36. O anel empilha `Via`, e não responde `483` a um `ACK`
+
+O `devlab-relay-sip` não serve para montar um loop: ele decide o sentido pela
+ORIGEM do datagrama, e num anel toda mensagem vem do outro proxy. Daí o
+`devlab-anel-sip`, que faz o que o RFC 3261 §16.6 manda: decrementa
+`Max-Forwards`, responde `483 Too Many Hops` quando ele chega a zero (§16.3), e
+**empilha um `Via` próprio ao encaminhar**, desempilhando-o na volta (§16.7).
+
+O `Via` não é enfeite: é o mecanismo que faz a resposta achar o caminho de
+volta. Sem ele o `483` do septuagésimo salto ficaria quicando entre os dois
+proxies para sempre, e o aluno veria um lab quebrado no lugar do comportamento
+que o protocolo define.
+
+A exceção do `ACK` saiu de uma medição. Na primeira versão a captura tinha
+**duas** voltas completas — 142 respostas `483` para 71 INVITEs. O SIPp manda o
+`ACK` do `483`, esse `ACK` também dá a volta no anel, e um segundo `483` nascia
+em resposta a ele. Além de confuso pelas razões erradas, é proibido: §17 não
+admite resposta a `ACK`. Corrigido, o percurso ficou determinístico e legível —
+verificado em duas execuções idênticas:
+
+| | quantidade |
+|---|---|
+| INVITE (`Max-Forwards` de 70 a 0) | 71 |
+| ACK | 71 |
+| 483 | 71 |
+| 483 que chegam a quem ligou | 1 |
+
+## 37. O que o nível NÃO cobre, e por quê
+
+Duas coisas do PRD §7 G ficaram de fora, e é melhor dizê-lo aqui do que deixar
+a capacidade da trilha prometendo:
+
+- **NAT.** Com `rede: nenhuma` o diálogo inteiro acontece em `127.0.0.0/8`, e
+  não há tradução de endereço para observar. Encenar NAT com `iptables` dentro
+  do container produziria um sintoma que o aluno não conseguiria relacionar com
+  o que vê em campo. O assunto tem casa: é a trilha H (`nathelper`,
+  `fix_nated_contact`, RTPengine), onde existe topologia para ele.
+- **Geração de carga e teste de capacidade** (G.3). O SIPp faz isso bem, e o
+  lab tem `devlab-chamada -n`. O que falta é o objeto: medir capacidade contra
+  outro SIPp mede o lab, não um sistema. O lugar é a trilha F, com um PBX de
+  verdade do outro lado.
+
+A capacidade declarada do nível engenheiro em `trilha.yaml` foi reescrita para
+o que ele entrega de fato. O rótulo é onde a honestidade mora — a mesma razão
+pela qual trilha sem lição aparece como "em breve" em vez de sumir do mapa.
+
+## 38. O relógio do RFC 3261 é visível no lab, e o teto do SIPp não é dele
+
+A lição de retransmissão precisava de números estáveis, e eles existem. Medido
+três vezes, com resultado idêntico, arredondando ao décimo:
+
+| transação | intervalos entre as cópias |
+|---|---|
+| **INVITE** (SIPp) | 0,5 · 1 · 2 · 4 · 8 s — dobra sempre |
+| **REGISTER** (sipsak) | 0,5 · 1 · 2 · 4 · 4 · 4 · 4 · 4 · 4 · 4 s — trava em `T2` |
+
+São exatamente os *Timer A* e *Timer E* do RFC 3261, com `T1` = 500 ms e
+`T2` = 4 s. O `sipsak` desiste depois de 11 transmissões, em 32 s, que é o
+`64 × T1` do *Timer F* — a lição usa esse número porque é ele que sai pela boca
+do usuário ("fica mudo uns trinta segundos e desiste").
+
+Uma honestidade que ficou registrada na própria lição: o INVITE do lab para na
+**quinta** retransmissão por causa do `-max_retrans 5` do SIPp, e não do
+protocolo. Com `-max_invite_retrans 10` aparece a sexta, em 31,5 s, e aí sim é
+o *Timer B* que encerra. Arredondar ao décimo é o que torna a projeção
+determinística: a variação medida entre execuções ficou em ~1 ms, com ~50 ms de
+folga até o próximo décimo.
+
+---
+
 ## Pendente: a imagem de FreeSWITCH está bloqueada por credencial
 
 `devlab/freeswitch-lab` **não pode ser construída** do jeito que o PRD §4.3

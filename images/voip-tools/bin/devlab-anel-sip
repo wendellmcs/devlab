@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Anel de proxies SIP: dois saltos que apontam um para o outro.
+
+Por que existe
+--------------
+O PRD §7 G.5 pede "loop de roteamento e `Max-Forwards`" como diagnóstico
+clássico. Um loop precisa de pelo menos dois roteadores que discordem sobre
+quem é o próximo salto, e o `devlab-relay-sip` do nível Construtor não serve:
+ele encaminha para um destino fixo e decide o sentido pela ORIGEM do datagrama
+(o que vem de quem atende volta para quem ligou). Num anel toda mensagem vem
+do outro proxy, e essa regra manda tudo para o lado errado.
+
+O que ele faz
+-------------
+Sobe N proxies, cada um num endereço da própria loopback, em círculo:
+
+    quem liga ──▶ 127.0.0.10 ──▶ 127.0.0.11 ──┐
+                       ▲                       │
+                       └───────────────────────┘
+
+E faz nos dois pontos o que o RFC 3261 §16.6 manda um proxy fazer, que é
+justamente o que produz o sintoma:
+
+1. **Decrementa `Max-Forwards`** antes de encaminhar (passo 3).
+2. **Responde `483 Too Many Hops`** quando recebe uma requisição com
+   `Max-Forwards: 0` (§16.3, passo 6).
+3. **Empilha um `Via` próprio** ao encaminhar, e o desempilha ao devolver a
+   resposta (§16.6 passo 8 e §16.7 passo 3).
+
+O passo 3 não é enfeite: é o mecanismo que faz a resposta achar o caminho de
+volta. Sem ele o `483` gerado no septuagésimo salto ficaria quicando entre os
+dois proxies para sempre — e o aluno veria um lab quebrado em vez do
+comportamento que o protocolo define. É por isso que este proxy empilha `Via` e
+o do nível Construtor não precisava: lá a resposta tinha um caminho só.
+
+O que o aluno vê
+----------------
+A mesma requisição passando pelos mesmos dois endereços dezenas de vezes, com
+o `Max-Forwards` caindo de 1 em 1, e um `483` no fim. O contador é a ÚNICA
+coisa que muda entre uma passagem e a seguinte — e é o que distingue um loop de
+um encaminhamento legítimo numa captura cheia.
+
+O que ele NÃO é
+---------------
+Não é um proxy de verdade, pelas mesmas razões do `devlab-relay-sip`: não
+mantém transações, não reescreve `Record-Route`, não olha `Route`. O loop aqui
+é montado de propósito; em campo ele nasce de erro de dialplan ou de dois
+equipamentos que se apontam mutuamente como gateway de saída. O sintoma na
+captura é o mesmo, e é ele o objeto de estudo.
+"""
+import argparse
+import select
+import socket
+import sys
+import time
+
+PADRAO_MAX_FORWARDS = 70
+
+
+def endereco(texto: str) -> tuple[str, int]:
+    ip, _, porta = texto.partition(":")
+    return ip, int(porta or 5060)
+
+
+def linhas_de(mensagem: bytes) -> list[str]:
+    return mensagem.decode("utf-8", "replace").split("\r\n")
+
+
+def indice_do_cabecalho(linhas: list[str], nome: str) -> int:
+    """Índice da primeira ocorrência de um cabeçalho, ou -1."""
+    for i, linha in enumerate(linhas):
+        if not linha.strip():
+            return -1  # acabou o cabeçalho
+        if linha.split(":", 1)[0].strip().lower() == nome.lower():
+            return i
+    return -1
+
+
+def valor_do_via(linha: str) -> tuple[str, int]:
+    """O endereço de quem mandou, lido do topo da pilha de Via."""
+    # Via: SIP/2.0/UDP 127.0.0.10:5060;branch=...
+    corpo = linha.split(":", 1)[1].strip()
+    alvo = corpo.split(";", 1)[0].split()[-1]
+    return endereco(alvo)
+
+
+def resposta_483(linhas: list[str]) -> bytes:
+    """483 com a pilha de Via da requisição — é ela que leva a resposta de volta."""
+    saida = ["SIP/2.0 483 Too Many Hops"]
+    for linha in linhas:
+        if not linha.strip():
+            break
+        nome = linha.split(":", 1)[0].strip().lower()
+        if nome in ("via", "from", "call-id", "cseq"):
+            saida.append(linha)
+        elif nome == "to":
+            saida.append(linha if ";tag=" in linha else linha + ";tag=devlabanel")
+    saida.append("Content-Length: 0")
+    return ("\r\n".join(saida) + "\r\n\r\n").encode("utf-8")
+
+
+class Salto:
+    """Um proxy do anel: escuta num endereço e encaminha para o próximo."""
+
+    def __init__(self, meu: tuple[str, int], proximo: tuple[str, int]) -> None:
+        self.meu = meu
+        self.proximo = proximo
+        # Sem SO_REUSEADDR: em UDP no Linux ela permite DOIS sockets no mesmo
+        # endereço:porta, e o datagrama vai para um dos dois sem regra
+        # previsível. Um anel esquecido de uma execução anterior tornaria a
+        # contagem de saltos aleatória. Melhor falhar na cara.
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(meu)
+        self.encaminhadas = 0
+        self.recusadas = 0
+
+    def trata(self, dados: bytes) -> None:
+        linhas = linhas_de(dados)
+        if linhas[0].startswith("SIP/2.0"):
+            self.devolve_resposta(linhas)
+        else:
+            self.encaminha_requisicao(linhas)
+
+    def encaminha_requisicao(self, linhas: list[str]) -> None:
+        i = indice_do_cabecalho(linhas, "Max-Forwards")
+        if i < 0:
+            # Requisição sem o cabeçalho: o RFC manda o proxy assumir 70.
+            linhas.insert(1, f"Max-Forwards: {PADRAO_MAX_FORWARDS}")
+            i = 1
+        restam = int(linhas[i].split(":", 1)[1].strip() or 0)
+
+        if restam <= 0:
+            # §16.3 passo 6: chegou a zero, o proxy é quem responde — MENOS ao
+            # ACK, que nunca recebe resposta (§17). Sem esta exceção o lab
+            # ficava confuso de um jeito instrutivo pelas razões erradas: o
+            # SIPp manda o ACK do 483, o ACK dá a volta no anel também, e um
+            # segundo 483 nascia em resposta a ele. Duas voltas na captura,
+            # sendo que só a primeira é o defeito.
+            metodo = linhas[0].split(" ", 1)[0]
+            topo = indice_do_cabecalho(linhas, "Via")
+            if metodo != "ACK" and topo >= 0:
+                self.sock.sendto(resposta_483(linhas), valor_do_via(linhas[topo]))
+                self.recusadas += 1
+            return
+
+        linhas[i] = f"Max-Forwards: {restam - 1}"
+        # O Via próprio entra no TOPO: é por ele que a resposta volta.
+        linhas.insert(1, f"Via: SIP/2.0/UDP {self.meu[0]}:{self.meu[1]}"
+                         f";branch=z9hG4bK-anel-{self.meu[0].replace('.', '-')}")
+        self.sock.sendto("\r\n".join(linhas).encode("utf-8"), self.proximo)
+        self.encaminhadas += 1
+
+    def devolve_resposta(self, linhas: list[str]) -> None:
+        # §16.7 passo 3: o proxy tira o PRÓPRIO Via e manda para o de baixo.
+        topo = indice_do_cabecalho(linhas, "Via")
+        if topo < 0:
+            return
+        del linhas[topo]
+        seguinte = indice_do_cabecalho(linhas, "Via")
+        if seguinte < 0:
+            return
+        self.sock.sendto("\r\n".join(linhas).encode("utf-8"),
+                         valor_do_via(linhas[seguinte]))
+        self.encaminhadas += 1
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="anel de proxies SIP do lab")
+    p.add_argument("--enderecos", default="127.0.0.10,127.0.0.11",
+                   help="os saltos do anel, na ordem; o último volta para o primeiro")
+    p.add_argument("--porta", type=int, default=5060)
+    p.add_argument("--segundos", type=float, default=40.0,
+                   help="tempo de vida; ele sai sozinho, sem precisar ser morto")
+    args = p.parse_args()
+
+    ips = [x.strip() for x in args.enderecos.split(",") if x.strip()]
+    if len(ips) < 2:
+        print("um anel precisa de pelo menos dois saltos", file=sys.stderr)
+        return 2
+
+    try:
+        saltos = [
+            Salto((ip, args.porta), (ips[(i + 1) % len(ips)], args.porta))
+            for i, ip in enumerate(ips)
+        ]
+    except OSError as erro:
+        print(f"não consegui montar o anel: {erro}\n"
+              f"já há um processo numa dessas portas — veja com: ss -unap",
+              file=sys.stderr)
+        return 1
+    por_socket = {s.sock: s for s in saltos}
+
+    caminho = " → ".join(ips + [ips[0]])
+    print(f"anel de {len(saltos)} salto(s): {caminho}", file=sys.stderr)
+
+    fim = time.monotonic() + args.segundos
+    while time.monotonic() < fim:
+        prontos, _, _ = select.select(list(por_socket), [], [], 1.0)
+        for sock in prontos:
+            dados, _ = sock.recvfrom(65535)
+            try:
+                por_socket[sock].trata(dados)
+            except (ValueError, IndexError, OSError):
+                # Mensagem que não é SIP, ou Via ilegível: o anel a ignora em
+                # vez de morrer no meio do lab.
+                continue
+
+    total = sum(s.encaminhadas for s in saltos)
+    recusadas = sum(s.recusadas for s in saltos)
+    print(f"anel: {total} mensagem(ns) encaminhada(s), "
+          f"{recusadas} recusada(s) com 483", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

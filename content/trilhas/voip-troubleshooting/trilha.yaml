@@ -10,4 +10,8 @@ situacao: disponivel
 capacidades:
   operador: "Sei ler um diálogo SIP no sngrep e identificar o código de resposta."
   construtor: "Sei capturar no ponto certo e provar se o problema é sinalização ou mídia."
-  engenheiro: "Sei reproduzir o defeito com SIPp e diagnosticar áudio unidirecional, codec e NAT."
+  # A redação anterior prometia NAT, e o lab não tem NAT: com `rede: nenhuma`
+  # o diálogo inteiro acontece em 127.0.0.0/8, onde não há tradução de
+  # endereço para observar. Prometer o que não se entrega é pior do que
+  # entregar menos — o rótulo é onde a honestidade mora (ver a decisão 37).
+  engenheiro: "Sei escrever o cenário que reproduz o defeito e diagnosticar registro, retransmissão e loop de roteamento."

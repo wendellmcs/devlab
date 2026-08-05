@@ -1,0 +1,288 @@
+id: voip-eng-05-capstone
+trilha: voip-troubleshooting
+nivel: engenheiro
+ordem: 5
+titulo: "Chamado 7719: \"o ramal não está registrado\""
+capacidade: "Sei derrubar um diagnóstico errado com evidência, provar o que de fato acontece e entregar um laudo com dono."
+xp: 120
+capstone: true
+prereqs: [voip-eng-04-loop]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+  # O registro está SADIO de propósito: o capstone cobra derrubar um
+  # diagnóstico plausível e errado, e para isso ele precisa ser testável.
+  setup: |
+    mkdir -p /etc/devlab
+    printf '1001:a1=%s\n' \
+      "$(printf %s '1001:devlab.local:segredo' | md5sum | awk '{print $1}')" \
+      > /etc/devlab/ramais
+    printf 'devlab.local\n' > /etc/devlab/realm
+    grep -q " $(hostname)\$" /etc/hosts || \
+      printf '127.0.0.1 %s\n' "$(hostname)" >> /etc/hosts
+  # O defeito verdadeiro. Decisão 26: quem o escolhe é o break.
+  break: |
+    printf 'anel\n' > /var/lib/devlab/rota-padrao
+
+ensina:
+  conceitos: []
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 7719, aberto pelo cliente e **já diagnosticado** por outra pessoa
+    antes de chegar a você:
+
+    > "Ligações para o parceiro não completam. Analisado: o ramal 1001 não
+    > está registrado. Orientado o cliente a reiniciar o telefone e reconfigurar
+    > o ramal. Aguardando retorno."
+
+    O cliente reiniciou o telefone três vezes. Reconfigurou o ramal duas. O
+    chamado está aberto há seis dias e agora é seu.
+
+    "Não está registrado" é a explicação mais reutilizada do suporte de
+    telefonia, e ela tem uma qualidade rara: é **testável em trinta
+    segundos**. Ou o ramal registra, e o diagnóstico morre ali, ou não
+    registra, e você acaba de confirmá-lo.
+
+    O que não se pode é continuar sem testar.
+
+  objetivos:
+    - verbo: diagnosticar
+      texto: "diagnosticar uma chamada que não completa, separando registro de roteamento"
+    - verbo: comparar
+      texto: "comparar um diagnóstico recebido com a evidência, e derrubá-lo quando ele não se sustenta"
+    - verbo: construir
+      texto: "construir um laudo que descarta a hipótese anterior e prova a verdadeira"
+
+  modelo_mental: |
+    Nada de novo. O que muda é que você recebeu uma resposta pronta, e ela
+    está errada.
+
+    O método que atravessa o nível:
+
+    1. **Teste a hipótese que já está na mesa antes de criar a sua.** Se o
+       chamado diz "não registra", prove que registra ou que não registra. Um
+       diagnóstico não testado sobrevive a seis dias de chamado exatamente
+       porque ninguém o testou.
+    2. **Pergunte ao servidor, não ao pcap.** Quem sabe se um ramal está
+       registrado é o registrador. A captura mostra as mensagens; o registro
+       do servidor mostra o que ele concluiu delas.
+    3. **Reproduza o defeito real** e capture a chamada inteira, do começo.
+    4. **Leia o que muda entre as mensagens.** É o campo que varia — e não o
+       volume da captura — que diz o que está acontecendo.
+    5. **Entregue o laudo com dono.** "Não é o registro" é meia entrega. A
+       outra metade é dizer o que é, entre quem, e com que evidência.
+
+    O passo 1 é o que este chamado cobra. Os outros você já fez quatro vezes.
+
+  demonstracao:
+    - comando: "grep . /etc/devlab/ramais /etc/devlab/realm"
+      saida: |-2
+        /etc/devlab/ramais:1001:a1=7faf5fb089ec5f309fb9d8d6217aa9f3
+        /etc/devlab/realm:devlab.local
+      nota: "O cadastro que o chamado acusa. O ramal 1001 existe, com a credencial guardada como `a1-hash`, e o servidor anuncia o realm ao lado. A senha do ramal é `segredo`. A partir daqui é com você: o resto desta lição não traz comando nenhum."
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Antes de capturar qualquer coisa: como você testa, em trinta segundos, se o diagnóstico do chamado se sustenta?"
+      resposta: |
+        Subindo o registrador e mandando o ramal registrar — e depois
+        perguntando ao **servidor**, não à captura, se ele aceitou.
+
+        Se o registro entra, o diagnóstico caiu, e caiu com evidência que se
+        anexa ao chamado. Se não entra, você acaba de confirmá-lo e já sabe
+        onde continuar: o desafio, o realm, a credencial.
+
+        O que importa aqui é a ordem. Testar primeiro a hipótese que já está
+        na mesa custa trinta segundos e pode encerrar a investigação; começar
+        pela sua custa uma hora e deixa a outra viva, para reaparecer na
+        próxima reunião.
+    - tipo: transferencia
+      pergunta: "Você prova que o ramal registra e que a chamada morre num loop. Como escrever isso sem transformar o chamado numa disputa com quem diagnosticou antes?"
+      resposta: |
+        Separando o que é fato do que é conclusão, e datando os dois.
+
+        O laudo diz o que foi medido — o ramal registrou às tal hora, com este
+        registro do servidor; a chamada foi reproduzida e o INVITE circulou
+        entre estes dois endereços até o contador zerar — e só então conclui.
+        A hipótese anterior não precisa ser adjetivada: ela é descartada pela
+        primeira medição, e quem ler entende sozinho.
+
+        Isso não é diplomacia: é o que torna o laudo útil daqui a seis meses,
+        quando o sintoma voltar e alguém for reler o chamado. O que sobrevive
+        é a medição. A discussão, não.
+
+objetivo_md: |
+  Este é o capstone do nível: ele integra as quatro lições e não dá o passo a
+  passo.
+
+  O ramal é o `1001`, a senha é `segredo`, e o servidor de registro sobe com
+  `devlab-registrar &`. A chamada do cliente se reproduz com `devlab-chamada`,
+  sem opção nenhuma.
+
+  ### Sua entrega
+
+  Quatro arquivos:
+
+  1. **`/root/registro.pcap`** — a prova sobre o diagnóstico que veio no
+     chamado: a captura de uma tentativa de registro do ramal 1001, com o
+     desafio e o veredito do servidor.
+  2. **`/root/chamada.pcap`** — a chamada que não completa, gravada do começo
+     ao fim.
+  3. **`/root/evidencia.txt`** — a contagem que sustenta o laudo: por qual par
+     de endereços a requisição passou, e quantas vezes.
+  4. **`/root/laudo.txt`** — a conclusão, cobrindo os três pontos:
+     - o que aconteceu com o **registro** do ramal 1001, e com que evidência;
+     - **onde** a chamada morre — os dois endereços e o campo que prova;
+     - **com que código** ela termina.
+
+  Não há dicas nesta lição. Tudo o que ela cobra já foi ensinado.
+
+verificar:
+  - descricao: "/root/registro.pcap prova que o ramal 1001 registra"
+    script: |
+      #!/bin/bash
+      ARQ=/root/registro.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"registro.pcap nao existe","dica_diagnostica":"o chamado afirma que o ramal nao registra; a primeira entrega e a prova sobre essa afirmacao"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      if [ "$(tshark -r "$ARQ" -Y "sip.Status-Code==401 and not icmp" 2>/dev/null | grep -c .)" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem o desafio 401","dica_diagnostica":"a captura precisa comecar antes do REGISTER; o 401 e a primeira resposta do servidor e faz parte do registro sadio"}'
+        exit 1
+      fi
+      if [ "$(tshark -r "$ARQ" -Y "sip.Status-Code==200 and sip.CSeq.method==REGISTER and not icmp" 2>/dev/null | grep -c .)" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem nenhum 200 OK de REGISTER","dica_diagnostica":"ou o registro nao foi tentado, ou foi recusado; o servidor diz o motivo na saida dele"}'
+        exit 1
+      fi
+      REG=/var/lib/devlab/registros
+      if [ ! -f "$REG" ] || ! grep -q '^1001 ' "$REG"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o servidor nao registrou o ramal 1001","dica_diagnostica":"quem diz se um ramal esta registrado e o registrador, nao o pcap; o registro dele fica em /var/lib/devlab/registros"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/chamada.pcap tem a chamada inteira, com o percurso e o desfecho"
+    script: |
+      #!/bin/bash
+      ARQ=/root/chamada.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"chamada.pcap nao existe","dica_diagnostica":"reproduza a chamada do cliente com a captura de pe e grave em /root/chamada.pcap"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      N=$(tshark -r "$ARQ" -Y "sip.Method==INVITE and not icmp" 2>/dev/null | grep -c .)
+      if [ "${N:-0}" -lt 60 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura tem so $N INVITE(s); ela nao cobre o percurso da chamada\",\"dica_diagnostica\":\"tudo acontece em milissegundos: a captura tem de estar de pe ANTES de a chamada ser originada\"}"
+        exit 1
+      fi
+      if [ "$(tshark -r "$ARQ" -Y "sip.Status-Code==483 and not icmp" 2>/dev/null | grep -c .)" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem a resposta que encerra a chamada","dica_diagnostica":"a captura precisa cobrir tambem o fim; o desfecho e uma resposta final que volta ate quem ligou"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/evidencia.txt traz o par de endereços e a contagem de passagens"
+    script: |
+      #!/bin/bash
+      ARQ=/root/evidencia.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"evidencia.txt nao existe","dica_diagnostica":"grave a contagem de passagens por par de enderecos: e ela que sustenta o laudo"}'
+        exit 1
+      fi
+      for ip in 127.0.0.10 127.0.0.11; do
+        if ! grep -q "$ip" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"a evidencia nao traz o endereco $ip\",\"dica_diagnostica\":\"os dois lados precisam aparecer: e o par que identifica entre quem a requisicao circula\"}"
+          exit 1
+        fi
+      done
+      if ! grep -qE '(^|[^0-9])3[0-9]([^0-9]|$)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a evidencia nao traz a contagem por par","dica_diagnostica":"lista de enderecos nao e evidencia de percurso; o que sustenta o laudo e QUANTAS vezes cada sentido foi percorrido"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/laudo.txt cobre registro, local do defeito e código final"
+    script: |
+      #!/bin/bash
+      ARQ=/root/laudo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"laudo.txt nao existe","dica_diagnostica":"escreva a conclusao: o que houve com o registro, onde a chamada morre e com que codigo"}'
+        exit 1
+      fi
+      if ! grep -qiE 'registr' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao trata do registro","dica_diagnostica":"o chamado veio com um diagnostico sobre o registro; um laudo que o ignora deixa a hipotese errada viva"}'
+        exit 1
+      fi
+      if ! grep -q '1001' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao nomeia o ramal","dica_diagnostica":"diga qual ramal foi testado: e o mesmo que o chamado acusa"}'
+        exit 1
+      fi
+      for ip in 127.0.0.10 127.0.0.11; do
+        if ! grep -q "$ip" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"o laudo nao nomeia o endereco $ip\",\"dica_diagnostica\":\"o defeito nao e de um equipamento so: o laudo precisa do PAR entre o qual a requisicao circula\"}"
+          exit 1
+        fi
+      done
+      if ! grep -qiE 'max.?forwards' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao cita o campo que prova o percurso","dica_diagnostica":"e o campo que muda de uma passagem para a seguinte que distingue este sintoma de uma retransmissao"}'
+        exit 1
+      fi
+      if ! grep -q '483' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao diz com que codigo a chamada termina","dica_diagnostica":"o codigo final esta na captura, e e ele que fecha o relato"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/registro.pcap -q 2>/dev/null &
+  sleep 1
+  devlab-registrar --segundos 10 &
+  sleep 2
+  sipsak -U -s sip:1001@127.0.0.1 -u 1001 -a segredo >/dev/null 2>&1
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  tcpdump -i lo -w /root/chamada.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  tshark -r /root/chamada.pcap -Y 'sip.Method==INVITE and not icmp' \
+         -T fields -e ip.src -e ip.dst -n 2>/dev/null \
+    | sort | uniq -c > /root/evidencia.txt
+  printf 'O diagnostico anterior nao se sustenta: o ramal 1001 REGISTRA normalmente. A captura em /root/registro.pcap mostra o desafio 401 e o 200 OK, e o proprio servidor anotou a ligacao em /var/lib/devlab/registros. O defeito esta no roteamento da chamada: o INVITE entra num loop entre 127.0.0.10 e 127.0.0.11, que se apontam mutuamente como proximo salto. O campo que prova e o Max-Forwards, que entra valendo 70 e desce de 1 em 1 a cada passagem, ate chegar a 0 depois de 71 passagens (35 em cada sentido, segundo /root/evidencia.txt). Nesse ponto o proxy responde 483 Too Many Hops, que volta ate quem ligou e encerra a chamada. A acao e corrigir a rota entre os dois equipamentos; reiniciar telefone ou refazer o ramal nao tem efeito nenhum sobre isso.\n' > /root/laudo.txt
+
+dicas: []
+
+erros_comuns:
+  - match: "nao consegui escutar em .*Address already in use|não consegui montar o anel"
+    digita: "devlab-registrar &"
+    mensagem: "não consegui escutar em 127.0.0.1:5060: [Errno 98] Address already in use"
+    causa: "o registrador e a chamada disputam a porta 5060; um dos dois ficou de pé de uma etapa anterior"
+    conserto: "faça uma coisa de cada vez, e confira quem está na porta com `ss -unap` antes de subir o próximo"
+    categoria: ferramenta_errada
+  - match: "RTP Streams[\\s\\S]*=====\\s*$"
+    digita: "tshark -r /root/chamada.pcap -q -z rtp,streams"
+    mensagem: "(a tabela sai com cabeçalho e nenhuma linha)"
+    causa: "a chamada nunca completou, então não houve mídia nenhuma para medir — procurar áudio aqui é investigar um sintoma que não existe"
+    conserto: "quando não há `200 OK`, o assunto é sinalização; a medição de mídia só faz sentido depois que a chamada é atendida"
+    categoria: conceitual
+
+cards_revisao:
+  - max-forwards-conta-saltos
+  - registro-e-desafio-antes-de-aceite
+  - loop-se-le-pela-repeticao-entre-os-mesmos

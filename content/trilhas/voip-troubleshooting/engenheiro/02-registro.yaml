@@ -1,0 +1,370 @@
+id: voip-eng-02-registro
+trilha: voip-troubleshooting
+nivel: engenheiro
+ordem: 2
+titulo: "403 com a senha certa: o realm mora dentro do hash"
+capacidade: "Sei diagnosticar um registro recusado lendo o desafio, e sei recalcular a credencial quando o realm muda."
+xp: 70
+prereqs: [voip-eng-01-cenario]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+  # O ramal guarda o a1-hash, não a senha — é o que fazem os PBX de verdade.
+  # O hash nasce com o realm `devlab.local`, e é isso que o break invalida.
+  #
+  # A linha no /etc/hosts existe porque o sipsak resolve o PRÓPRIO nome para
+  # montar o Via, e um container sem rede não tem esse nome em lugar nenhum
+  # (`--network none` não escreve o hostname no /etc/hosts). Sem ela o sipsak
+  # morre em "cannot resolve local hostname" antes de mandar qualquer coisa —
+  # ruído de laboratório, não conteúdo.
+  setup: |
+    mkdir -p /etc/devlab
+    printf '1001:a1=%s\n' \
+      "$(printf %s '1001:devlab.local:segredo' | md5sum | awk '{print $1}')" \
+      > /etc/devlab/ramais
+    printf 'devlab.local\n' > /etc/devlab/realm
+    grep -q " $(hostname)\$" /etc/hosts || \
+      printf '127.0.0.1 %s\n' "$(hostname)" >> /etc/hosts
+  # Decisão 26: quem troca o realm é o break, não o aluno. Ele sobe o
+  # registrar como sempre e recebe o 403 que o cliente dele recebeu.
+  break: |
+    printf 'pbx.novodominio.com\n' > /etc/devlab/realm
+
+ensina:
+  conceitos:
+    - id: registro-e-desafio-antes-de-aceite
+      titulo: "401 não é falha: é o desafio, e a primeira tentativa vai sem credencial de propósito"
+    - id: a1-hash-carrega-o-realm
+      titulo: "o realm está DENTRO do hash guardado; trocar o realm invalida toda credencial armazenada"
+  comandos: [sipsak, devlab-registrar]
+
+ensino:
+  gancho: |
+    Ontem à noite a operação migrou o domínio SIP do PBX. Estava planejado,
+    foi comunicado, e tem de ficar como está.
+
+    Hoje de manhã:
+
+    > "Nenhum ramal registra. Todo mundo com telefone morto. E a senha não
+    > mudou — eu mesmo conferi ramal por ramal."
+
+    E a senha não mudou mesmo. Você vai digitá-la, corretamente, e vai tomar
+    um **403 Forbidden** na cara. A pessoa que abriu o chamado está certa em
+    tudo o que afirma, e o registro continua sendo recusado.
+
+    A explicação está numa conta de três linhas que quase ninguém já viu — e
+    é a mesma conta que faz o registro funcionar todo dia.
+
+  objetivos:
+    - verbo: diagnosticar
+      texto: "diagnosticar um registro recusado lendo o desafio e a resposta na captura"
+    - verbo: explicar
+      texto: "explicar por que uma senha correta produz 403 depois de uma troca de realm"
+    - verbo: construir
+      texto: "construir a credencial nova a partir de usuário, realm e senha"
+
+  modelo_mental: |
+    ### O registro é uma conversa de duas voltas
+
+    Nenhum telefone manda a senha de saída. O que acontece é sempre isto:
+
+    | volta | quem fala | o quê |
+    |---|---|---|
+    | 1 | telefone | `REGISTER`, **sem credencial nenhuma** |
+    | 1 | servidor | `401 Unauthorized` + `WWW-Authenticate: ... realm="…", nonce="…"` |
+    | 2 | telefone | `REGISTER` de novo, agora com `Authorization: ...` |
+    | 2 | servidor | `200 OK` — ou `403 Forbidden` |
+
+    > O `401` da primeira volta **não é erro**. É o desafio. Toda captura de
+    > registro sadio tem um, e quem se assusta com ele investiga a coisa
+    > errada. O que decide é a resposta da SEGUNDA volta.
+
+    O `nonce` é um número que o servidor inventa para aquele desafio. Ele
+    existe para que a resposta do telefone só valha uma vez: quem gravar o
+    tráfego não consegue reusá-la depois.
+
+    > Uma honestidade sobre este laboratório: aqui o `nonce` é **fixo**. Num
+    > servidor de verdade ele é sorteado a cada desafio, e é isso que impede o
+    > ataque de repetição. Fixá-lo é o que torna a conta reproduzível — você
+    > pode rodar duas vezes e comparar. Se numa captura de produção o `nonce`
+    > se repetir entre desafios, isso é um defeito de segurança do servidor.
+
+    ### A conta
+
+    O telefone não manda a senha nem cifrada: manda o resultado de três MD5
+    encadeados (RFC 2617).
+
+    ```
+    HA1      = MD5( usuario : realm : senha )
+    HA2      = MD5( metodo  : uri )
+    response = MD5( HA1 : nonce : HA2 )
+    ```
+
+    O servidor faz a mesma conta do lado dele e compara. Se bater, o telefone
+    provou saber a senha sem nunca dizê-la.
+
+    ### E aqui está o problema
+
+    Repare no que entra no `HA1`: **usuário, realm e senha**. O servidor
+    precisa do `HA1` para conferir — e é ele que o PBX guarda no lugar da
+    senha. É esse valor que o FreeSWITCH chama de `a1-hash` e o Asterisk de
+    `md5secret`.
+
+    > Guardar o `a1-hash` protege a senha, e prende o cadastro ao realm. Trocar
+    > o realm anunciado pelo servidor invalida, de uma vez e em silêncio, todo
+    > `a1-hash` já armazenado.
+
+    A senha continua certa. O usuário continua certo. O hash guardado é que
+    responde a uma pergunta que ninguém faz mais. E o sintoma é o pior
+    possível: `403` para quem digitou tudo corretamente.
+
+    Os dois consertos possíveis, e a escolha entre eles é de operação, não de
+    técnica:
+
+    | conserto | quando |
+    |---|---|
+    | devolver o realm antigo | a troca foi acidente |
+    | recalcular todo `a1-hash` com o realm novo | a troca foi decidida e fica |
+
+    ### O que o servidor sabe e a captura não
+
+    A captura mostra o `403`. Quem sabe **por que** é o servidor: foi senha
+    errada, foi usuário inexistente, foi hash de outro realm? Por isso o
+    veredito de "o ramal registrou" se lê no registro do servidor, nunca no
+    pcap — a mesma regra que vale para chamada vale para registro.
+
+  anatomia:
+    - linha: "sipsak -U -s sip:1001@127.0.0.1 -u 1001 -a segredo"
+      partes:
+        - trecho: "sipsak"
+          papel: comando
+          explica: "um canivete de SIP: manda uma requisição solta e mostra o que voltou"
+        - trecho: "-U"
+          papel: opcao
+          explica: "modo *usrloc*: manda um `REGISTER`, que é o que um telefone faz ao ligar"
+        - trecho: "-s sip:1001@127.0.0.1"
+          papel: opcao
+          explica: "quem se registra e onde; é daqui que sai a Request-URI"
+        - trecho: "-u 1001"
+          papel: opcao
+          explica: "o usuário de AUTENTICAÇÃO — o que entra no `HA1`. Nem sempre é igual ao do endereço, e é por isso que existe uma opção só para ele"
+        - trecho: "-a segredo"
+          papel: opcao
+          explica: "a senha, usada para calcular a resposta do desafio; ela não viaja"
+    - linha: "printf %s '1001:devlab.local:segredo' | md5sum"
+      partes:
+        - trecho: "printf %s"
+          papel: comando
+          explica: "escreve o texto SEM quebra de linha no fim — um `\\n` sobrando muda o hash inteiro"
+        - trecho: "'1001:devlab.local:segredo'"
+          papel: argumento
+          explica: "`usuario:realm:senha`, exatamente nesta ordem e com dois-pontos entre os três"
+        - trecho: "md5sum"
+          papel: comando
+          explica: "o MD5 do que entrar pela entrada padrão; o hexadecimal que sai é o `a1-hash`"
+
+  demonstracao:
+    - comando: "grep . /etc/devlab/ramais /etc/devlab/realm"
+      saida: |-2
+        /etc/devlab/ramais:1001:a1=7faf5fb089ec5f309fb9d8d6217aa9f3
+        /etc/devlab/realm:pbx.novodominio.com
+      nota: "O cadastro do lab, com um ramal só. Repare no que está guardado no lugar da senha: um hexadecimal de 32 caracteres, que é o `a1-hash`. E, ao lado, o realm que o servidor anuncia hoje. A senha do ramal 1001 é `segredo` e não mudou — mas ela não está em lugar nenhum deste arquivo."
+    - comando: "devlab-registrar --segundos 8 2>/root/registrar.log & sleep 2; sipsak -U -s sip:1001@127.0.0.1 -u 1001 -a segredo >/dev/null 2>&1; sleep 7; grep . /root/registrar.log"
+      saida: |-2
+        registrar em 127.0.0.1:5060, realm "pbx.novodominio.com", 1 ramal(is)
+        401 (sem credencial)
+        403 (1001: digest não confere; o cliente calculou com realm "pbx.novodominio.com")
+      nota: "A tentativa de registro com a senha certa, e o que o servidor anotou. Primeiro o `401` — o desafio, esperado, que toda captura sadia tem. Depois o veredito. Repare na última linha: ele diz com que realm o cliente fez a conta, que é a informação que a captura sozinha não dá."
+    - comando: "tcpdump -i lo -w /root/reg.pcap -q 2>/dev/null & sleep 1; devlab-registrar --segundos 6 2>/dev/null & sleep 2; sipsak -U -s sip:1001@127.0.0.1 -u 1001 -a segredo >/dev/null 2>&1; sleep 5; pkill -x tcpdump; sleep 1; tshark -r /root/reg.pcap -Y 'sip and not icmp' -T fields -e sip.CSeq.method -e sip.Status-Code -e sip.auth.realm -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        REGISTER
+        REGISTER	401	"pbx.novodominio.com"
+        REGISTER		"pbx.novodominio.com"
+        REGISTER	403
+      nota: "As duas voltas na captura, projetadas em três colunas: método, código e o realm que apareceu na mensagem. Linha 1, o `REGISTER` sem credencial. Linha 2, o `401` trazendo o realm que o servidor anuncia agora. Linha 3, o `REGISTER` de volta com a credencial calculada **com esse realm**. Linha 4, o veredito. Compare o realm da linha 2 com o realm de que o cadastro precisaria."
+    - comando: "printf %s '1001:devlab.local:segredo' | md5sum; printf %s '1001:pbx.novodominio.com:segredo' | md5sum"
+      saida: |-2
+        7faf5fb089ec5f309fb9d8d6217aa9f3  -
+        5086a53923b9ed2cc965d99e210900ab  -
+      nota: "A mesma senha, o mesmo usuário, e dois hashes que não têm nada a ver um com o outro. É isto que a troca de realm faz com um cadastro inteiro. O `%s` do `printf` importa: `printf '...\\n'` acrescentaria uma quebra de linha ao texto, e o MD5 sairia diferente do que o telefone calcula."
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Numa captura de registro que FUNCIONA, você vê um `401`. O cliente reclama que \"tem erro de autenticação no log\". Ele tem razão?"
+      resposta: |
+        Não. Esse `401` é o desafio, e ele existe em toda captura de registro
+        sadia — inclusive nas de agora, com todos os telefones funcionando.
+
+        A primeira volta vai **sem credencial de propósito**: o telefone ainda
+        não sabe o realm nem o nonce, que são justamente o que o `401` traz.
+        Só a segunda volta pode ser aprovada ou recusada.
+
+        O que decide é o código da segunda volta. Um log cheio de `401` com
+        `200 OK` logo em seguida é um sistema saudável; o que preocupa é `401`
+        seguido de `401`, ou de `403`.
+    - tipo: predicao
+      pergunta: "Um ramal registra normalmente. Alguém troca o realm do servidor e roda `reload`. O que acontece com quem está registrado, e com quem for registrar depois?"
+      resposta: |
+        Quem já está registrado continua funcionando — até a ligação expirar.
+        O registro é uma ligação com prazo (o `Expires`), e enquanto ela vale,
+        ninguém refaz conta nenhuma.
+
+        Quando o prazo vence, o telefone renova, recebe o desafio com o realm
+        NOVO, calcula com ele, e o hash guardado — feito com o realm antigo —
+        não bate. `403`.
+
+        É por isso que este defeito costuma aparecer em cascata e horas depois
+        da mudança: os telefones vão caindo conforme cada registro expira, e
+        ninguém liga uma coisa à outra. Quem mexeu já foi embora.
+    - tipo: transferencia
+      pergunta: "O cliente manda a senha por e-mail e pede que você cadastre o ramal. Ele avisa que o realm do PBX dele é `voz.cliente.com.br`. Por que o realm importa se você tem a senha?"
+      resposta: |
+        Porque se o cadastro guarda `a1-hash`, você precisa do realm para
+        **produzir** o hash — `MD5(usuario:realm:senha)`. Com o realm errado
+        você gera um valor que nunca vai bater, e o sintoma vai ser `403` com
+        a senha correta: exatamente o chamado deste laboratório, criado por
+        você mesmo no cadastro.
+
+        E há a recíproca, que é o que salva tempo: quando alguém aparece com
+        `403` num ramal recém-criado, a primeira coisa a conferir não é a
+        senha — é se o realm usado no cadastro é o mesmo que o servidor
+        anuncia no desafio. A captura mostra o segundo em uma linha.
+
+objetivo_md: |
+  A migração de domínio **fica**: o PBX passa a anunciar `pbx.novodominio.com`
+  e ninguém vai desfazer isso. A senha do ramal `1001` é `segredo` e não mudou.
+  O cadastro está em `/etc/devlab/ramais`, e guarda o `a1-hash`.
+
+  Suba o servidor com `devlab-registrar &` — ele sai sozinho depois de um
+  minuto — e registre o ramal com o `sipsak`.
+
+  ### Sua tarefa
+
+  1. Faça o ramal `1001` **registrar de novo**, sem desfazer a migração:
+     `/etc/devlab/realm` tem de continuar com o domínio novo no fim.
+  2. Grave a prova em **`/root/registro.pcap`**: a captura precisa conter o
+     desafio e o `200 OK` do registro que deu certo.
+  3. Escreva em **`/root/causa.txt`** duas ou três frases dizendo por que uma
+     senha correta estava sendo recusada — nomeando o realm e o que ele tem a
+     ver com a credencial guardada.
+
+  Não há dicas nesta lição.
+
+verificar:
+  - descricao: "a migração continua de pé: o servidor ainda anuncia o domínio novo"
+    script: |
+      #!/bin/bash
+      ARQ=/etc/devlab/realm
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"/etc/devlab/realm nao existe mais","dica_diagnostica":"o realm do servidor e esse arquivo; sem ele o registrar volta ao padrao e a migracao se perde"}'
+        exit 1
+      fi
+      if ! grep -q 'pbx.novodominio.com' "$ARQ"; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o realm do servidor nao e mais o do dominio novo (esta: $(tr -d '\\n' < "$ARQ"))\",\"dica_diagnostica\":\"devolver o realm antigo tambem faria o registro voltar, mas desfaz a migracao — o enunciado pede que ela fique. O conserto e do lado do cadastro\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o servidor registrou o ramal 1001 — o oráculo é o registro dele"
+    script: |
+      #!/bin/bash
+      ARQ=/var/lib/devlab/registros
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o servidor nao chegou a rodar: nao ha arquivo de registros","dica_diagnostica":"suba o registrar com devlab-registrar & antes de tentar registrar"}'
+        exit 1
+      fi
+      if ! grep -q '^1001 ' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o ramal 1001 nao consta como registrado no servidor","dica_diagnostica":"o registro so entra aqui quando o digest confere; a saida do registrar diz com que realm o cliente calculou"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/registro.pcap tem o desafio e o 200 OK do registro"
+    script: |
+      #!/bin/bash
+      ARQ=/root/registro.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"registro.pcap nao existe","dica_diagnostica":"suba o tcpdump antes de registrar e grave em /root/registro.pcap"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      if [ "$(tshark -r "$ARQ" -Y "sip.Status-Code==401 and not icmp" 2>/dev/null | grep -c .)" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem o desafio 401","dica_diagnostica":"a captura precisa comecar ANTES do REGISTER: o 401 e a primeira resposta do servidor"}'
+        exit 1
+      fi
+      N=$(tshark -r "$ARQ" -Y "sip.Status-Code==200 and sip.CSeq.method==REGISTER and not icmp" 2>/dev/null | grep -c .)
+      if [ "${N:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem nenhum 200 OK de REGISTER","dica_diagnostica":"ela precisa cobrir o registro que DEU CERTO; se voce capturou so a tentativa recusada, grave de novo depois do conserto"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/causa.txt explica o 403 pelo realm e pela credencial guardada"
+    script: |
+      #!/bin/bash
+      ARQ=/root/causa.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"causa.txt nao existe","dica_diagnostica":"escreva duas ou tres frases sobre por que a senha certa estava sendo recusada"}'
+        exit 1
+      fi
+      if ! grep -qi 'realm' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o texto nao menciona o realm","dica_diagnostica":"e o realm anunciado no desafio que mudou; sem nomea-lo, o texto nao aponta a causa"}'
+        exit 1
+      fi
+      if ! grep -qiE 'a1|hash|md5|credencial' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o texto nao diz o que o realm tem a ver com a credencial","dica_diagnostica":"o que estava guardado no cadastro nao era a senha: era um hash calculado COM o realm antigo"}'
+        exit 1
+      fi
+      if ! grep -qiE 'senha' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o texto nao trata da senha","dica_diagnostica":"o que torna o chamado confuso e que a senha estava certa; diga isso explicitamente"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  printf '1001:a1=%s\n' \
+    "$(printf %s '1001:pbx.novodominio.com:segredo' | md5sum | awk '{print $1}')" \
+    > /etc/devlab/ramais
+  tcpdump -i lo -w /root/registro.pcap -q 2>/dev/null &
+  sleep 1
+  devlab-registrar --segundos 10 &
+  sleep 2
+  sipsak -U -s sip:1001@127.0.0.1 -u 1001 -a segredo >/dev/null 2>&1
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  printf 'O servidor passou a anunciar o realm pbx.novodominio.com no desafio, e o cadastro guardava o a1-hash do ramal 1001 calculado com o realm antigo (devlab.local). Como o realm entra na conta MD5(usuario:realm:senha), o hash guardado deixou de bater com o que o telefone calcula, e o servidor recusou com 403 mesmo com a senha certa. O conserto foi recalcular o a1-hash com o realm novo, sem desfazer a migracao.\n' > /root/causa.txt
+
+dicas: []
+
+erros_comuns:
+  - match: "cannot resolve local hostname"
+    digita: "sipsak -U -s sip:1001@127.0.0.1 -u 1001 -a segredo"
+    mensagem: "error: cannot resolve local hostname: 7a1c9e0b4f21"
+    causa: "o sipsak resolve o próprio nome da máquina para montar o cabeçalho `Via`, e numa máquina sem DNS nem entrada no `/etc/hosts` esse nome não existe"
+    conserto: "acrescente o nome ao `/etc/hosts`, ou informe o endereço direto com `sipsak -H 127.0.0.1 ...`"
+    categoria: conceitual
+  - match: "nao consegui escutar em .*Address already in use|Address already in use"
+    digita: "devlab-registrar &"
+    mensagem: "não consegui escutar em 127.0.0.1:5060: [Errno 98] Address already in use"
+    causa: "já há um registrar de uma execução anterior segurando a porta; ele responderia o desafio com o realm de antes"
+    conserto: "veja quem está na porta com `ss -unap` e encerre esse processo antes de subir outro"
+    categoria: ferramenta_errada
+  - match: "403 Forbidden"
+    digita: "sipsak -U -s sip:1001@127.0.0.1 -a segredo"
+    mensagem: "403 Forbidden"
+    causa: "sem `-u`, o sipsak monta o usuário de autenticação a partir do endereço e envia `username=\"1001@\"` — um usuário que não existe no cadastro"
+    conserto: "diga o usuário de autenticação explicitamente com `-u 1001`; é ele que entra no `HA1`"
+    categoria: flag_errada
+
+cards_revisao:
+  - registro-e-desafio-antes-de-aceite
+  - a1-hash-carrega-o-realm

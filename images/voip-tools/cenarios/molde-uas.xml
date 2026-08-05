@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<!-- MOLDE de cenário UAS — o esqueleto que o aluno completa.
+
+     Por que um molde, e não uma folha em branco: o que a lição cobra é
+     ESCOLHER o que a mensagem diz, não decorar a sintaxe de um XML. O
+     esqueleto abaixo já tem a ordem das mensagens de uma chamada atendida
+     (INVITE → 180 → 200 → ACK → BYE → 200) e os `[last_*]` que copiam da
+     requisição os campos que identificam o diálogo. O que falta é o miolo.
+
+     As três regras que fazem um cenário de UAS funcionar:
+
+     1. `[last_Via:]`, `[last_From:]`, `[last_Call-ID:]` e `[last_CSeq:]`
+        copiam da última requisição recebida. Sem eles a resposta pertence a
+        outro diálogo, e quem ligou a descarta sem nem contar como resposta.
+     2. O `To` da resposta leva uma `tag` que é SUA — é ela que diz a quem
+        ligou que existe alguém do outro lado. Sem tag, o ACK não fecha o
+        diálogo.
+     3. `Content-Length: [len]` é calculado pelo SIPp a partir do corpo. Um
+        número escrito à mão fica errado no instante em que o SDP muda.
+
+     E a que mais custa tempo quando esquecida: o `<recv request="ACK">` NÃO
+     pode ser `optional="true"` se houver um `<nop>` depois dele. O SIPp recusa
+     carregar o cenário e escreve o motivo no arquivo de erro, não na tela — o
+     sintoma aparente é um UAS que sobe e nunca responde nada.
+-->
+<scenario name="MOLDE: complete o que falta">
+
+  <recv request="INVITE" crlf="true">
+  </recv>
+
+  <send>
+    <![CDATA[
+
+      SIP/2.0 180 Ringing
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=devlabMoldeTag[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <!-- O 200 OK. `retrans="500"` é o que faz o SIPp reenviá-lo se o ACK não
+       vier — a retransmissão do RFC 3261, do lado de quem responde.
+
+       AQUI ESTÁ O QUE FALTA: o corpo SDP da RESPOSTA, que é onde se declara
+       o codec com que este lado aceita falar e a porta em que ele espera o
+       áudio. Sem corpo, quem ligou não sabe para onde mandar a voz.
+
+       Um SDP de resposta tem esta forma (as linhas com <> são de você):
+
+         v=0
+         o=devlab 1 1 IN IP[local_ip_type] [local_ip]
+         s=-
+         c=IN IP[media_ip_type] [media_ip]
+         t=0 0
+         m=audio [media_port] RTP/AVP <o número do payload>
+         a=rtpmap:<o mesmo número> <NOME>/8000
+
+       Os números de payload que aparecem em telefonia:
+         0 = PCMU (G.711 µ-law)   8 = PCMA (G.711 A-law)   18 = G.729
+  -->
+  <send retrans="500">
+    <![CDATA[
+
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=devlabMoldeTag[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      COMPLETE AQUI
+
+    ]]>
+  </send>
+
+  <recv request="ACK" rtd="true" crlf="true">
+  </recv>
+
+  <recv request="BYE">
+  </recv>
+
+  <send>
+    <![CDATA[
+
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <timewait milliseconds="2000"/>
+
+</scenario>
