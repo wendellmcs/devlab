@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Proxy SIP mínimo do lab: encaminha SINALIZAÇÃO e não toca na mídia.
+
+Por que existe
+--------------
+O nível Construtor da trilha G ensina a escolher o PONTO DE CAPTURA, e essa
+escolha só tem consequência quando existe mais de um ponto. Com quem liga e
+quem atende conversando direto, todo ponto vê a mesma coisa e a lição vira
+afirmação sem prova.
+
+Com este relay no meio, a chamada passa a ter a topologia que existe em campo:
+
+    quem liga (127.0.0.1) ── SIP ──▶ proxy (127.0.0.2) ── SIP ──▶ quem atende (127.0.0.3)
+              └──────────────────────── RTP, DIRETO ───────────────────────┘
+
+E o fato que a lição cobra cai por consequência, não por encenação: **o proxy
+não vê áudio nenhum.** Ele não reescreve o SDP, então os dois lados combinam
+entre si os endereços de mídia e mandam a voz um para o outro sem passar por
+aqui. É o que faz um proxy SIP sem relay de mídia — e é a causa do chamado
+clássico "capturei no SBC e não tem RTP na captura".
+
+O que ele NÃO é
+---------------
+Não é um proxy de verdade: não reescreve `Via`, não acrescenta `Record-Route`,
+não mantém tabela de transações. Ele encaminha datagrama e lembra de um cliente
+só, porque o lab tem uma chamada de cada vez. Um proxy honesto está na trilha H
+(Kamailio); aqui o objeto de estudo é a captura, não o proxy.
+
+O que ele NÃO precisa reescrever, e por quê: o SIPp do lab manda ACK e BYE para
+o mesmo endereço para o qual mandou o INVITE (o `[remote_ip]` da linha de
+comando), então o diálogo inteiro passa por aqui sem nenhum truque de
+roteamento. Num softphone comum isso dependeria do `Contact` da resposta.
+"""
+import argparse
+import socket
+import sys
+import time
+
+
+def endereco(texto: str) -> tuple[str, int]:
+    ip, _, porta = texto.partition(":")
+    return ip, int(porta or 5060)
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="proxy SIP mínimo do lab")
+    p.add_argument("--escuta", default="127.0.0.2:5060")
+    p.add_argument("--destino", default="127.0.0.3:5060")
+    p.add_argument("--segundos", type=float, default=40.0,
+                   help="tempo de vida; o relay sai sozinho, sem precisar ser morto")
+    args = p.parse_args()
+
+    escuta, destino = endereco(args.escuta), endereco(args.destino)
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(escuta)
+    s.settimeout(1.0)
+
+    cliente: tuple[str, int] | None = None
+    encaminhados = 0
+    fim = time.monotonic() + args.segundos
+
+    while time.monotonic() < fim:
+        try:
+            dados, origem = s.recvfrom(65535)
+        except socket.timeout:
+            continue
+
+        # Quem fala de onde diz o sentido: o que vem de quem atende volta para
+        # quem ligou; qualquer outra origem é quem ligou.
+        if origem[0] == destino[0]:
+            if cliente is not None:
+                s.sendto(dados, cliente)
+                encaminhados += 1
+        else:
+            cliente = origem
+            s.sendto(dados, destino)
+            encaminhados += 1
+
+    print(f"proxy: {encaminhados} mensagem(ns) encaminhada(s)", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

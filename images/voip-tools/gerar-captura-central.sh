@@ -16,18 +16,13 @@
 # desfechos distintos — e fica congelado na imagem. Isso é o que permite que a
 # demonstração da lição tenha saída estável entre execuções.
 #
-# Um acoplamento que vale saber, porque não é óbvio: o `Call-ID` que o SIPp
-# gera é `[call_number]-[pid]@[ip]`, então os Call-ID desta captura carregam o
-# PID que os processos tiveram DURANTE O BUILD. A lição 6 mostra esses valores
-# numa demonstração. Medido: o PID se repete entre builds, porque a sequência
-# de processos dentro deste RUN é sempre a mesma — duas reconstruções seguidas
-# deram `1-21`, `1-37` e `1-50` nas duas.
-#
-# Mas é estabilidade por consequência, não por garantia: acrescentar um comando
-# aqui desloca os PIDs e a saída gravada da lição 6 passa a divergir. Quem
-# mexer neste arquivo deve rodar `python3 scripts/capturar-demonstracao.py
-# voip-op-06-sngrep` depois. O `--conferir` detecta e falha alto — o modo de
-# falha é barulhento, não silencioso.
+# O `Call-ID` desta captura é determinístico, e isso foi conquistado: o formato
+# padrão do SIPp é `%u-%p@%s`, com o PID do processo no meio, e por isso os
+# valores mostrados na lição 6 dependiam de quais PIDs o build sorteou —
+# estabilidade por consequência, não por garantia. O `devlab-chamada` passa
+# `-cid_str` trocando o PID pelo NÚMERO DISCADO, então aqui saem sempre
+# `1-2001@127.0.0.1`, `1-2002@...` e `1-2003@...`, em qualquer build e em
+# qualquer máquina.
 set -uo pipefail
 
 DESTINO=${1:-/usr/share/devlab/central.pcap}

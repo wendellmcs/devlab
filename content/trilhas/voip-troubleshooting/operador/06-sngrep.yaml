@@ -143,9 +143,9 @@ ensino:
     - comando: "tshark -r /usr/share/devlab/central.pcap -Y sip -T fields -e sip.Call-ID -n | sort -u"
       saida: |-2
         Running as user "root" and group "root". This could be dangerous.
-        1-21@127.0.0.1
-        1-37@127.0.0.1
-        1-50@127.0.0.1
+        1-2001@127.0.0.1
+        1-2002@127.0.0.1
+        1-2003@127.0.0.1
       nota: "Três Call-ID distintos: é o que diz que há três chamadas ali, e é a única costura entre as mensagens de cada uma. Todo o agrupamento do sngrep sai daqui."
     - comando: "sngrep -N -q -I /usr/share/devlab/central.pcap -O /root/chamada-2002.pcap 2002"
       saida: ""

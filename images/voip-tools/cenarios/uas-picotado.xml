@@ -1,23 +1,27 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 <!DOCTYPE scenario SYSTEM "sipp.dtd">
 
-<!-- UAS que ATENDE e devolve RTP — a linha de base audível do lab.
+<!-- UAS que ATENDE e devolve RTP PICOTADO — a chamada que o cliente reclama.
 
-     Por que não usar o cenário `uas` embutido no SIPp:
+     A degradação NÃO é injetada na rede do lab; ela já vem dentro do arquivo
+     de mídia (`pcap/g711a-picotado.pcap`, feito por `gerar-midia.py`). Os dois
+     motivos estão medidos:
 
-     1. Ele nunca envia mídia. Responde a sinalização e pronto.
-     2. Ele responde PCMU(0) a uma oferta de PCMA(8), ou seja, os dois lados
-        nem sequer concordam no codec.
+     1. `iptables` não serve. A captura se enxerta na camada de dispositivo,
+        ANTES do netfilter (decisão 21), então um pacote descartado em INPUT
+        aparece na gravação inteiro — e o aluno não teria perda nenhuma para
+        MEDIR na captura dele.
+     2. `tc netem` serve, e é aleatório. Perda e jitter mudariam a cada
+        execução, e toda saída gravada de demonstração divergiria (decisão 27).
 
-     O resultado é que, sozinho, o cenário embutido produz uma chamada que
-     COMPLETA e não tem áudio em sentido nenhum. Isso torna impossível ensinar
-     áudio unidirecional: sem um estado "funcionando" do qual a falha se
-     distinga, o aluno não tem com o que comparar, e "sem áudio" deixa de ser
-     um sintoma para virar o comportamento normal do lab.
+     Com o buraco de sequência dentro do próprio arquivo, a mesma chamada dá o
+     mesmo veredito sempre: 225 pacotes recebidos, 24 perdidos (9,6%), com o
+     espaçamento oscilando até 60 ms. Medido em execuções repetidas.
 
-     Aqui o codec da resposta casa com a oferta e o RTP volta. A falha passa a
-     ser sempre injetada de propósito, e o aluno pode provar a diferença. -->
-<scenario name="UAS que atende e devolve RTP">
+     A degradação fica só no sentido de QUEM ATENDE para QUEM LIGA. A
+     assimetria é o conteúdo: quem ligou ouve picotado, quem atendeu ouve bem,
+     e o sentido degradado é o que o aluno tem de nomear. -->
+<scenario name="UAS que atende e devolve RTP picotado">
 
   <recv request="INVITE" crlf="true">
   </recv>
@@ -71,10 +75,10 @@
   <recv request="ACK" rtd="true" crlf="true">
   </recv>
 
-  <!-- A mídia de volta: é exatamente isto que o cenário embutido não tem. -->
+  <!-- A mídia de volta, com os buracos de sequência já embutidos. -->
   <nop>
     <action>
-      <exec play_pcap_audio="pcap/g711a.pcap"/>
+      <exec play_pcap_audio="pcap/g711a-picotado.pcap"/>
     </action>
   </nop>
 

@@ -6,9 +6,9 @@
 # do SIPp na primeira lição seria ensinar a ferramenta antes do protocolo — o
 # contrário do que a trilha se propõe.
 #
-# O que ela produz é real: dois processos SIPp conversando por 127.0.0.1, com
-# INVITE → 180 → 200 → ACK → RTP → BYE → 200, SDP negociado em PCMA e mídia nos
-# dois sentidos (o lado que atende usa -rtp_echo, então devolve o que recebe).
+# O que ela produz é real: dois processos SIPp conversando, com INVITE → 180 →
+# 200 → ACK → RTP → BYE → 200, SDP negociado em PCMA e mídia nos dois sentidos
+# (cada lado toca um arquivo de áudio; ninguém ecoa o do outro).
 #
 # O registro que ela deixa é do ENDPOINT, não da captura — ver a decisão 21 em
 # docs/DESIGN-VOIP.md. O arquivo de estatísticas do SIPp diz quantas chamadas
@@ -21,6 +21,9 @@
 # ramal deu ocupado"), nunca códigos: quem liga para um telefone descobre o
 # código lendo a resposta, e é isso que a trilha ensina. Um `--destino 486`
 # entregaria de graça a resposta do exercício na própria linha de comando.
+#
+# `--por-proxy` põe um proxy de sinalização no meio do caminho. A mídia continua
+# indo direta de ponta a ponta — é o que dá ao lab pontos de captura diferentes.
 set -uo pipefail
 
 PORTA_SIP=5060
@@ -29,13 +32,22 @@ RTP_DESTINO=6000
 RTP_ORIGEM=6100
 REGISTRO=/var/lib/devlab/ultima-chamada
 CENARIOS=/usr/share/sipp/cenarios
+
+# Os três papéis, quando a chamada vai `--por-proxy`. São três endereços da
+# própria loopback: 127.0.0.0/8 inteiro chega em `lo`, então não é preciso
+# configurar interface nenhuma para ter três pontos distinguíveis por endereço.
+IP_QUEM_LIGA=127.0.0.1
+IP_PROXY=127.0.0.2
+IP_QUEM_ATENDE=127.0.0.3
 # Escrito pelo `lab.break` da lição que quer que a chamada JÁ nasça com defeito.
 # Sem ele o destino é `atende`, e é isso que mantém a lição 1 inalterada.
 DESTINO_PADRAO=/var/lib/devlab/destino-padrao
+PID_DO_PROXY=/var/lib/devlab/proxy.pid
 
 duracao=1        # quantas chamadas
 silencioso=0
 destino=""
+por_proxy=0
 # O número discado, que vira o usuário da Request-URI (`INVITE sip:NUMERO@...`).
 # `service` é o padrão do SIPp e fica como padrão aqui para não mudar a chamada
 # que a lição 1 já gravou. Trocá-lo é o que permite ter, numa captura só, várias
@@ -52,6 +64,7 @@ cenario_de() {
     ausente)      echo "uas-ausente.xml" ;;
     sem-codec)    echo "uas-sem-codec.xml" ;;
     sobrecarga)   echo "uas-sobrecarga.xml" ;;
+    picotado)     echo "uas-picotado.xml" ;;
     *) return 1 ;;
   esac
 }
@@ -62,11 +75,14 @@ while [ $# -gt 0 ]; do
     -q|--silencioso) silencioso=1; shift ;;
     -d|--destino)   destino="$2"; shift 2 ;;
     -N|--numero)    numero="$2"; shift 2 ;;
+    -p|--por-proxy) por_proxy=1; shift ;;
     -h|--ajuda)
-      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
       echo
-      echo "  --destino atende|ocupado|desconhecido|ausente|sem-codec|sobrecarga"
+      echo "  --destino atende|ocupado|desconhecido|ausente|sem-codec|sobrecarga|picotado"
       echo "  --numero  NUMERO discado (padrão: service)"
+      echo "  --por-proxy  a sinalização passa por um proxy em $IP_PROXY;"
+      echo "               a mídia vai direta entre as pontas"
       exit 0 ;;
     *) echo "opção desconhecida: $1" >&2; exit 2 ;;
   esac
@@ -82,8 +98,18 @@ fi
 
 if ! CENARIO_UAS=$(cenario_de "$destino"); then
   echo "destino desconhecido: $destino" >&2
-  echo "use um de: atende ocupado desconhecido ausente sem-codec sobrecarga" >&2
+  echo "use um de: atende ocupado desconhecido ausente sem-codec sobrecarga picotado" >&2
   exit 2
+fi
+
+# Sem proxy os dois lados moram em 127.0.0.1, como sempre foi; com proxy cada
+# papel ganha um endereço, e é o que dá ao aluno pontos de captura distintos.
+if [ "$por_proxy" -eq 1 ]; then
+  IP_UAS="$IP_QUEM_ATENDE"
+  IP_ALVO="$IP_PROXY"
+else
+  IP_UAS="$IP_QUEM_LIGA"
+  IP_ALVO="$IP_QUEM_LIGA"
 fi
 
 dizer() { [ "$silencioso" -eq 1 ] || echo "$@"; }
@@ -98,20 +124,46 @@ cd /usr/share/sipp || exit 1
 # que o problema é dele ter rodado duas vezes.
 pkill -x sipp 2>/dev/null && sleep 1
 
-dizer "→ atendendo em 127.0.0.1:$PORTA_SIP (aguardando INVITE)"
+dizer "→ atendendo em $IP_UAS:$PORTA_SIP (aguardando INVITE)"
 # Sem -rtp_echo de propósito: o cenário já toca áudio de volta, e somar o eco
 # faria o lado que atende mandar mídia duas vezes — inclusive antes de quem
 # ligou ter aberto a porta de RTP, o que enchia toda captura de "ICMP port
 # unreachable". Ruído que o aluno não tem como explicar na primeira lição.
 sipp -sf "$CENARIOS/$CENARIO_UAS" \
-     -p "$PORTA_SIP" -i 127.0.0.1 \
+     -p "$PORTA_SIP" -i "$IP_UAS" \
      -min_rtp_port "$RTP_DESTINO" -max_rtp_port "$((RTP_DESTINO + 8))" \
      -trace_stat -stf "$REGISTRO/quem-atendeu.csv" \
      -bg >"$REGISTRO/quem-atendeu.log" 2>&1
 sleep 1
 
-dizer "→ ligando de 127.0.0.1:$PORTA_SIP_ORIGEM"
-sipp -sn uac_pcap "127.0.0.1:$PORTA_SIP" -s "$numero" -i 127.0.0.1 -p "$PORTA_SIP_ORIGEM" \
+if [ "$por_proxy" -eq 1 ]; then
+  # Um relay esquecido de uma execução interrompida seguraria a porta e a
+  # chamada morreria com uma mensagem que não diz isso a quem está no lab.
+  if [ -r "$PID_DO_PROXY" ]; then
+    kill "$(cat "$PID_DO_PROXY")" 2>/dev/null
+    sleep 1
+  fi
+  dizer "→ proxy de sinalização em $IP_PROXY:$PORTA_SIP (a mídia não passa por ele)"
+  devlab-relay-sip --escuta "$IP_PROXY:$PORTA_SIP" \
+                   --destino "$IP_QUEM_ATENDE:$PORTA_SIP" \
+                   --segundos 40 >"$REGISTRO/proxy.log" 2>&1 &
+  proxy_pid=$!
+  echo "$proxy_pid" > "$PID_DO_PROXY"
+  sleep 1
+fi
+
+dizer "→ ligando de $IP_QUEM_LIGA:$PORTA_SIP_ORIGEM"
+# O cenário de quem liga é do DevLab, não o `uac_pcap` embutido: o embutido
+# emenda um segundo pcap (DTMF) com numeração própria, e todo receptor lê o
+# salto como 74% de perda numa chamada perfeita. Ver o cabeçalho do arquivo.
+#
+# `-cid_str` fixa o formato do Call-ID (o padrão é `%u-%p@%s`, com o PID no
+# meio). Trocar o PID pelo número discado é o que torna o identificador da
+# chamada o mesmo em todo build — e é a única forma suportada de mexer nele:
+# escrever o Call-ID no cenário faz o SIPp descartar as respostas.
+sipp -sf "$CENARIOS/uac-com-audio.xml" "$IP_ALVO:$PORTA_SIP" \
+     -cid_str "%u-$numero@%s" \
+     -s "$numero" -i "$IP_QUEM_LIGA" -p "$PORTA_SIP_ORIGEM" \
      -min_rtp_port "$RTP_ORIGEM" -max_rtp_port "$((RTP_ORIGEM + 8))" \
      -m "$duracao" -r 1 -timeout 30 \
      -trace_stat -stf "$REGISTRO/quem-ligou.csv" \
@@ -120,6 +172,10 @@ codigo=$?
 
 sleep 2
 pkill -x sipp 2>/dev/null
+if [ "$por_proxy" -eq 1 ]; then
+  kill "$proxy_pid" 2>/dev/null
+  wait "$proxy_pid" 2>/dev/null
+fi
 sleep 1
 
 # `SuccessfulCall(C)` é a coluna cumulativa de chamadas concluídas. O cabeçalho

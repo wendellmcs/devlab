@@ -1,0 +1,344 @@
+id: voip-con-02-ponto
+trilha: voip-troubleshooting
+nivel: construtor
+ordem: 2
+titulo: "Três máquinas, três verdades sobre a mesma chamada"
+capacidade: "Sei escolher em que ponto capturar, e sei o que cada ponto pode e não pode provar."
+xp: 40
+prereqs: [voip-con-01-filtro]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+
+ensina:
+  conceitos:
+    - id: sinalizacao-e-midia-nao-seguem-o-mesmo-caminho
+      titulo: "a sinalização pode passar por um intermediário e a mídia ir direta entre as pontas"
+    - id: ponto-de-captura-limita-a-prova
+      titulo: "cada ponto de captura vê um pedaço; o que ele não vê não vira evidência"
+  comandos: []
+
+ensino:
+  gancho: |
+    O chamado é o de sempre: "completa e não tem áudio". Você tem acesso ao
+    servidor da operadora que fica na frente do PBX, captura lá, e manda o
+    veredito:
+
+    > "Capturei no proxy: **não há um único pacote de RTP**. O áudio não está
+    > saindo do cliente."
+
+    E está errado. Nesse ponto **nunca** haveria RTP — nem quando a chamada
+    está perfeita. O proxy trata a sinalização; a voz vai direta de uma ponta à
+    outra e não passa por lá.
+
+    Você acabou de acusar o lado errado com uma captura que estava certa. O
+    problema não foi o filtro, nem a leitura: foi o **ponto**.
+
+  objetivos:
+    - verbo: executar
+      texto: "capturar de um ponto escolhido, restringindo a gravação ao que aquele ponto vê"
+    - verbo: comparar
+      texto: "comparar o que o mesmo diálogo mostra em dois pontos diferentes"
+    - verbo: explicar
+      texto: "explicar por que a ausência de mídia num ponto não prova ausência de mídia"
+
+  modelo_mental: |
+    Numa central de verdade a chamada quase nunca é uma linha reta entre duas
+    pontas. Tem um proxy, um SBC, um gateway no caminho — e a peça que muda
+    tudo é esta:
+
+    > **O intermediário decide se a mídia passa por ele.** Um proxy SIP
+    > "simples" só encaminha sinalização. Ele lê o SDP e não o reescreve, então
+    > as duas pontas combinam os endereços de mídia **entre si** e a voz vai
+    > direta, sem tocar no proxy.
+
+    ```
+      quem liga ──────── SIP ────────▶ proxy ──────── SIP ────────▶ quem atende
+          │                                                              │
+          └───────────────────── RTP, DIRETO ────────────────────────────┘
+    ```
+
+    Daí saem as três verdades de uma chamada só:
+
+    | ponto | vê a sinalização | vê a mídia |
+    |---|---|---|
+    | **quem liga** | só a perna dele até o proxy | **sim**, os dois sentidos |
+    | **o proxy** | as duas pernas, inteiras | **não**, nunca |
+    | **quem atende** | só a perna dele até o proxy | **sim**, os dois sentidos |
+
+    Nenhum dos três está mentindo. Cada um responde a uma pergunta diferente,
+    e escolher o ponto é escolher qual pergunta você vai poder responder:
+
+    - **"O diálogo chegou inteiro dos dois lados?"** → capture no proxy. É o
+      único lugar que vê as duas pernas e, portanto, o único que mostra se o
+      intermediário mudou alguma coisa no meio do caminho.
+    - **"O áudio existe, e em qual sentido?"** → capture numa ponta. O proxy
+      não tem essa informação para dar.
+
+    E o corolário que mais custa caro:
+
+    > **Ausência de evidência num ponto não é evidência de ausência.** "Não vi
+    > RTP" só quer dizer alguma coisa se aquele ponto veria o RTP caso ele
+    > existisse.
+
+    ### Como este lab representa os três pontos
+
+    Aqui os três papéis moram na mesma máquina, cada um num endereço da
+    loopback: quem liga em `127.0.0.1`, o proxy em `127.0.0.2`, quem atende em
+    `127.0.0.3`. Numa rede de verdade você escolhe o ponto escolhendo em qual
+    **máquina** roda o `tcpdump`; aqui você escolhe pelo **filtro de captura**,
+    restringindo a gravação ao que passaria naquele ponto. É a peça da lição
+    anterior fazendo o trabalho de um lugar físico — e o que sai do arquivo é
+    exatamente o que sairia lá.
+
+  anatomia:
+    - linha: "tcpdump -i lo -w /root/no-proxy.pcap -q host 127.0.0.2"
+      partes:
+        - trecho: "tcpdump"
+          papel: comando
+          explica: "o gravador de sempre"
+        - trecho: "-w /root/no-proxy.pcap"
+          papel: opcao
+          explica: "onde a gravação daquele ponto fica"
+        - trecho: "host 127.0.0.2"
+          papel: argumento
+          explica: "o filtro de captura que representa o PONTO: só o que sai ou chega no proxy. É o mesmo tráfego que um `tcpdump` rodando na máquina dele veria"
+
+  demonstracao:
+    - comando: "tcpdump -i lo -w /root/no-proxy.pcap -q host 127.0.0.2 2>/dev/null & sleep 2; devlab-chamada -q --por-proxy; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Uma chamada com proxy no meio, gravada do ponto de vista DELE. O `--por-proxy` põe a sinalização para passar por 127.0.0.2; a mídia continua sendo combinada entre as pontas."
+    - comando: "tshark -r /root/no-proxy.pcap -Y sip -T fields -e ip.src -e ip.dst -e _ws.col.Info -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        127.0.0.1	127.0.0.2	Request: INVITE sip:service@127.0.0.2:5060 |
+        127.0.0.2	127.0.0.3	Request: INVITE sip:service@127.0.0.2:5060 |
+        127.0.0.3	127.0.0.2	Status: 180 Ringing |
+        127.0.0.2	127.0.0.1	Status: 180 Ringing |
+        127.0.0.3	127.0.0.2	Status: 200 OK (INVITE) |
+        127.0.0.2	127.0.0.1	Status: 200 OK (INVITE) |
+        127.0.0.1	127.0.0.2	Request: ACK sip:service@127.0.0.2:5060 |
+        127.0.0.2	127.0.0.3	Request: ACK sip:service@127.0.0.2:5060 |
+        127.0.0.1	127.0.0.2	Request: BYE sip:service@127.0.0.2:5060 |
+        127.0.0.2	127.0.0.3	Request: BYE sip:service@127.0.0.2:5060 |
+        127.0.0.3	127.0.0.2	Status: 200 OK (BYE) |
+        127.0.0.2	127.0.0.1	Status: 200 OK (BYE) |
+      nota: "Doze mensagens, e não seis: cada uma aparece DUAS vezes, uma em cada perna. O INVITE chega de 127.0.0.1 e sai para 127.0.0.3; o 200 OK volta de 127.0.0.3 e segue para 127.0.0.1. É esta a visão que só o ponto do meio tem — e é com ela que se prova que o intermediário repassou o que recebeu."
+    - comando: "tshark -r /root/no-proxy.pcap -q -z io,phs"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+
+        ===================================================================
+        Protocol Hierarchy Statistics
+        Filter:
+
+        eth                                      frames:12 bytes:5332
+          ip                                     frames:12 bytes:5332
+            udp                                  frames:12 bytes:5332
+              sip                                frames:12 bytes:5332
+        ===================================================================
+      nota: "E aqui o fato da lição: no proxy **não existe uma linha de rtp**. Não é defeito, não é filtro errado — a voz nunca passou por ali. Quem fecha o chamado com \"capturei no proxy e não tem áudio\" está descrevendo o funcionamento normal."
+    - comando: "tcpdump -i lo -w /root/na-ponta.pcap -q host 127.0.0.1 2>/dev/null & sleep 2; devlab-chamada -q --por-proxy; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "A mesma chamada, agora gravada do ponto de quem liga."
+    - comando: "tshark -r /root/na-ponta.pcap -Y sip -T fields -e ip.src -e ip.dst -e _ws.col.Info -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        127.0.0.1	127.0.0.2	Request: INVITE sip:service@127.0.0.2:5060 |
+        127.0.0.2	127.0.0.1	Status: 180 Ringing |
+        127.0.0.2	127.0.0.1	Status: 200 OK (INVITE) |
+        127.0.0.1	127.0.0.2	Request: ACK sip:service@127.0.0.2:5060 |
+        127.0.0.1	127.0.0.2	Request: BYE sip:service@127.0.0.2:5060 |
+        127.0.0.2	127.0.0.1	Status: 200 OK (BYE) |
+      nota: "Seis mensagens, e todas contra 127.0.0.2. Quem liga não vê a outra perna: para ele, quem atendeu foi o proxy. Se o defeito estivesse ENTRE o proxy e quem atende, esta captura não teria como mostrá-lo."
+    - comando: "tshark -r /root/na-ponta.pcap -Y \"rtp and not icmp\" -T fields -e ip.src -e ip.dst -n | sort -u"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        127.0.0.1	127.0.0.3
+        127.0.0.3	127.0.0.1
+      nota: "E o áudio está aqui, nos dois sentidos — trocado com **127.0.0.3**, um endereço que a sinalização desta captura nunca mostrou. Foi combinado dentro do SDP que passou pelo proxy. É o retrato do que a lição diz: sinalização e mídia não seguem o mesmo caminho."
+
+  pratica_guiada:
+    - instrucao: "Grave a chamada do ponto de quem ATENDE, em /root/treino.pcap."
+      modelo: "tcpdump -i lo -w /root/treino.pcap -q host ____ 2>/dev/null & sleep 2; devlab-chamada -q --por-proxy; sleep 2; pkill -x tcpdump; sleep 1"
+      resposta: "tcpdump -i lo -w /root/treino.pcap -q host 127.0.0.3 2>/dev/null & sleep 2; devlab-chamada -q --por-proxy; sleep 2; pkill -x tcpdump; sleep 1"
+    - instrucao: "Mostre com quem esse ponto trocou SINALIZAÇÃO."
+      modelo: "tshark -r /root/treino.pcap -Y sip -T fields -e ip.src -e ip.dst -n | ____ -u"
+      resposta: "tshark -r /root/treino.pcap -Y sip -T fields -e ip.src -e ip.dst -n | sort -u"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você captura no proxy uma chamada que está perfeita. Quantos fluxos de áudio aparecem?"
+      resposta: |
+        Nenhum. E a chamada continua perfeita.
+
+        A mídia foi combinada no SDP entre as duas pontas e vai direta de uma à
+        outra. O proxy encaminha sinalização; ele não está no caminho da voz.
+
+        Por isso "não vi RTP" só vira diagnóstico quando dito de um ponto que
+        veria o RTP se ele existisse — uma das pontas, ou um intermediário que
+        de fato faça relay de mídia.
+    - tipo: diagnostico
+      pergunta: "Na captura de quem liga, a sinalização é toda com o proxy, mas o áudio vem de um terceiro endereço. Isso é ataque, erro de configuração ou normal?"
+      resposta: |
+        Normal, e é o comportamento esperado de um proxy que não faz relay de
+        mídia.
+
+        O endereço da voz não vem do endereço de quem enviou a mensagem: vem do
+        `c=` e do `m=audio` **dentro** do SDP, que o proxy repassou sem
+        reescrever. Quem atende anunciou o próprio endereço, e é para lá que a
+        voz vai.
+
+        É também por isso que NAT quebra áudio com tanta facilidade: se o que
+        está escrito no SDP não for alcançável de fora, a sinalização completa
+        e a voz vai para um endereço que não existe.
+    - tipo: transferencia
+      pergunta: "O cliente diz que não ouve. Você só tem acesso ao SBC, que faz relay de mídia. O que essa captura permite e não permite concluir?"
+      resposta: |
+        Como o SBC faz relay, a mídia passa por ele — então ali existem
+        **quatro** fluxos: dois de cada lado. Isso permite muita coisa: dá para
+        ver se o áudio chega da operadora e se o SBC o repassa para o cliente.
+
+        O que essa captura **não** prova é a entrega na ponta. Que o SBC tenha
+        enviado não quer dizer que o telefone recebeu — entre os dois ainda há
+        internet, NAT e o firewall do cliente. É a mesma fronteira de sempre:
+        a captura prova até onde ela alcança, e o passo seguinte é perguntar a
+        quem contabiliza do outro lado.
+
+objetivo_md: |
+  Um chamado só, dois pontos de captura, e a diferença entre eles é a lição.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `--por-proxy` | põe a sinalização para passar por 127.0.0.2 |
+  | `host X` | filtro de captura que representa o ponto X |
+  | `-e ip.src -e ip.dst` | de quem para quem, em cada mensagem |
+  | `-z io,phs` | o que existe dentro do arquivo, por protocolo |
+
+  Os três papéis: quem liga em `127.0.0.1`, o proxy em `127.0.0.2`, quem
+  atende em `127.0.0.3`.
+
+  ### Sua tarefa
+
+  Reproduza uma chamada `--por-proxy` e grave, **ao mesmo tempo**, o que cada
+  um destes dois pontos veria:
+
+  1. `/root/ponto-proxy.pcap` — o que passa pelo proxy. Tem de conter as
+     **duas pernas** da sinalização (mensagens com 127.0.0.1 e com 127.0.0.3)
+     e **nenhum** pacote de mídia.
+  2. `/root/ponto-cliente.pcap` — o que passa por quem liga. Tem de conter a
+     sinalização dele com o proxy e a **mídia nos dois sentidos**.
+
+  Depois escreva em `/root/resposta.txt` uma linha respondendo: em qual dos
+  dois arquivos é possível provar que houve áudio, e por quê.
+
+verificar:
+  - descricao: "/root/ponto-proxy.pcap tem as duas pernas da sinalização e nenhuma mídia"
+    script: |
+      #!/bin/bash
+      ARQ=/root/ponto-proxy.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"ponto-proxy.pcap nao existe","dica_diagnostica":"grave com um filtro de captura que represente o ponto do proxy: host 127.0.0.2"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      # As duas pernas: o proxy e o unico ponto que fala com os dois lados.
+      PERNA_A=$(tshark -r "$ARQ" -Y "sip and ip.addr==127.0.0.1" 2>/dev/null | grep -c .)
+      PERNA_B=$(tshark -r "$ARQ" -Y "sip and ip.addr==127.0.0.3" 2>/dev/null | grep -c .)
+      if [ "${PERNA_A:-0}" -lt 1 ] || [ "${PERNA_B:-0}" -lt 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"este arquivo nao tem as duas pernas (com 127.0.0.1: $PERNA_A, com 127.0.0.3: $PERNA_B)\",\"dica_diagnostica\":\"a chamada precisa ser originada com --por-proxy, e o filtro de captura precisa ser o do ponto do proxy\"}"
+        exit 1
+      fi
+      MIDIA=$(tshark -r "$ARQ" -Y "rtp and not icmp" 2>/dev/null | grep -c .)
+      if [ "${MIDIA:-0}" -gt 0 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"apareceu midia ($MIDIA pacote(s)) numa captura do ponto do proxy\",\"dica_diagnostica\":\"pelo proxy nao passa audio; se ele apareceu, o filtro de captura esta pegando mais do que aquele ponto veria\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/ponto-cliente.pcap tem a sinalização com o proxy e a mídia nos dois sentidos"
+    script: |
+      #!/bin/bash
+      ARQ=/root/ponto-cliente.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"ponto-cliente.pcap nao existe","dica_diagnostica":"grave um segundo arquivo, ao mesmo tempo, com o filtro de captura do ponto de quem liga"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      SIP=$(tshark -r "$ARQ" -Y "sip and ip.addr==127.0.0.2" 2>/dev/null | grep -c .)
+      if [ "${SIP:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"este arquivo nao tem a sinalizacao de quem liga com o proxy","dica_diagnostica":"o ponto de quem liga e 127.0.0.1; a sinalizacao dele e toda contra 127.0.0.2"}'
+        exit 1
+      fi
+      # A midia vai direta entre as pontas: 127.0.0.1 <-> 127.0.0.3.
+      IDA=$(tshark -r "$ARQ" -Y "rtp and not icmp and ip.dst==127.0.0.3" 2>/dev/null | grep -c .)
+      VOLTA=$(tshark -r "$ARQ" -Y "rtp and not icmp and ip.dst==127.0.0.1" 2>/dev/null | grep -c .)
+      if [ "${IDA:-0}" -lt 1 ] || [ "${VOLTA:-0}" -lt 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura do ponto de quem liga nao tem os dois sentidos do audio (para 127.0.0.3: $IDA, para 127.0.0.1: $VOLTA)\",\"dica_diagnostica\":\"o filtro de captura deste ponto precisa pegar TUDO que fala com 127.0.0.1, sinalizacao e midia; e a captura tem de durar a chamada inteira\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/resposta.txt diz onde a existência de áudio é demonstrável"
+    script: |
+      #!/bin/bash
+      ARQ=/root/resposta.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"resposta.txt nao existe","dica_diagnostica":"escreva uma linha dizendo em qual dos dois arquivos da para provar que houve audio, e por que"}'
+        exit 1
+      fi
+      # O arquivo tem de apontar a PONTA. Citar o proxy como resposta e o erro
+      # que a licao inteira existe para desfazer.
+      if ! grep -qiE 'cliente|ponta|quem liga|127\.0\.0\.1' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a resposta nao aponta o arquivo do ponto de quem liga","dica_diagnostica":"so um dos dois pontos esta no caminho da voz; diga qual e chame-o pelo nome ou pelo endereco"}'
+        exit 1
+      fi
+      if ! grep -qiE 'midia|mídia|rtp|audio|áudio|voz' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a resposta nao diz o que existe naquele arquivo e nao existe no outro","dica_diagnostica":"nomeie o que so aparece num deles: os fluxos de RTP, isto e, a midia"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/ponto-proxy.pcap -q host 127.0.0.2 2>/dev/null &
+  tcpdump -i lo -w /root/ponto-cliente.pcap -q host 127.0.0.1 2>/dev/null &
+  sleep 2
+  devlab-chamada -q --por-proxy
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  printf 'So em ponto-cliente.pcap: e um ponto que esta no caminho da voz, e por isso a midia RTP nos dois sentidos aparece nele. Pelo proxy passa apenas sinalizacao, entao a ausencia de RTP la nao prova nada sobre o audio.\n' > /root/resposta.txt
+
+dicas:
+  - "Um ponto de captura, aqui, é um filtro de captura por endereço: `host 127.0.0.2` grava o que o proxy veria."
+  - "Os dois gravadores precisam subir antes da chamada, cada um com seu `host` e seu arquivo — é a mesma técnica de duas capturas simultâneas da lição anterior."
+  - "tcpdump -i lo -w /root/ponto-proxy.pcap -q host 127.0.0.2 2>/dev/null & e o segundo com host 127.0.0.1, e só então devlab-chamada -q --por-proxy"
+
+erros_comuns:
+  - match: "tcpdump: (syntax error|can't parse filter expression)"
+    digita: "tcpdump -i lo -w /root/x.pcap -q ip.addr==127.0.0.2"
+    mensagem: "tcpdump: can't parse filter expression: syntax error"
+    causa: "`ip.addr==` é filtro de exibição; na captura o endereço se escreve `host 127.0.0.2`"
+    conserto: "use `host 127.0.0.2` — e, se quiser só um sentido, `src host` ou `dst host`"
+    categoria: sintaxe
+  - match: "0 packets captured"
+    digita: "tcpdump -i lo -w /root/ponto-proxy.pcap -q host 127.0.0.2"
+    mensagem: "0 packets captured"
+    causa: "a chamada foi originada sem `--por-proxy`, e nesse caso ninguém fala com 127.0.0.2: os dois lados conversam direto em 127.0.0.1"
+    conserto: "origine com `devlab-chamada --por-proxy` quando quiser a topologia com intermediário"
+    categoria: conceitual
+
+cards_revisao:
+  - sinalizacao-e-midia-nao-seguem-o-mesmo-caminho
+  - ponto-de-captura-limita-a-prova
+  - captura-nao-prova-entrega

@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<!-- UAC do DevLab — quem LIGA. Substitui o cenário embutido `uac_pcap`.
+
+     Duas coisas mudam em relação ao embutido, e as duas são medidas.
+
+     1. NÃO toca o pcap de DTMF depois do áudio.
+
+        O embutido toca `g711a.pcap` (sequência 1000..1249) e em seguida
+        `dtmf_2833_1.pcap` (sequência 2000..2009). São dois arquivos
+        independentes, com espaços de numeração DISJUNTOS, e o resultado é que
+        `tshark -z rtp,streams` lê o salto de 1249 para 2000 como perda:
+
+            Pkts 260   Lost 750 (74.3%)
+
+        numa chamada perfeita. Não é bug do tshark — é o que qualquer receptor
+        concluiria. Num aparelho de verdade o DTMF de RFC 4733 continua a MESMA
+        numeração do áudio e não produz buraco nenhum; ou seja, os 74% eram
+        artefato do lab. Como o nível Construtor inteiro mede fluxo de mídia,
+        uma linha de base suja tornaria toda medição uma exceção a explicar.
+
+     2. As tags e os branches são DETERMINÍSTICOS.
+
+        O embutido usa `[pid]` neles, e por isso o texto de uma captura gerada
+        no build dependia de quais PIDs o build sorteou: a demonstração que
+        mostrasse uma mensagem inteira divergiria a cada reconstrução da
+        imagem. Aqui derivam do NÚMERO DISCADO (`[service]`), escolhido por
+        quem chama — distintos entre chamadas de uma mesma captura, e os mesmos
+        em todo build.
+
+        O `Call-ID` continua sendo `[call_id]`, e isso NÃO é esquecimento: em
+        modo cliente o SIPp indexa a chamada pelo Call-ID que ele mesmo gerou, e
+        um valor escrito no cenário faz com que ele descarte as respostas do
+        outro lado como "out-of-call". Medido — a chamada morre em timeout
+        depois de cinco retransmissões do INVITE. Quem determina esse valor é o
+        `-cid_str` da linha de comando, que o `devlab-chamada` passa.
+
+     O SDP é cópia literal do embutido, incluindo o `telephone-event`. A oferta
+     de mídia é o que a lição de SDP dissseca linha a linha; mudá-la mudaria
+     conteúdo já auditado sem nenhum ganho. Oferecer 101 sem enviar dígito
+     nenhum não é inconsistência: a oferta diz o que se ACEITA receber. -->
+<scenario name="UAC do DevLab: liga e envia audio">
+
+  <send retrans="500">
+    <![CDATA[
+
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=z9hG4bK-[service]-invite
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[service]SIPpTag09[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>
+      Call-ID: [call_id]
+      CSeq: 1 INVITE
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Subject: Performance Test
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[local_ip_type] [local_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 8 101
+      a=rtpmap:8 PCMA/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-11,16
+
+    ]]>
+  </send>
+
+  <recv response="100" optional="true">
+  </recv>
+
+  <recv response="180" optional="true">
+  </recv>
+
+  <recv response="200" rtd="true" crlf="true">
+  </recv>
+
+  <send>
+    <![CDATA[
+
+      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=z9hG4bK-[service]-ack
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[service]SIPpTag09[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 1 ACK
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Subject: Performance Test
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <!-- A voz de quem ligou. -->
+  <nop>
+    <action>
+      <exec play_pcap_audio="pcap/g711a.pcap"/>
+    </action>
+  </nop>
+
+  <!-- Um pouco mais do que a duração da mídia (5 s), para o último pacote
+       sair antes do BYE. O embutido esperava 8 s porque emendava o DTMF. -->
+  <pause milliseconds="5500"/>
+
+  <send retrans="500">
+    <![CDATA[
+
+      BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=z9hG4bK-[service]-bye
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[service]SIPpTag09[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 2 BYE
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Subject: Performance Test
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv response="200" crlf="true">
+  </recv>
+
+  <ResponseTimeRepartition value="10, 20, 30, 40, 50, 100, 150, 200"/>
+  <CallLengthRepartition value="10, 50, 100, 500, 1000, 5000, 10000"/>
+
+</scenario>

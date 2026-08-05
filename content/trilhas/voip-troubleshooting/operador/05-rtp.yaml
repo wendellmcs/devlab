@@ -82,11 +82,13 @@ ensino:
     está boa" é uma conclusão **falsa**. Ver na captura prova que o pacote
     chegou até o ponto de captura. Não prova entrega.
 
-    E uma advertência sobre contagem, específica deste lab: em `lo` um pacote
-    entregue é gravado **duas vezes** (uma na saída, outra na entrada), e um
-    pacote descartado, só uma. Medido. Então número absoluto de pacote na
-    loopback não corresponde ao que foi enviado — **compare os sentidos entre
-    si**, não os totais.
+    E uma advertência sobre contagem, específica deste lab: quando **ninguém
+    escuta** na porta de destino, o sistema devolve um aviso de porta fechada
+    que carrega **uma cópia do pacote dentro dele**. Um filtro por porta conta
+    então o mesmo pacote duas vezes — o pacote e a reclamação sobre ele. Medido:
+    100 datagramas para uma porta fechada viram 200 quadros; para uma porta
+    aberta, 100. Por isso todo filtro daqui em diante leva `and not icmp`, e por
+    isso **compare os sentidos entre si**, nunca os totais.
 
   anatomia:
     - linha: "tshark -r /root/chamada.pcap -Y \"rtp and not icmp\" -n"

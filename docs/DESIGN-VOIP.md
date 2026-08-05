@@ -110,35 +110,57 @@ Dois corolários que economizam depuração:
   próprio `send()` falhar com `EPERM` — o remetente recebe um erro imediato, e
   nenhum firewall remoto do mundo real se comporta assim. O sintoma ensinado
   ficaria errado.
-- **Em `lo`, cada pacote é capturado duas vezes** (uma na saída, outra na
-  entrada). Os números absolutos de um `tshark | wc -l` sobre loopback não
-  correspondem ao que foi enviado; compare **sentidos entre si**, ou use
-  `tshark -z rtp,streams`.
+- **Um filtro por porta conta o mesmo pacote duas vezes quando ninguém o
+  recebe.** Ver a correção abaixo. Os números absolutos de um `tshark | wc -l`
+  sobre este lab não correspondem ao que foi enviado; compare **sentidos entre
+  si**, ou use `tshark -z rtp,streams`.
 
-### Refinamento medido ao escrever as lições 5 e 7
+### Correção medida (2026-08-04): não existe duplicação em `lo`
 
-A tabela acima diz o essencial e a contagem merece uma correção. Medido com a
-chamada real do lab (o lado que atende toca 5 s de G.711, ou seja 250 pacotes
-de 20 ms), contando UDP cru por sentido:
+Este documento afirmava, e a lição 5 ensinava, que a loopback grava cada pacote
+**entregue** duas vezes — uma na saída, outra na entrada. **Está errado**, e o
+mecanismo real é quase o inverso. Medido com 100 datagramas UDP para uma porta
+aberta e 100 para uma porta fechada, capturando tudo em `lo`:
 
-| | pacotes enviados | pacotes na captura |
-|---|---|---|
-| sem regra | 250 | **500** (2×) |
-| DROP em INPUT na porta de destino | 250 | **250** (1×) |
+| destino | enviados | quadros com `udp.dstport==porta` | destes, ICMP |
+|---|---|---|---|
+| porta **aberta** (há socket) | 100 | **100** | 0 |
+| porta **fechada** (ninguém escuta) | 100 | **200** | **100** |
 
-Ou seja: em `lo` a duplicação **só acontece quando o pacote é entregue**. O
-descartado é gravado uma vez (na saída) e não chega a ser gravado na entrada.
-A consequência prática tem dois lados:
+Quem dobra a contagem é o **ICMP port unreachable**: ele carrega dentro dele
+uma cópia do pacote original, cabeçalho UDP incluído, e por isso um filtro por
+`udp.dstport` casa o pacote **e** o aviso que reclama dele. É o mesmo motivo
+pelo qual a lição 5 já filtrava `and not icmp` na anatomia — a explicação é que
+estava trocada.
 
+Por que isso aparece o tempo todo no lab: **nenhum lado abre socket de RTP.**
+Durante uma chamada, `ss -unap` mostra só 5060 e 5061; o SIPp toca o pcap de
+áudio sem nunca ficar escutando na porta de mídia. Logo **todo** pacote RTP
+gera um ICMP de porta fechada, e a contagem por porta sai sempre dobrada.
+
+E é isso que explica o número que gerou a leitura errada. Com a regra de DROP
+em INPUT, o pacote é descartado **antes** da camada UDP, o aviso ICMP não chega
+a ser gerado, e a contagem cai de 500 para 250. Nada mudou na duplicação: o que
+sumiu foram os avisos.
+
+| | pacotes enviados | `udp.dstport==6100` | `... and not icmp` | ICMP |
+|---|---|---|---|---|
+| sem regra | 250 | 500 | 250 | 250 |
+| DROP em INPUT na porta 6100 | 250 | 250 | 250 | 0 |
+
+As três consequências práticas continuam valendo, e uma delas fica mais forte:
+
+- **Filtrar `and not icmp` não é preciosismo**, é o que separa contar pacote de
+  contar reclamação sobre o pacote.
 - O que a decisão 21 afirma continua de pé, e é o que importa: **os pacotes
   aparecem na captura, no sentido certo, e a aplicação não recebe nenhum.** A
   lista de sentidos de uma chamada muda é idêntica à de uma chamada boa —
   verificado, e é a demonstração central da lição 5.
-- Mas **não se pode ensinar "a contagem caiu pela metade" como técnica.** Isso
-  é artefato da loopback. Numa interface real não há duplicação nenhuma, o
-  descarte em INPUT não muda a contagem, e o mesmo defeito ficaria invisível
-  também no número. Por isso as lições comparam **presença de sentido** e
-  consultam o contador do firewall — nunca o total de pacotes.
+- **Não se pode ensinar "a contagem caiu pela metade" como técnica.** Ela cai
+  porque o lab não tem ninguém escutando na porta de mídia; num endpoint real,
+  que escuta, não haveria ICMP nenhum para sumir e o número não mudaria. As
+  lições comparam **presença de sentido** e consultam o contador do firewall —
+  nunca o total de pacotes.
 
 ## 22. A mídia RTP é sintetizada no build, não baixada
 

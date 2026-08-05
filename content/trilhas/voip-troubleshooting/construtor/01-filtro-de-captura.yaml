@@ -1,0 +1,381 @@
+id: voip-con-01-filtro
+trilha: voip-troubleshooting
+nivel: construtor
+ordem: 1
+titulo: "O que você não gravar não existe"
+capacidade: "Sei escolher o que entra na gravação — e sei o que essa escolha custa depois."
+xp: 40
+prereqs: [voip-op-07-capstone]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+
+ensina:
+  conceitos:
+    - id: filtro-de-captura-descarta
+      titulo: "o filtro de captura decide o que entra no arquivo, e o que ficou de fora não volta"
+    - id: filtro-de-exibicao-esconde
+      titulo: "o filtro de exibição só esconde: o pacote continua no arquivo"
+    - id: rtp-so-e-rtp-com-sdp
+      titulo: "o leitor só sabe que um UDP é RTP porque leu o SDP da chamada; sem a sinalização junto, ele mostra 'data'"
+  comandos: []
+
+ensino:
+  gancho: |
+    Você capturou a noite inteira no servidor da central para pegar a queixa
+    que só acontece de madrugada. De manhã o chamado está lá:
+
+    > "A chamada da 1h47 completou e ninguém ouviu nada."
+
+    Você abre a captura e a sinalização está toda lá — INVITE, 200, ACK, BYE.
+    De áudio, nada. Nenhum pacote. E não é que o áudio não tenha passado: é
+    que você capturou com `port 5060`, porque o disco não aguentaria tudo.
+
+    A chamada foi embora. Não dá para voltar e gravar de novo o que aconteceu
+    à 1h47. **A escolha do filtro na hora da captura é uma decisão sobre o que
+    você vai poder provar depois** — e é irreversível.
+
+  objetivos:
+    - verbo: executar
+      texto: "gravar uma captura com filtro de captura, escolhendo o que entra no arquivo"
+    - verbo: explicar
+      texto: "explicar por que o filtro de captura é irreversível e o de exibição não"
+    - verbo: identificar
+      texto: "identificar qual das duas sintaxes uma expressão é, pela forma como ela é escrita"
+
+  modelo_mental: |
+    São **dois filtros, em dois momentos**, e confundi-los é o erro que custa a
+    evidência.
+
+    | | quando age | o que faz com o que não casa | onde se escreve |
+    |---|---|---|---|
+    | **filtro de captura** | na hora de gravar | **descarta**: nunca entra no arquivo | expressão solta do `tcpdump`; `-f` do `tshark` |
+    | **filtro de exibição** | na hora de ler | **esconde**: continua no arquivo | `-Y` do `tshark` |
+
+    O filtro de captura é o que protege o disco: numa central com trezentas
+    chamadas simultâneas, gravar tudo enche um SSD antes do café. E é o que
+    cobra o preço: o pacote que ele descartou não existe mais em lugar nenhum.
+
+    ### Duas línguas, e a confusão é honesta
+
+    Elas nem são a mesma família:
+
+    ```
+    filtro de captura     udp port 5060        host 127.0.0.1 and udp
+    filtro de exibição    sip.Method=="INVITE"     ip.src==127.0.0.1
+    ```
+
+    O filtro de captura fala **BPF**, uma linguagem antiga, que roda dentro do
+    kernel e por isso só conhece o que dá para olhar rápido no pacote:
+    protocolo, endereço, porta, tamanho. Ela **não sabe o que é SIP**. Um
+    `tcpdump ... sip` não filtra nada: ele nem começa.
+
+    O filtro de exibição fala a língua do Wireshark, que já decodificou tudo e
+    conhece `sip.Method`, `rtp.seq`, `sdp.media`. Ela é infinitamente mais
+    expressiva — e só existe depois que o pacote já está gravado.
+
+    O vocabulário de BPF que resolve telefonia é pequeno:
+
+    | expressão | pega |
+    |---|---|
+    | `udp port 5060` | tudo que sai ou entra na 5060 |
+    | `udp portrange 6000-6108` | uma faixa inteira — a de mídia |
+    | `host 127.0.0.3` | tudo que fala com aquele endereço |
+    | `udp port 5060 or udp port 5061` | as duas coisas |
+    | `not icmp` | tudo, menos os avisos |
+
+    ### O preço escondido de separar a sinalização da mídia
+
+    Tem uma segunda conta, e ela pega quase todo mundo uma vez.
+
+    **RTP não se anuncia.** Um pacote de voz não tem nada que diga "eu sou
+    RTP": é UDP numa porta qualquer, escolhida na hora. Quem descobre isso é o
+    LEITOR, e ele descobre lendo o **SDP** da chamada — a mensagem em que os
+    dois lados combinaram as portas. Foi por isso que, nas lições anteriores,
+    `-Y rtp` funcionou: a sinalização estava no mesmo arquivo.
+
+    Grave só a mídia, sem a sinalização, e o mesmo comando não acha nada. Os
+    pacotes estão lá; o leitor é que não tem como saber o que eles são, e os
+    chama de `data`. A saída é dizer a ele:
+
+    ```
+    tshark -r midia.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -Y rtp
+    ```
+
+    `-d` é *decode as*: "trate o que estiver nesta porta como aquele
+    protocolo". Sem ele, a captura de mídia pura é um monte de bytes.
+
+    Daí a regra prática de quem captura em produção: **quando puder, guarde a
+    sinalização junto** — ela é pequena e é o que dá sentido ao resto.
+
+  anatomia:
+    - linha: "tcpdump -i lo -w /root/so-sip.pcap -q udp port 5060"
+      partes:
+        - trecho: "tcpdump"
+          papel: comando
+          explica: "o mesmo gravador de sempre"
+        - trecho: "-i lo"
+          papel: opcao
+          explica: "a interface onde este lab conversa"
+        - trecho: "-w /root/so-sip.pcap"
+          papel: opcao
+          explica: "grava o pacote cru no arquivo"
+        - trecho: "-q"
+          papel: opcao
+          explica: "silencia o resumo por pacote na tela"
+        - trecho: "udp port 5060"
+          papel: argumento
+          explica: "**o filtro de captura** — repare que ele não tem opção nenhuma na frente: é a expressão solta no fim da linha. Só o que casar com ela entra no arquivo"
+
+  demonstracao:
+    - comando: "tcpdump -i lo -w /root/so-sip.pcap -q udp port 5060 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Uma chamada inteira, gravada com o filtro de captura que quase todo mundo usa por reflexo: só a porta do SIP."
+    - comando: "tshark -r /root/so-sip.pcap -q -z io,phs"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+
+        ===================================================================
+        Protocol Hierarchy Statistics
+        Filter:
+
+        eth                                      frames:6 bytes:2666
+          ip                                     frames:6 bytes:2666
+            udp                                  frames:6 bytes:2666
+              sip                                frames:6 bytes:2666
+        ===================================================================
+      nota: "`-z io,phs` responde \"o que tem dentro deste arquivo?\" — a árvore de protocolos, com quantos quadros e quantos bytes de cada um. Aqui: seis quadros, todos SIP. De mídia, nem a linha existe."
+    - comando: "tcpdump -i lo -w /root/tudo.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "A mesma chamada, agora sem filtro de captura nenhum: entra tudo o que passar em `lo`."
+    - comando: "tshark -r /root/tudo.pcap -q -z io,phs"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+
+        ===================================================================
+        Protocol Hierarchy Statistics
+        Filter:
+
+        eth                                      frames:1006 bytes:230666
+          ip                                     frames:1006 bytes:230666
+            udp                                  frames:506 bytes:109666
+              sip                                frames:6 bytes:2666
+              rtp                                frames:500 bytes:107000
+            icmp                                 frames:500 bytes:121000
+              rtp                                frames:500 bytes:121000
+        ===================================================================
+      nota: "Mil e seis quadros contra seis, e 230 mil bytes contra 2,6 mil — cinco segundos de UMA chamada já são cem vezes mais arquivo. É essa a conta que faz alguém filtrar na captura. Repare também nos 500 quadros de `icmp` carregando `rtp` dentro: são os avisos de porta fechada que você já conhece, cada um com uma cópia do pacote de voz."
+    - comando: "tshark -r /root/tudo.pcap -Y \"rtp and not icmp\" -T fields -e udp.srcport -e udp.dstport -n | sort -u"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        6000	6100
+        6100	6000
+      nota: "O mesmo arquivo, lido com um filtro de EXIBIÇÃO, devolve os dois sentidos do áudio. Compare com o primeiro arquivo: lá, nenhum comando faria a mídia voltar. O `-Y` esconde; o filtro de captura apaga. Um você desfaz digitando outra coisa; o outro exigiria voltar no tempo."
+    - comando: "tcpdump -i lo -w /root/so-midia.pcap -q udp portrange 6000-6108 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Agora o contrário: um arquivo só com a mídia, sem nenhuma mensagem SIP. É o que se faz quando a voz é o objeto da investigação e o disco é curto."
+    - comando: "tshark -r /root/so-midia.pcap -q -z io,phs"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+
+        ===================================================================
+        Protocol Hierarchy Statistics
+        Filter:
+
+        eth                                      frames:500 bytes:107000
+          ip                                     frames:500 bytes:107000
+            udp                                  frames:500 bytes:107000
+              data                               frames:500 bytes:107000
+        ===================================================================
+      nota: "Quinhentos quadros de UDP e **nenhuma linha de rtp**: o leitor os chama de `data`. Os pacotes de voz estão todos aqui — o que sumiu foi o SDP que dizia quais portas carregavam áudio. Sem ele, o Wireshark não tem como saber que aquilo é RTP, e não chuta."
+    - comando: "tshark -r /root/so-midia.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -q -z io,phs"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+
+        ===================================================================
+        Protocol Hierarchy Statistics
+        Filter:
+
+        eth                                      frames:500 bytes:107000
+          ip                                     frames:500 bytes:107000
+            udp                                  frames:500 bytes:107000
+              rtp                                frames:500 bytes:107000
+        ===================================================================
+      nota: "Com `-d` (*decode as*) você diz o que ele não pôde deduzir, e os mesmos 500 quadros viram RTP. Guarde as duas metades da lição: filtrar mídia sem sinalização é legítimo, mas cobra este pedágio toda vez que o arquivo for lido."
+
+  pratica_guiada:
+    - instrucao: "Grave só a mídia desta chamada em /root/treino.pcap, usando a faixa de portas de áudio do lab (6000 a 6108)."
+      modelo: "tcpdump -i lo -w /root/treino.pcap -q udp ____ 6000-6108 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      resposta: "tcpdump -i lo -w /root/treino.pcap -q udp portrange 6000-6108 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+    - instrucao: "Liste os fluxos de áudio desse arquivo — lembrando que ele não tem o SDP que ensina o leitor a reconhecê-los."
+      modelo: "tshark -r /root/treino.pcap ____ udp.port==6000,rtp -d udp.port==6100,rtp -q -z rtp,streams"
+      resposta: "tshark -r /root/treino.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -q -z rtp,streams"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você grava com `udp port 5060` e depois lê o arquivo com `-Y rtp`. O que aparece?"
+      resposta: |
+        Nada. E não porque o `-Y rtp` esteja errado: é que o arquivo não tem
+        nenhum pacote de mídia para ele mostrar.
+
+        Os dois filtros agiram em momentos diferentes. O de captura já tinha
+        decidido o conteúdo do arquivo lá atrás, na hora da gravação; o de
+        exibição só pode escolher dentro do que sobrou.
+    - tipo: diagnostico
+      pergunta: "`tcpdump -i lo -w x.pcap sip` responde `can't parse filter expression: syntax error`. Por quê?"
+      resposta: |
+        Porque `sip` não é uma palavra de BPF. O filtro de captura roda dentro
+        do kernel, sobre o pacote ainda não decodificado, e conhece protocolo,
+        endereço, porta e tamanho — não conhece protocolo de aplicação.
+
+        Quem conhece `sip` é o filtro de EXIBIÇÃO, que só age depois que o
+        Wireshark decodificou o pacote. Na captura, o equivalente é dizer onde
+        o SIP costuma estar: `udp port 5060`.
+    - tipo: transferencia
+      pergunta: "Numa central com 300 chamadas simultâneas você precisa investigar UM cliente. Como captura?"
+      resposta: |
+        Filtrando na captura pelo que identifica aquele cliente na camada que o
+        BPF enxerga — o endereço IP do equipamento dele: `host 200.1.2.3`.
+
+        Isso pega a sinalização **e** a mídia daquele cliente, porque as duas
+        saem do mesmo endereço, e descarta as outras 299 chamadas. Filtrar por
+        `udp port 5060` faria o contrário: guardaria a sinalização das 300 e
+        jogaria fora o áudio de todas — inclusive o do cliente que você quer.
+
+objetivo_md: |
+  Numa central de verdade, sinalização e mídia costumam ir para arquivos
+  separados: a sinalização é pequena e vale guardar por dias, a mídia é enorme
+  e só interessa por algumas horas. Duas capturas ao mesmo tempo, dois filtros
+  diferentes.
+
+  | Peça | Para que serve |
+  |---|---|
+  | expressão solta no fim do `tcpdump` | o filtro de captura |
+  | `udp port N` | uma porta, entrando ou saindo |
+  | `udp portrange A-B` | uma faixa de portas |
+  | `or` | uma coisa **ou** a outra |
+  | `-z io,phs` | o que tem dentro do arquivo, por protocolo |
+  | `-Y` do `tshark` | filtro de exibição, na hora de ler |
+  | `-d udp.port==N,rtp` | manda decodificar aquela porta como RTP |
+
+  ### Sua tarefa
+
+  Com **uma única chamada**, produza dois arquivos:
+
+  1. `/root/sinalizacao.pcap` — só o SIP (portas 5060 e 5061), **sem nenhum
+     pacote de mídia**.
+  2. `/root/midia.pcap` — só o áudio (portas 6000 a 6108), **sem nenhuma
+     mensagem SIP**, com os dois sentidos.
+
+  Os dois gravadores precisam estar de pé ao mesmo tempo, antes de a chamada
+  começar. É a única forma de os dois arquivos serem da mesma chamada.
+
+  Ao conferir o segundo arquivo você vai esbarrar no que a demonstração
+  mostrou: sem a sinalização junto, é preciso `-d` para o leitor reconhecer o
+  RTP.
+
+verificar:
+  - descricao: "/root/sinalizacao.pcap tem o diálogo SIP e nenhum pacote de mídia"
+    script: |
+      #!/bin/bash
+      ARQ=/root/sinalizacao.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"sinalizacao.pcap nao existe","dica_diagnostica":"grave com tcpdump -w /root/sinalizacao.pcap e um filtro de captura para as portas do SIP"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      for filtro in "sip.Method==INVITE" "sip.Status-Code==200" "sip.Method==BYE"; do
+        N=$(tshark -r "$ARQ" -Y "$filtro" 2>/dev/null | grep -c .)
+        if [ "${N:-0}" -lt 1 ]; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"a captura de sinalizacao nao tem a chamada inteira (falta $filtro)\",\"dica_diagnostica\":\"a captura precisa estar de pe ANTES do INVITE e so parar depois do BYE\"}"
+          exit 1
+        fi
+      done
+      # O ponto da licao: o filtro de captura DESCARTA. Se ha midia aqui, ele
+      # nao existiu — o aluno gravou tudo e so achou que filtrou.
+      MIDIA=$(tshark -r "$ARQ" -Y "rtp and not icmp" 2>/dev/null | grep -c .)
+      if [ "${MIDIA:-0}" -gt 0 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"este arquivo ainda tem $MIDIA pacote(s) de midia\",\"dica_diagnostica\":\"o filtro de captura e a expressao SOLTA no fim da linha do tcpdump, sem opcao na frente; sem ela, entra tudo\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/midia.pcap tem os dois sentidos do áudio e nenhuma mensagem SIP"
+    script: |
+      #!/bin/bash
+      ARQ=/root/midia.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"midia.pcap nao existe","dica_diagnostica":"grave um segundo arquivo, ao mesmo tempo, com um filtro de captura para a faixa de portas de audio"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      # `-d` e obrigatorio aqui, e e o ponto da licao: este arquivo nao tem o
+      # SDP, entao sem dizer "decodifique como RTP" o tshark ve so `data`.
+      D="-d udp.port==6000,rtp -d udp.port==6100,rtp"
+      IDA=$(tshark -r "$ARQ" $D -Y "rtp and not icmp and udp.dstport==6000" 2>/dev/null | grep -c .)
+      VOLTA=$(tshark -r "$ARQ" $D -Y "rtp and not icmp and udp.dstport==6100" 2>/dev/null | grep -c .)
+      if [ "${IDA:-0}" -lt 1 ] || [ "${VOLTA:-0}" -lt 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura de midia nao tem os dois sentidos (para 6000: $IDA, para 6100: $VOLTA)\",\"dica_diagnostica\":\"a faixa precisa cobrir as portas dos DOIS lados, e a captura precisa durar a chamada inteira\"}"
+        exit 1
+      fi
+      SIP=$(tshark -r "$ARQ" -Y sip 2>/dev/null | grep -c .)
+      if [ "${SIP:-0}" -gt 0 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"este arquivo ainda tem $SIP mensagem(ns) SIP\",\"dica_diagnostica\":\"restrinja a faixa de portas do filtro de captura: 5060 e 5061 nao podem estar dentro dela\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/sinalizacao.pcap -q udp port 5060 or udp port 5061 2>/dev/null &
+  tcpdump -i lo -w /root/midia.pcap -q udp portrange 6000-6108 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+
+dicas:
+  - "Dois `tcpdump` podem gravar ao mesmo tempo na mesma interface, cada um com seu filtro e seu arquivo. Suba os dois ao fundo ANTES da chamada."
+  - "Para a sinalização, `udp port 5060 or udp port 5061`. Para a mídia, `udp portrange 6000-6108` — a faixa cobre as portas dos dois lados. Para CONFERIR o arquivo de mídia, lembre do `-d`."
+  - "tcpdump -i lo -w /root/sinalizacao.pcap -q udp port 5060 or udp port 5061 2>/dev/null & depois o segundo, com portrange 6000-6108, e só então a chamada."
+
+erros_comuns:
+  - match: "can't parse filter expression: syntax error"
+    digita: "tcpdump -i lo -w /root/x.pcap -q sip"
+    mensagem: "tcpdump: can't parse filter expression: syntax error"
+    causa: "`sip` é palavra do filtro de EXIBIÇÃO; o de captura fala BPF, que só conhece protocolo, endereço, porta e tamanho — e nem chega a rodar quando não entende a expressão"
+    conserto: "diga onde o SIP está, não o que ele é: `udp port 5060`"
+    categoria: sintaxe
+  - match: "looks like a valid display filter; however, it isn't a valid\\s+capture filter"
+    digita: "tshark -i lo -f \"sip.Method==INVITE\" -w /root/x.pcap"
+    mensagem: "tshark: Invalid capture filter \"sip.Method==INVITE\" for interface 'Loopback'.\n\nThat string looks like a valid display filter; however, it isn't a valid\ncapture filter (can't parse filter expression: syntax error)."
+    causa: "o `-f` do tshark é o filtro de CAPTURA, e recebeu uma expressão de exibição; a própria mensagem diz exatamente isso"
+    conserto: "para filtrar na captura use BPF (`-f \"udp port 5060\"`); para filtrar na leitura use `-Y \"sip.Method==INVITE\"`"
+    categoria: sintaxe
+  - match: "^\\s*data\\s+frames:"
+    digita: "tshark -r /root/midia.pcap -Y rtp -n"
+    mensagem: "(nenhuma linha; e `-z io,phs` mostra `udp` → `data`, sem `rtp`)"
+    causa: "a captura não tem o SDP da chamada, e é ele que diz ao leitor quais portas carregam áudio; sem isso o pacote de voz é UDP indistinguível de qualquer outro"
+    conserto: "diga qual porta decodificar: `-d udp.port==6000,rtp -d udp.port==6100,rtp` — ou capture a sinalização junto da mídia"
+    categoria: conceitual
+  - match: "tcpdump: syntax error|tcpdump: .*invalid option -- 'Y'"
+    digita: "tcpdump -i lo -Y sip"
+    mensagem: "tcpdump: invalid option -- 'Y'"
+    causa: "`-Y` é do tshark, não do tcpdump; o tcpdump não lê filtro de exibição porque ele não decodifica protocolo de aplicação"
+    conserto: "grave com o tcpdump e leia com o tshark, ou passe o filtro de captura como expressão solta"
+    categoria: flag_errada
+
+cards_revisao:
+  - filtro-de-captura-descarta
+  - filtro-de-exibicao-esconde
+  - rtp-so-e-rtp-com-sdp
