@@ -1,0 +1,286 @@
+id: voip-con-05-rtcp
+trilha: voip-troubleshooting
+nivel: construtor
+ordem: 5
+titulo: "O outro lado também está contando"
+capacidade: "Sei ler o relatório RTCP do endpoint e compará-lo com a minha medição para localizar onde a perda acontece."
+xp: 40
+prereqs: [voip-con-04-medir]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+
+ensina:
+  conceitos:
+    - id: rtcp-e-a-conta-de-quem-recebe
+      titulo: "o RTCP carrega o que o OUTRO lado contabilizou ter recebido — é medição dele, não sua"
+    - id: divergencia-localiza-a-perda
+      titulo: "quando a sua medição e a do outro lado divergem, a perda está entre os dois pontos"
+  comandos: []
+
+ensino:
+  gancho: |
+    Você mediu: o áudio que chega ao cliente perdeu 9,6%. Manda para a
+    operadora. Vem a resposta:
+
+    > "Do nosso lado não há perda. Nosso equipamento reporta 0%."
+
+    Empate. Duas medições, dois pontos, nenhuma prova de onde o pacote se
+    perdeu — e a partir daqui o chamado costuma virar disputa.
+
+    Só que a resposta já estava dentro da sua captura. **Os endpoints trocam
+    boletins sobre o que estão recebendo**, e esses boletins viajam junto com
+    a chamada. Ler o boletim do outro lado é ler a medição dele, feita por ele,
+    sem depender de e-mail nenhum.
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar os relatórios RTCP dentro de uma captura"
+    - verbo: executar
+      texto: "extrair de um relatório a perda e o jitter que o outro lado contabilizou"
+    - verbo: comparar
+      texto: "comparar o relatório do outro lado com a própria medição e localizar onde a perda ocorre"
+
+  modelo_mental: |
+    Ao lado de cada fluxo de voz corre um segundo fluxo, pequeno, de
+    **relatórios**: é o RTCP. A convenção é simples — se a voz vai na porta
+    `N`, os relatórios vão na `N+1`.
+
+    | | porta | volume | conteúdo |
+    |---|---|---|---|
+    | RTP | 6000 | 50 pacotes por segundo | a voz |
+    | RTCP | 6001 | 1 a cada poucos segundos | quanto chegou, e como |
+
+    Cada lado manda o seu, a cada poucos segundos, e o relatório tem duas
+    metades:
+
+    - **"eu enviei"** — quantos pacotes e quantos bytes saíram daqui.
+    - **"de você, chegou isto"** — a fração perdida, o total perdido acumulado
+      e o jitter **medidos por quem recebe**.
+
+    A segunda metade é o que muda uma investigação:
+
+    > O RTCP é a contabilidade do OUTRO lado, entregue dentro da sua captura.
+    > Você não precisa pedir por e-mail o que o equipamento dele mediu.
+
+    ### É a mesma regra da mídia, agora do outro lado
+
+    Você já sabe que a captura prova até o ponto de captura, e que quem
+    responde "chegou?" é o registro do endpoint. O RTCP é justamente esse
+    registro viajando pela rede — e por isso ele responde a uma pergunta que
+    nenhuma captura sua responde: **o que aconteceu depois do seu ponto**.
+
+    ### O que a divergência quer dizer
+
+    Compare o que você mediu com o que o outro lado relatou, sempre do **mesmo
+    sentido**:
+
+    | você mede | ele relata | conclusão |
+    |---|---|---|
+    | 0% | 0% | aquele sentido está bom |
+    | 9% | 9% | a perda é anterior ao seu ponto |
+    | 0% | 9% | a perda está **entre** o seu ponto e ele |
+    | 9% | 0% | os dois relatórios não são do mesmo fluxo; confira o SSRC |
+
+    A terceira linha é a que fecha chamado: ela recorta o trecho da rede em
+    que o pacote sumiu, sem depender de acesso ao equipamento do outro.
+
+    ### Os campos que interessam
+
+    | campo | o que traz |
+    |---|---|
+    | `rtcp.senderssrc` | quem está falando |
+    | `rtcp.ssrc.identifier` | sobre qual fluxo ele está falando |
+    | `rtcp.ssrc.fraction` | a fração perdida, em **256 avos** (26 ≈ 10%) |
+    | `rtcp.ssrc.cum_nr` | quantos pacotes se perderam desde o início |
+    | `rtcp.ssrc.jitter` | o jitter em **unidades de timestamp**: dividido por 8, dá ms em G.711 |
+
+    Os dois últimos formatos pegam quase todo mundo uma vez. A fração é um
+    byte, não um percentual; o jitter está na escala do relógio do codec.
+
+  anatomia:
+    - linha: "tshark -r captura.pcap -Y rtcp -T fields -e rtcp.senderssrc -e rtcp.ssrc.identifier -e rtcp.ssrc.fraction -n"
+      partes:
+        - trecho: "-Y rtcp"
+          papel: opcao
+          explica: "filtro de exibição: só os relatórios, que são pouquíssimos no meio dos milhares de pacotes de voz"
+        - trecho: "-e rtcp.senderssrc"
+          papel: argumento
+          explica: "quem assina o relatório"
+        - trecho: "-e rtcp.ssrc.identifier"
+          papel: argumento
+          explica: "o fluxo de que ele está falando — é o SSRC de QUEM ENVIOU aquele áudio, e é o que amarra o relatório ao fluxo certo"
+        - trecho: "-e rtcp.ssrc.fraction"
+          papel: argumento
+          explica: "a fração perdida na janela do relatório, em 256 avos"
+
+  demonstracao:
+    - comando: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -d udp.port==6001,rtcp -d udp.port==6101,rtcp -q -z io,phs"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+
+        ===================================================================
+        Protocol Hierarchy Statistics
+        Filter:
+
+        eth                                      frames:477 bytes:101838
+          ip                                     frames:477 bytes:101838
+            udp                                  frames:477 bytes:101838
+              rtp                                frames:475 bytes:101650
+              rtcp                               frames:2 bytes:188
+        ===================================================================
+      nota: "A mesma gravação da lição anterior, agora decodificando também as portas de relatório. Além dos 475 pacotes de voz há **dois** de RTCP — um de cada lado. É esse o volume do RTCP: quase nada, e passa despercebido em toda captura que não o procura."
+    - comando: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6001,rtcp -d udp.port==6101,rtcp -Y rtcp -T fields -e udp.srcport -e rtcp.senderssrc -e rtcp.ssrc.identifier -e rtcp.ssrc.fraction -e rtcp.ssrc.cum_nr -e rtcp.ssrc.jitter -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        6101	0x1234abcd	0x5678cdef	26	25	44
+        6001	0x5678cdef	0x1234abcd	0	0	0
+      nota: "As duas contabilidades, lado a lado. A primeira linha é o relatório de **quem ligou** (porta 6101): ele diz que, do fluxo `0x5678cdef` — o áudio que vem de quem atendeu —, perdeu 25 pacotes, fração 26 em 256 avos (≈10%) e jitter 44, que dividido por 8 dá 5,5 ms. A segunda é o relatório de **quem atendeu**: do fluxo que vem de quem ligou, zero perdas, zero jitter. Os dois números batem com a tabela da lição anterior, e agora não são a sua medição: são as deles."
+    - comando: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -q -z rtp,streams"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        ========================= RTP Streams ========================
+           Start time      End time     Src IP addr  Port    Dest IP addr  Port       SSRC          Payload  Pkts         Lost   Min Delta(ms)  Mean Delta(ms)   Max Delta(ms)  Min Jitter(ms) Mean Jitter(ms)  Max Jitter(ms) Problems?
+             0.000000      5.020000       127.0.0.1  6000       127.0.0.1  6100 0x5678CDEF            g711A   225    24 (9.6%)           8.000          22.411          60.000           0.000           5.473           7.041 X
+             0.000000      4.980000       127.0.0.1  6100       127.0.0.1  6000 0x1234ABCD            g711A   250     0 (0.0%)          20.000          20.000          20.000           0.000           0.000           0.000
+        ==============================================================
+      nota: "A comparação que importa. O seu `-z rtp,streams` mediu **24** perdidos no fluxo `0x5678CDEF`; o dono do fluxo relatou **25**. A diferença não é erro: o último pacote da chamada também se perdeu, e quem só tem a captura não tem como saber que ele existiu — a numeração simplesmente termina antes. O endpoint sabe, porque ele conta o que esperava. É a mesma lição de sempre, num terceiro disfarce: a captura mede até onde alcança."
+
+  pratica_guiada:
+    - instrucao: "Peça só os relatórios da gravação de referência, mostrando quem assina cada um."
+      modelo: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6001,rtcp -d udp.port==6101,rtcp -Y ____ -T fields -e rtcp.senderssrc -n"
+      resposta: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6001,rtcp -d udp.port==6101,rtcp -Y rtcp -T fields -e rtcp.senderssrc -n"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você captura no seu SBC: o áudio que vem da operadora chega com 0% de perda. O RTCP do telefone do cliente relata 12%. Onde está o problema?"
+      resposta: |
+        Entre o SBC e o telefone — ou seja, no trecho que vem **depois** do seu
+        ponto de captura: a rede interna do cliente, o link dele, o wi-fi, o
+        firewall dele.
+
+        Até o seu ponto o áudio chegou íntegro, e isso a sua captura prova. O
+        que chegou ao telefone perdeu 12%, e isso o relatório dele prova. As
+        duas evidências juntas recortam o trecho, e nenhuma delas sozinha
+        recortaria.
+    - tipo: predicao
+      pergunta: "Um relatório traz `fraction 13`. Isso é muito ou pouco?"
+      resposta: |
+        13 em 256 avos, ou seja, **cerca de 5%** — bastante: acima de 3% a voz
+        já pica de forma perceptível.
+
+        O campo tem 8 bits e vale de 0 a 255, então 13 não é "13%". Ler o campo
+        como percentual é o engano mais comum do RTCP, e ele erra por um fator
+        de vinte — para menos quando a perda é alta, o que faz um problema
+        grave parecer irrelevante.
+    - tipo: transferencia
+      pergunta: "Numa captura de 40 minutos, o RTCP mostra `cum_nr` crescendo de 0 para 800 só nos últimos 5 minutos. O que isso diz?"
+      resposta: |
+        Que a perda **não** foi constante: o acumulado ficou parado quase o
+        tempo todo e disparou no fim. O defeito tem hora, e a hora é o começo
+        daqueles 5 minutos.
+
+        É a diferença entre "essa rota é ruim" e "alguma coisa aconteceu às
+        14h37" — e a segunda é investigável: um backup que começou, um enlace
+        que caiu para o secundário, um pico de tráfego. O `cum_nr` é
+        cumulativo, então a inclinação dele no tempo é a curva do problema.
+
+objetivo_md: |
+  A gravação de referência do lab está em
+  `/usr/share/devlab/midia-do-cliente.pcap` e traz, além da voz, os relatórios
+  RTCP dos dois lados.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `-Y rtcp` | só os relatórios |
+  | `-d udp.port==N,rtcp` | necessário quando a gravação não tem a sinalização |
+  | `rtcp.ssrc.identifier` | sobre qual fluxo o relatório fala |
+  | `rtcp.ssrc.cum_nr` | quantos pacotes o autor do relatório não recebeu |
+  | `rtcp.ssrc.fraction` | a fração perdida, em 256 avos |
+
+  ### Sua tarefa
+
+  1. Grave em `/root/relatorios.txt` o que **cada lado** relatou: uma linha por
+     relatório, trazendo pelo menos quem assina, sobre qual fluxo ele fala e
+     quantos pacotes se perderam.
+  2. Escreva em `/root/conclusao.txt` **uma ou duas frases** dizendo qual dos
+     dois lados estava recebendo áudio degradado e quantos pacotes ele
+     contabilizou ter perdido.
+
+verificar:
+  - descricao: "/root/relatorios.txt traz os relatórios dos dois lados"
+    script: |
+      #!/bin/bash
+      ARQ=/root/relatorios.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"relatorios.txt nao existe","dica_diagnostica":"extraia os relatorios da gravacao de referencia com -Y rtcp e redirecione para o arquivo"}'
+        exit 1
+      fi
+      # Os dois SSRC: sem os dois, so um lado foi extraido.
+      for ssrc in 1234abcd 5678cdef; do
+        if ! grep -qi "$ssrc" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo nao menciona o fluxo 0x$ssrc\",\"dica_diagnostica\":\"sao dois relatorios, um de cada lado; peca quem assina (rtcp.senderssrc) e sobre quem fala (rtcp.ssrc.identifier)\"}"
+          exit 1
+        fi
+      done
+      # E a conta de perdidos, que e o motivo de ler RTCP.
+      if ! grep -qE '(^|[^0-9])25([^0-9]|$)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao traz quantos pacotes o outro lado contabilizou perder","dica_diagnostica":"acrescente o campo do acumulado de perdas: rtcp.ssrc.cum_nr"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/conclusao.txt aponta o lado degradado e o número que ele relatou"
+    script: |
+      #!/bin/bash
+      ARQ=/root/conclusao.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"conclusao.txt nao existe","dica_diagnostica":"escreva uma ou duas frases dizendo qual lado recebia audio degradado e quantos pacotes ele perdeu"}'
+        exit 1
+      fi
+      # Quem RECEBE o audio degradado e quem liga (porta 6100 / SSRC 1234abcd).
+      if ! grep -qiE 'quem liga|quem ligou|6100|1234abcd|cliente' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a conclusao nao identifica o lado que recebia o audio degradado","dica_diagnostica":"o relatorio que acusa perda foi assinado por um dos lados; e ele quem estava recebendo mal"}'
+        exit 1
+      fi
+      if ! grep -qE '(^|[^0-9])25([^0-9]|$)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a conclusao nao traz o numero que o proprio endpoint contabilizou","dica_diagnostica":"o acumulado de perdas do relatorio e o numero que vale aqui, porque foi ele quem contou"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tshark -r /usr/share/devlab/midia-do-cliente.pcap \
+         -d udp.port==6001,rtcp -d udp.port==6101,rtcp -Y rtcp \
+         -T fields -e udp.srcport -e rtcp.senderssrc -e rtcp.ssrc.identifier \
+         -e rtcp.ssrc.fraction -e rtcp.ssrc.cum_nr -e rtcp.ssrc.jitter -n \
+         2>/dev/null > /root/relatorios.txt
+  printf 'Quem ligou (SSRC 0x1234abcd, porta 6100) era quem recebia audio degradado: o relatorio assinado por ele contabiliza 25 pacotes perdidos do fluxo 0x5678cdef, com fracao 26/256 (cerca de 10%%). O outro lado relatou zero perdas.\n' > /root/conclusao.txt
+
+dicas:
+  - "Os relatórios vão na porta da mídia + 1, e esta gravação não tem sinalização — então é preciso `-d udp.port==6001,rtcp -d udp.port==6101,rtcp` antes de qualquer coisa."
+  - "Filtre com `-Y rtcp` e peça os campos: `rtcp.senderssrc`, `rtcp.ssrc.identifier`, `rtcp.ssrc.cum_nr`."
+  - "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6001,rtcp -d udp.port==6101,rtcp -Y rtcp -T fields -e rtcp.senderssrc -e rtcp.ssrc.identifier -e rtcp.ssrc.cum_nr -n > /root/relatorios.txt"
+
+erros_comuns:
+  - match: "Some fields aren't valid:[\\s\\S]*rtcp\\.fraction"
+    digita: "tshark -r captura.pcap -Y rtcp -T fields -e rtcp.fraction -n"
+    mensagem: "tshark: Some fields aren't valid:\n\trtcp.fraction"
+    causa: "os campos do bloco de relatório vivem sob `rtcp.ssrc.`, porque descrevem o fluxo de um SSRC específico"
+    conserto: "use `rtcp.ssrc.fraction`, `rtcp.ssrc.cum_nr` e `rtcp.ssrc.jitter` — e confirme no dicionário com `tshark -G fields | grep rtcp.ssrc`"
+    categoria: sintaxe
+  - match: "^$"
+    digita: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -Y rtcp -n"
+    mensagem: "(saída vazia, sem erro nenhum)"
+    causa: "sem a sinalização junto, o leitor não sabe que aquelas portas carregam RTCP — o mesmo motivo pelo qual o RTP aparecia como `data`"
+    conserto: "diga as portas: `-d udp.port==6001,rtcp -d udp.port==6101,rtcp`"
+    categoria: conceitual
+
+cards_revisao:
+  - rtcp-e-a-conta-de-quem-recebe
+  - divergencia-localiza-a-perda
+  - medir-por-sentido

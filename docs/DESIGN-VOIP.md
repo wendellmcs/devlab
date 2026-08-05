@@ -233,6 +233,138 @@ O validador já rodava os dois. Agora os dois motores reproduzem o mesmo lab.
 
 ---
 
+# As decisões do nível Construtor
+
+O nível ensina a **capturar no ponto certo e medir**. As quatro decisões abaixo
+foram o que tornou isso possível sem inventar comportamento nenhum.
+
+## 28. O lab tem cenário de UAC próprio, e o Call-ID vem do `-cid_str`
+
+O cenário embutido `uac_pcap` toca `g711a.pcap` (sequência 1000..1249) e emenda
+`dtmf_2833_1.pcap` (sequência 2000..2009). São dois arquivos com espaços de
+numeração **disjuntos**, e o salto de 1249 para 2000 é lido como perda por
+qualquer receptor. Medido, numa chamada perfeita:
+
+```
+Pkts 260   Lost 750 (74.3%)
+```
+
+Não é bug do tshark: é o que o RFC 3550 manda concluir de um buraco de
+sequência desse tamanho. Num aparelho real o DTMF de RFC 4733 continua a mesma
+numeração do áudio e não abre buraco nenhum — ou seja, os 74% eram artefato do
+lab. Como o nível inteiro mede fluxo de mídia, uma linha de base suja tornaria
+toda medição uma exceção a explicar, e a regra do projeto é não ensinar em
+volta de um artefato removível.
+
+O cenário próprio (`cenarios/uac-com-audio.xml`) toca só o áudio. O SDP é cópia
+literal do embutido — inclusive o `telephone-event` —, porque é ele que a lição
+de SDP disseca, e mudá-lo mexeria em conteúdo auditado sem ganho.
+
+A segunda metade da decisão é o **determinismo do texto**. Tags e branches
+saem dos cenários com valor derivado do número discado. O `Call-ID`, não: em
+modo cliente o SIPp **indexa a chamada pelo Call-ID que ele mesmo gerou**, e um
+valor escrito no cenário faz com que ele descarte as respostas do outro lado
+como *out-of-call* — medido, a chamada morre em timeout depois de cinco
+retransmissões do INVITE. A forma suportada é o `-cid_str` da linha de comando,
+que troca o `%p` (PID) pelo número discado.
+
+Isso apagou a pendência registrada em `gerar-captura-central.sh`: os Call-ID da
+captura de central não dependem mais de quais PIDs o build sorteou. E abriu o
+que o nível precisava — `-z follow,udp,ascii,N` de duas chamadas distintas
+produz **texto idêntico**, verificado, e por isso pode virar demonstração
+gravada.
+
+## 29. O "proxy" do lab encaminha sinalização e não toca na mídia
+
+Sem intermediário, todo ponto de captura vê a mesma coisa e "capturar no ponto
+certo" vira afirmação sem prova. `devlab-chamada --por-proxy` põe um relay em
+`127.0.0.2` entre quem liga (`127.0.0.1`) e quem atende (`127.0.0.3`) — três
+endereços da própria loopback, que `--network none` mantém.
+
+O relay **não reescreve o SDP**, e é essa omissão que produz o fato que a lição
+cobra: as duas pontas combinam os endereços de mídia entre si e o áudio vai
+direto, sem passar pelo proxy. Medido: no ponto do proxy, 12 mensagens SIP (as
+duas pernas) e **zero** fluxos de RTP; no ponto de quem liga, 6 mensagens e os
+dois fluxos, trocados com um endereço que a sinalização dali nunca mostra.
+
+É o chamado clássico "capturei no SBC e não tem RTP na captura" acontecendo de
+verdade, e não encenado.
+
+Duas honestidades registradas: ele não é proxy de verdade (não reescreve `Via`,
+não acrescenta `Record-Route`, não mantém transações — o lab tem uma chamada de
+cada vez), e os três papéis moram na mesma máquina, então o **ponto** é
+representado por um filtro de captura por endereço. A lição diz as duas coisas
+ao aluno; o que sai do arquivo é o que sairia lá.
+
+## 30. A degradação de mídia nasce dentro do arquivo de áudio
+
+Para ensinar a medir é preciso uma chamada ruim reproduzível. As duas formas
+óbvias não servem, e as duas foram medidas:
+
+- **`iptables` não produz perda visível numa captura local.** A captura se
+  enxerta antes do netfilter (decisão 21), então o pacote descartado em INPUT
+  aparece na gravação inteiro. Uma regra de DROP degrada o áudio e não deixa
+  rastro nenhum no `-z rtp,streams`.
+- **`tc netem` produz, e é aleatório.** Funciona (inclusive o arranjo classful,
+  que degrada só a porta de mídia e deixa a sinalização intacta), mas perda e
+  jitter mudam a cada execução, e nenhuma saída de demonstração sobreviveria ao
+  `--conferir`.
+
+A degradação passou a ser gerada dentro de `pcap/g711a-picotado.pcap`, que o
+`uas-picotado.xml` toca: 1 pacote em cada 10 não é gravado — o número de
+sequência é consumido e o buraco aparece em quem recebe — e o espaçamento
+oscila num passeio limitado, o que o SIPp reproduz porque ele respeita o
+intervalo do arquivo. Resultado medido, em execuções repetidas: **225 pacotes,
+24 perdidos (9,6%)**, sempre. O `--destino picotado` é mais um nome de sintoma,
+como manda a decisão 23.
+
+## 31. RTCP não existe no lab, e por isso é sintetizado numa gravação
+
+O PRD §7 G.2 pede "analisar RTCP", e o SIPp **não gera RTCP**: durante uma
+chamada, `ss -unap` mostra só as portas de sinalização, e `-Y rtcp` sobre
+qualquer captura do lab não devolve nada.
+
+Sintetizar era a única saída honesta, e ela cabia no mesmo lugar onde o nível já
+precisava de números estáveis. `gerar-midia.py --captura` escreve
+`/usr/share/devlab/midia-do-cliente.pcap`: os dois sentidos da chamada picotada
+com carimbos de tempo **escolhidos**, mais um Sender Report de cada lado. O
+arquivo é byte-idêntico em qualquer máquina e em qualquer build, então a tabela
+do `-z rtp,streams` — com jitter, mínimo e máximo — pode ser demonstração
+gravada, o que numa captura ao vivo seria impossível (as colunas de tempo mudam
+na terceira casa a cada execução).
+
+Ele não tem sinalização, de propósito: é uma captura só de mídia, como as que
+chegam de cliente, e por isso exige o `-d` para ser lida — que é justamente o
+que a primeira lição do nível ensina.
+
+Um detalhe que virou conteúdo: o relatório do endpoint diz **25** perdidos e o
+`-z rtp,streams` mede **24**. Os dois estão certos. O último pacote da chamada
+também se perdeu, e quem só tem a captura não tem como saber que ele existiu —
+a numeração termina antes. O endpoint sabe porque conta o que esperava. É a
+decisão 21 aparecendo num terceiro disfarce.
+
+## 32. Uma captura só de mídia não se decodifica sozinha
+
+Descoberto pelo validador, não por leitura: o check da primeira lição reprovava
+depois da solução de referência, e a causa não era flush nem corrida. **RTP não
+se anuncia.** Quem diz ao leitor que um UDP qualquer é RTP é o **SDP** da
+chamada; sem a sinalização no mesmo arquivo, `-Y rtp` não casa nada e o
+`-z io,phs` classifica os 500 pacotes como `data`. Medido:
+
+| leitura | resultado |
+|---|---|
+| `-Y "rtp and not icmp"` | 0 quadros |
+| `-Y udp` | 500 quadros |
+| com `-d udp.port==6000,rtp -d udp.port==6100,rtp` | 500 quadros de RTP |
+
+Isso virou o terceiro conceito da lição 1 em vez de virar uma pegadinha: a
+tarefa manda separar sinalização e mídia em dois arquivos, e o aluno esbarra
+nisso ao conferir o seu próprio resultado. É também o motivo prático da regra
+"quando puder, guarde a sinalização junto — ela é pequena e é o que dá sentido
+ao resto".
+
+---
+
 ## Pendente: a imagem de FreeSWITCH está bloqueada por credencial
 
 `devlab/freeswitch-lab` **não pode ser construída** do jeito que o PRD §4.3

@@ -88,8 +88,9 @@ RUN rm -f /etc/dpkg/dpkg.cfg.d/excludes \
 # referenciam mas não os arquivos; ver o cabeçalho de gerar-midia.py.
 COPY gerar-midia.py /usr/local/bin/devlab-gerar-midia
 RUN chmod 0755 /usr/local/bin/devlab-gerar-midia \
- && mkdir -p /usr/share/sipp/pcap \
- && python3 /usr/local/bin/devlab-gerar-midia /usr/share/sipp/pcap --segundos 5
+ && mkdir -p /usr/share/sipp/pcap /usr/share/devlab \
+ && python3 /usr/local/bin/devlab-gerar-midia /usr/share/sipp/pcap --segundos 5 \
+      --captura /usr/share/devlab/midia-do-cliente.pcap
 
 # Cenários do DevLab. Ficam junto do `pcap/` porque o `play_pcap_audio` resolve
 # o caminho RELATIVO ao diretório de trabalho de quem roda o sipp — e é por

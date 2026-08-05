@@ -1,0 +1,336 @@
+id: voip-con-03-seguir
+trilha: voip-troubleshooting
+nivel: construtor
+ordem: 3
+titulo: "A linha de resumo não tem a resposta"
+capacidade: "Sei reconstituir o texto inteiro de um diálogo e extrair dele o campo exato que resolve o chamado."
+xp: 40
+prereqs: [voip-con-02-ponto]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+  # Decisão 26: em lição de DESCOBRIR, quem escolhe o defeito é o break. O
+  # aluno roda `devlab-chamada` sem opção nenhuma e reproduz a chamada do
+  # cliente — a recusa e o motivo dela têm de sair da captura, não da linha
+  # de comando que ele mesmo digitou.
+  break: |
+    echo sem-codec > /var/lib/devlab/destino-padrao
+
+ensina:
+  conceitos:
+    - id: fluxo-tem-indice
+      titulo: "cada conversa entre duas pontas recebe um índice, e é por ele que se pede o texto inteiro"
+    - id: resumo-esconde-o-que-resolve
+      titulo: "o resumo dá o método e o código; a causa costuma estar num cabeçalho que ele não mostra"
+    - id: campo-tem-nome
+      titulo: "todo campo decodificado tem nome consultável, e é por ele que se extrai exatamente o que se quer"
+  comandos: []
+
+ensino:
+  gancho: |
+    O cliente liga para um número e a chamada não completa. Você captura,
+    filtra o SIP, e a lista de resumo diz:
+
+    ```
+    Request: INVITE sip:service@...
+    Status: 488 Not Acceptable Here
+    Request: ACK sip:service@...
+    ```
+
+    Você já sabe o que é um 488: os dois lados não fecharam formato de mídia.
+    Só que isso não fecha chamado nenhum. **Qual** formato o outro lado queria?
+    Foi ele quem recusou ou foi um equipamento no meio?
+
+    A resposta muitas vezes está escrita, em português técnico, dentro da
+    própria mensagem — num cabeçalho que a linha de resumo não mostra. Esta
+    lição é sobre parar de ler a lista e passar a ler a mensagem.
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar o índice do fluxo a que uma chamada pertence"
+    - verbo: executar
+      texto: "reconstituir o texto inteiro de um diálogo a partir da captura"
+    - verbo: executar
+      texto: "extrair de uma captura o valor de um cabeçalho específico"
+
+  modelo_mental: |
+    Existem **três alturas** para ler a mesma captura, e escolher a altura
+    certa é metade do trabalho.
+
+    | altura | comando | serve para |
+    |---|---|---|
+    | resumo | `-T fields -e _ws.col.Info` | ver a forma da chamada: quem pediu o quê, o que respondeu |
+    | texto inteiro | `-z follow,udp,ascii,N` | ler a mensagem como ela foi escrita, cabeçalho por cabeçalho |
+    | campo | `-T fields -e sip.Warning` | tirar UM valor de todas as mensagens, para comparar ou registrar |
+
+    O erro comum é ficar preso na primeira. Ela é ótima para achar a chamada e
+    péssima para explicá-la: o resumo é uma etiqueta, e as etiquetas não têm
+    `Warning`, nem `User-Agent`, nem `Contact`.
+
+    ### O que é um "fluxo"
+
+    Para pedir o texto inteiro é preciso dizer **de qual conversa**. O leitor
+    numera cada par de pontas que troca UDP entre si: é o `udp.stream`.
+
+    > Um fluxo é **um par de pontas**, não uma chamada.
+
+    A diferença aparece no minuto em que existe um intermediário. Uma chamada
+    que passa por proxy tem **duas** pernas — quem liga↔proxy e proxy↔quem
+    atende — e portanto **dois** fluxos, com índices diferentes. Seguir só o
+    fluxo 0 mostra metade da história, e essa metade pode ser justamente a que
+    está boa.
+
+    ### Onde a causa costuma estar escrita
+
+    Quando um equipamento recusa uma chamada, o código diz a categoria e
+    alguns cabeçalhos dizem o resto:
+
+    | cabeçalho | o que costuma trazer |
+    |---|---|
+    | `Warning` | o motivo em texto, escrito por quem recusou |
+    | `Reason` | o motivo de um `CANCEL` ou de um `BYE` |
+    | `User-Agent` / `Server` | marca e versão de quem respondeu — diz QUEM recusou |
+    | `Contact` | para onde mandar o resto do diálogo |
+
+    Nem todo equipamento preenche `Warning`. Quando preenche, é a primeira
+    linha a procurar depois de um código de recusa — e é comum ela dizer
+    exatamente o que falta configurar.
+
+    ### Como se descobre o nome de um campo
+
+    Não se decora: pergunta-se. `tshark -G fields` despeja o dicionário
+    inteiro de campos que o leitor conhece, e um `grep` acha o que interessa.
+    É assim que se sai de "eu queria o Warning" para `-e sip.Warning`.
+
+  anatomia:
+    - linha: "tshark -r /root/chamada.pcap -q -z follow,udp,ascii,0"
+      partes:
+        - trecho: "tshark"
+          papel: comando
+          explica: "o leitor de sempre"
+        - trecho: "-r /root/chamada.pcap"
+          papel: opcao
+          explica: "lê a gravação"
+        - trecho: "-q"
+          papel: opcao
+          explica: "cala a lista pacote a pacote; só o relatório pedido sai"
+        - trecho: "-z follow,udp,ascii,0"
+          papel: opcao
+          explica: "o relatório: **siga** o fluxo UDP de índice **0** e mostre o conteúdo em texto. Os três pedaços depois de `follow` são o transporte, o formato e o índice"
+
+  demonstracao:
+    - comando: "tcpdump -i lo -w /root/chamada.pcap -q udp port 5060 or udp port 5061 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "A chamada do cliente, reproduzida como ela chega: sem escolher destino nenhum. Este lab já nasce com o defeito dele."
+    - comando: "tshark -r /root/chamada.pcap -Y sip -T fields -e _ws.col.Info -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        Request: INVITE sip:service@127.0.0.1:5060 |
+        Status: 488 Not Acceptable Here |
+        Request: ACK sip:service@127.0.0.1:5060 |
+      nota: "A primeira altura: o resumo. Três mensagens, e a chamada morreu num 488. Daqui não sai mais nada — a etiqueta acabou."
+    - comando: "tshark -r /root/chamada.pcap -Y sip -T fields -e udp.stream -e ip.src -e udp.srcport -e ip.dst -e udp.dstport -n | sort -u"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        0	127.0.0.1	5060	127.0.0.1	5061
+        0	127.0.0.1	5061	127.0.0.1	5060
+      nota: "Antes de pedir o texto, é preciso saber de qual conversa. Todas as mensagens estão no fluxo **0**, entre 5061 e 5060 — as duas linhas são os dois sentidos do mesmo par de pontas, e por isso um fluxo só."
+    - comando: "tshark -r /root/chamada.pcap -q -z follow,udp,ascii,0"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+
+        ===================================================================
+        Follow: udp,ascii
+        Filter: udp.stream eq 0
+        Node 0: 127.0.0.1:5061
+        Node 1: 127.0.0.1:5060
+        577
+        INVITE sip:service@127.0.0.1:5060 SIP/2.0
+        Via: SIP/2.0/UDP 127.0.0.1:5061;branch=z9hG4bK-service-invite
+        From: sipp <sip:sipp@127.0.0.1:5061>;tag=serviceSIPpTag091
+        To: service <sip:service@127.0.0.1:5060>
+        Call-ID: 1-service@127.0.0.1
+        CSeq: 1 INVITE
+        Contact: sip:sipp@127.0.0.1:5061
+        Max-Forwards: 70
+        Subject: Performance Test
+        Content-Type: application/sdp
+        Content-Length:   188
+
+        v=0
+        o=user1 53655765 2353687637 IN IP4 127.0.0.1
+        s=-
+        c=IN IP4 127.0.0.1
+        ... (mais 32 linha(s))
+      nota: "A segunda altura, e a diferença é gritante: a mensagem inteira, como ela viajou. Os números soltos (`577`, `409`) são o tamanho de cada mensagem, e o recuo indica o sentido. A saída continua além do que cabe aqui — o que importa é ver que uma mensagem tem dez, quinze linhas de cabeçalho, e que o resumo mostrava uma."
+    - comando: "tshark -r /root/chamada.pcap -Y sip -T fields -e sip.Status-Code -e sip.Warning -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+
+        488	399 devlab "Incompatible media format: only G729 (18) offered here"
+      nota: "A terceira altura: um campo, de todas as mensagens. E ali está o chamado resolvido — quem recusou escreveu o motivo em texto: só trabalha com G729. Nenhuma das três linhas do resumo tinha essa informação."
+    - comando: "tshark -G fields | grep sip.Warning"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        F	Warning	sip.Warning	FT_STRING	sip		0x0	RFC 3261: Warning Header
+      nota: "E é assim que se descobre o nome de um campo sem decorar nada: `-G fields` despeja o dicionário do leitor, o `grep` acha o pedaço. O terceiro pedaço da linha — `sip.Warning` — é exatamente o que vai depois do `-e`."
+    - comando: "tcpdump -i lo -w /root/com-proxy.pcap -q udp port 5060 or udp port 5061 2>/dev/null & sleep 2; devlab-chamada -q --por-proxy; sleep 2; pkill -x tcpdump; sleep 1; tshark -r /root/com-proxy.pcap -Y sip -T fields -e udp.stream -e ip.src -e ip.dst -n | sort -u"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        0	127.0.0.1	127.0.0.2
+        0	127.0.0.2	127.0.0.1
+        1	127.0.0.2	127.0.0.3
+        1	127.0.0.3	127.0.0.2
+      nota: "E o motivo de o índice não ser detalhe: a MESMA chamada, com um proxy no meio, aparece em **dois** fluxos. O 0 é a perna de quem liga, o 1 é a perna de quem atende. `follow ... ,0` mostraria só metade do caminho — e se o defeito estivesse na outra perna, você fecharia o chamado dizendo que está tudo certo."
+
+  pratica_guiada:
+    - instrucao: "Descubra o nome do campo que traz o User-Agent do SIP."
+      modelo: "tshark -G fields | grep ____"
+      resposta: "tshark -G fields | grep sip.User-Agent"
+    - instrucao: "Extraia da captura quem respondeu — o método/código de cada mensagem e o User-Agent."
+      modelo: "tshark -r /root/chamada.pcap -Y sip -T fields -e sip.Status-Code -e ____ -n"
+      resposta: "tshark -r /root/chamada.pcap -Y sip -T fields -e sip.Status-Code -e sip.User-Agent -n"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você segue o fluxo 0 de uma chamada com proxy e tudo parece normal, mas a chamada falhou. O que faltou olhar?"
+      resposta: |
+        A outra perna. Com um intermediário no caminho, uma chamada são dois
+        fluxos: o 0 é a conversa de quem liga com o proxy, e o defeito pode
+        estar inteiro no fluxo 1, entre o proxy e quem atende.
+
+        A pergunta que resolve é sempre a mesma: **este ponto veria o
+        problema, se ele existisse?** Liste os índices antes de seguir um, e
+        siga os dois quando houver dois.
+    - tipo: predicao
+      pergunta: "Uma operadora responde `503 Service Unavailable` sem cabeçalho `Warning`. O que a captura ainda pode dizer sobre quem recusou?"
+      resposta: |
+        O `User-Agent` ou o `Server` da resposta, quando existem, dizem marca e
+        versão de quem respondeu — e isso separa "a operadora recusou" de "o
+        meu próprio SBC recusou e nem chegou lá".
+
+        O `Via` também ajuda: cada equipamento que encaminha acrescenta o seu,
+        então a pilha de `Via` da resposta mostra por onde a mensagem passou.
+        Sem `Warning`, a investigação vira "quem respondeu isso, e a partir de
+        onde" — e as duas perguntas se respondem com cabeçalho.
+    - tipo: transferencia
+      pergunta: "Um fornecedor pede \"a captura da chamada\" e você tem um arquivo de 4 GB da central inteira. O que mandar?"
+      resposta: |
+        Só o diálogo daquela chamada — e você já tem as três peças para
+        extraí-lo: achar o `Call-ID` da chamada, localizar o fluxo a que ela
+        pertence e recortar.
+
+        Mandar os 4 GB transfere o trabalho e o risco: são conversas de outros
+        clientes, e ninguém do outro lado vai procurar. Recortar mostra
+        exatamente o que você viu, é o que faz o fornecedor responder rápido —
+        e é a mesma razão pela qual `Warning` extraído em uma linha vale mais,
+        num chamado, do que um anexo que ninguém abre.
+
+objetivo_md: |
+  O lab já está com a chamada do cliente: ela não completa, e o resumo só diz
+  o código.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `-e udp.stream` | o índice do fluxo de cada mensagem |
+  | `-z follow,udp,ascii,N` | o texto inteiro daquele fluxo |
+  | `-e sip.Warning` | um cabeçalho específico, de todas as mensagens |
+  | `tshark -G fields` | o dicionário de nomes de campo |
+
+  ### Sua tarefa
+
+  Reproduza a chamada, grave em `/root/chamada.pcap` e produza:
+
+  1. `/root/dialogo.txt` — o **texto inteiro** do diálogo, como ele viajou:
+     as mensagens com seus cabeçalhos, não a lista de resumo.
+  2. `/root/motivo.txt` — **só o motivo** que o outro lado escreveu ao
+     recusar. Uma linha basta; o que se quer é o texto do cabeçalho, não a
+     mensagem inteira de novo.
+
+verificar:
+  - descricao: "/root/dialogo.txt traz o texto das mensagens, com cabeçalhos"
+    script: |
+      #!/bin/bash
+      ARQ=/root/dialogo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"dialogo.txt nao existe","dica_diagnostica":"reconstitua o texto do fluxo com -z follow,udp,ascii,N e redirecione para o arquivo"}'
+        exit 1
+      fi
+      # Cabecalhos so existem no TEXTO da mensagem; a lista de resumo nao os
+      # tem. Exigir tres deles e o que separa uma coisa da outra.
+      for cabecalho in 'INVITE sip:' 'Call-ID:' 'CSeq:'; do
+        if ! grep -q "$cabecalho" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo nao tem o texto das mensagens (falta '$cabecalho')\",\"dica_diagnostica\":\"a lista de resumo nao serve aqui: e preciso o conteudo, que sai do follow do fluxo\"}"
+          exit 1
+        fi
+      done
+      if ! grep -q '488' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o dialogo gravado nao inclui a resposta final","dica_diagnostica":"a captura precisa cobrir a chamada inteira, do INVITE ao ACK"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/motivo.txt isola o motivo escrito por quem recusou"
+    script: |
+      #!/bin/bash
+      ARQ=/root/motivo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"motivo.txt nao existe","dica_diagnostica":"extraia o cabecalho que traz o motivo em texto e grave nele"}'
+        exit 1
+      fi
+      if ! grep -qi 'G729' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao traz o motivo que o outro lado escreveu","dica_diagnostica":"o motivo esta num cabecalho da resposta de recusa; descubra o nome do campo com tshark -G fields e peca so ele com -e"}'
+        exit 1
+      fi
+      # "So o motivo": um follow inteiro tambem contem o texto, e passaria no
+      # teste acima. O corte de tamanho e o que cobra a extracao.
+      LINHAS=$(grep -c . "$ARQ")
+      if [ "${LINHAS:-0}" -gt 4 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo tem $LINHAS linhas; o que se pede e so o motivo\",\"dica_diagnostica\":\"em vez de gravar o dialogo inteiro, peca o campo: -T fields -e <nome do campo>\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/chamada.pcap -q udp port 5060 or udp port 5061 2>/dev/null &
+  sleep 2
+  devlab-chamada -q
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  tshark -r /root/chamada.pcap -q -z follow,udp,ascii,0 2>/dev/null > /root/dialogo.txt
+  tshark -r /root/chamada.pcap -Y sip -T fields -e sip.Warning -n 2>/dev/null | grep . > /root/motivo.txt
+
+dicas:
+  - "O texto inteiro sai de `-z follow,udp,ascii,N`, e o `N` é o índice do fluxo — descubra-o com `-e udp.stream` antes."
+  - "O motivo está num cabeçalho da resposta de recusa. Se não souber o nome do campo, procure no dicionário: `tshark -G fields | grep -i warning`."
+  - "tshark -r /root/chamada.pcap -Y sip -T fields -e sip.Warning -n | grep . > /root/motivo.txt"
+
+erros_comuns:
+  - match: "Invalid -z argument|it must be one of"
+    digita: "tshark -r /root/chamada.pcap -q -z follow,udp,ascii"
+    mensagem: "tshark: Invalid -z argument \"follow,udp,ascii\"; it must be one of:"
+    causa: "faltou o índice do fluxo: o `follow` precisa saber QUAL conversa seguir, e sem o quarto pedaço ele nem reconhece o pedido"
+    conserto: "acrescente o índice no fim: `-z follow,udp,ascii,0`"
+    categoria: sintaxe
+  - match: "Some fields aren't valid"
+    digita: "tshark -r /root/chamada.pcap -Y sip -T fields -e sip.warning -n"
+    mensagem: "tshark: Some fields aren't valid:\n\tsip.warning"
+    causa: "o nome do campo diferencia maiúscula de minúscula, e o do cabeçalho segue a grafia do RFC: `sip.Warning`"
+    conserto: "confirme o nome exato no dicionário: `tshark -G fields | grep -i warning`"
+    categoria: sintaxe
+  - match: "^$"
+    digita: "tshark -r /root/chamada.pcap -q -z follow,udp,ascii,1"
+    mensagem: "(saída vazia, sem erro nenhum)"
+    causa: "o índice pedido não existe nessa captura; sem proxy no caminho, a chamada inteira é um fluxo só, o 0"
+    conserto: "liste os índices que existem com `-e udp.stream` e siga um deles"
+    categoria: conceitual
+
+cards_revisao:
+  - fluxo-tem-indice
+  - resumo-esconde-o-que-resolve
+  - campo-tem-nome

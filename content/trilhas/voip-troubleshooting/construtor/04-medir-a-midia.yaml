@@ -1,0 +1,339 @@
+id: voip-con-04-medir
+trilha: voip-troubleshooting
+nivel: construtor
+ordem: 4
+titulo: "Quanto de ruim é ruim: perda e jitter"
+capacidade: "Sei medir perda e jitter de cada sentido de uma chamada e dizer se o número explica a reclamação."
+xp: 40
+prereqs: [voip-con-03-seguir]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+
+ensina:
+  conceitos:
+    - id: perda-e-buraco-de-sequencia
+      titulo: "perda se mede pelo buraco na numeração, não pela contagem de pacotes"
+    - id: jitter-e-variacao-nao-atraso
+      titulo: "jitter é a variação do intervalo de chegada; atraso constante não é jitter"
+    - id: medir-por-sentido
+      titulo: "a medição vale por sentido: um pode estar perfeito enquanto o outro derruba a chamada"
+  comandos: []
+
+ensino:
+  gancho: |
+    "Falha, corta, dá uns engasgos. Dá para entender, mas cansa."
+
+    Não é "não tem áudio" — esse você já sabe resolver. É pior de defender:
+    o cliente diz que está ruim, o outro lado diz que está bom, e ninguém tem
+    número nenhum na mão. O chamado vira uma discussão de percepção.
+
+    Quem tem a gravação não precisa discutir. Duas medidas — **quanto se
+    perdeu** e **quanto o intervalo oscilou** — transformam "está ruim" em
+    "9,6% de perda no sentido que vem da operadora, e zero no que vai".
+
+  objetivos:
+    - verbo: executar
+      texto: "medir perda e jitter de cada fluxo de áudio de uma gravação"
+    - verbo: identificar
+      texto: "identificar qual sentido está degradado e em que grau"
+    - verbo: explicar
+      texto: "explicar por que contar pacotes não mede perda e por que atraso não é jitter"
+
+  modelo_mental: |
+    Todo pacote de voz leva dois números que fazem a medição existir:
+
+    | campo | o que é |
+    |---|---|
+    | **número de sequência** | um contador que anda de 1 em 1, sem pular |
+    | **timestamp** | o instante da voz que aquele pacote carrega |
+
+    ### Perda: o buraco, não a contagem
+
+    Quem recebe sabe que perdeu porque a sequência **pula**: veio 1042, veio
+    1043, veio 1045. O 1044 não vai chegar mais.
+
+    > Perda se mede pelo buraco na numeração — nunca por "contei menos pacotes
+    > do que esperava".
+
+    A diferença não é filosófica. Você não sabe quantos pacotes o outro lado
+    mandou; só ele sabe. E numa captura local o número total ainda pode estar
+    inflado por avisos de ICMP ou dobrado por um filtro mal escrito. O buraco
+    de sequência é a única evidência que não depende de você adivinhar o
+    denominador.
+
+    ### Jitter: variação, não atraso
+
+    Pacotes de voz saem de 20 em 20 ms. Se chegassem de 20 em 20 ms, bastava
+    tocá-los. O que estraga a chamada é chegarem **irregularmente**: 20, 45, 8,
+    60.
+
+    > Jitter é a **variação** do intervalo de chegada. Um atraso grande e
+    > CONSTANTE não é jitter: incomoda a conversa, mas não pica o áudio.
+
+    Quem recebe se defende com um *jitter buffer*: segura alguns
+    milissegundos de áudio para tocar num ritmo regular. Se o jitter passa do
+    tamanho do buffer, o pacote atrasado chega tarde demais para ser tocado, e
+    o efeito é o mesmo de ter se perdido — **jitter alto vira perda audível**.
+
+    Referências que servem de régua no dia a dia:
+
+    | medida | bom | aceitável | ruim |
+    |---|---|---|---|
+    | perda | 0% | até ~1% | acima de ~3% já pica |
+    | jitter médio | < 5 ms | até ~30 ms | acima de 30 ms |
+
+    ### Sempre por sentido
+
+    Os dois fluxos são independentes, e a rede raramente estraga os dois
+    igualmente. Uma medição que junta os dois esconde exatamente o que
+    interessa: **em qual sentido** está o defeito — e é isso que aponta para o
+    lado responsável.
+
+    ### A tabela
+
+    `-z rtp,streams` faz as três coisas de uma vez: uma linha por fluxo, com
+    pacotes, perda e jitter. As colunas que resolvem chamado são poucas:
+
+    | coluna | lê-se |
+    |---|---|
+    | `Src/Dest Port` | o sentido |
+    | `Pkts` | quantos chegaram |
+    | `Lost` | quantos faltaram na numeração, e a porcentagem |
+    | `Mean Delta(ms)` | o intervalo médio entre chegadas — perto de 20 é o normal |
+    | `Mean/Max Jitter(ms)` | a variação, média e pior caso |
+    | `Problems?` | um `X` quando o próprio leitor achou o fluxo estranho |
+
+  anatomia:
+    - linha: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -q -z rtp,streams"
+      partes:
+        - trecho: "tshark"
+          papel: comando
+          explica: "o leitor de sempre"
+        - trecho: "-r /usr/share/devlab/midia-do-cliente.pcap"
+          papel: opcao
+          explica: "a gravação de referência que já vem no lab"
+        - trecho: "-d udp.port==6000,rtp"
+          papel: opcao
+          explica: "*decode as*: esta gravação não tem a sinalização, então é preciso dizer que aquela porta carrega RTP — a mesma peça da primeira lição do nível"
+        - trecho: "-q"
+          papel: opcao
+          explica: "só o relatório, sem a lista pacote a pacote"
+        - trecho: "-z rtp,streams"
+          papel: opcao
+          explica: "o relatório: um resumo por fluxo de áudio, com perda e jitter calculados"
+
+  demonstracao:
+    - comando: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -q -z rtp,streams"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        ========================= RTP Streams ========================
+           Start time      End time     Src IP addr  Port    Dest IP addr  Port       SSRC          Payload  Pkts         Lost   Min Delta(ms)  Mean Delta(ms)   Max Delta(ms)  Min Jitter(ms) Mean Jitter(ms)  Max Jitter(ms) Problems?
+             0.000000      5.020000       127.0.0.1  6000       127.0.0.1  6100 0x5678CDEF            g711A   225    24 (9.6%)           8.000          22.411          60.000           0.000           5.473           7.041 X
+             0.000000      4.980000       127.0.0.1  6100       127.0.0.1  6000 0x1234ABCD            g711A   250     0 (0.0%)          20.000          20.000          20.000           0.000           0.000           0.000
+        ==============================================================
+      nota: "A tabela inteira, e ela já responde ao chamado. O fluxo de 6100 para 6000 está impecável: 250 pacotes, nenhuma perda, intervalo de 20 ms cravado. O de 6000 para 6100 chegou com 225 pacotes, **24 faltando na numeração (9,6%)**, intervalo variando de 8 a 60 ms e jitter médio de 5,5 ms. O `X` na última coluna é o leitor concordando que aquele fluxo tem problema. Esta gravação é sintetizada pelo lab, para que os números sejam sempre os mesmos; numa capturada da rede o sentido bom mostraria centésimos de milissegundo em vez de zero cravado."
+    - comando: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -Y \"rtp.seq<=1011 and udp.dstport==6100\" -T fields -e rtp.seq -n"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+        1000
+        1001
+        1002
+        1003
+        1004
+        1005
+        1006
+        1007
+        1008
+        1010
+        1011
+      nota: "De onde vem aquele 9,6%: a numeração do fluxo degradado, nos primeiros pacotes. Ela vai 1006, 1007, 1008 e pula direto para 1010 — o 1009 não chegou. É esse buraco que a coluna `Lost` conta, e é a única evidência de perda que não depende de você saber quantos pacotes o outro lado mandou. Repare também que dá para filtrar por VALOR de campo: `rtp.seq<=1011` é filtro de exibição como qualquer outro."
+    - comando: "tcpdump -i lo -w /root/minha.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q --destino picotado; sleep 2; pkill -x tcpdump; sleep 1"
+      saida: ""
+      nota: "Agora a mesma degradação numa chamada de verdade, reproduzida aqui — e com a sinalização junto, o que dispensa o `-d`."
+    - comando: "tshark -r /root/minha.pcap -Y \"rtp and not icmp\" -T fields -e udp.srcport -e udp.dstport -n | sort | uniq -c"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+            225 6000	6100
+            250 6100	6000
+      nota: "Uma contagem por sentido: 250 saíram de 6100, e só 225 chegaram de 6000. A diferença bate com a perda medida no arquivo de referência — a degradação é a mesma, e é do arquivo de mídia, não do acaso da rede. (A tabela completa do `-z rtp,streams` também funciona nesta captura; ela não está gravada aqui porque as colunas de tempo mudam a cada execução.)"
+    - comando: "tcpdump -i lo -w /root/boa.pcap -q 2>/dev/null & sleep 2; devlab-chamada -q; sleep 2; pkill -x tcpdump; sleep 1; tshark -r /root/boa.pcap -Y \"rtp and not icmp\" -T fields -e udp.srcport -e udp.dstport -n | sort | uniq -c"
+      saida: |-2
+        Running as user "root" and group "root". This could be dangerous.
+            250 6000	6100
+            250 6100	6000
+      nota: "E a linha de base, para comparar: a chamada normal do lab, 250 pacotes em cada sentido. Sem esse retrato do que é NORMAL, número nenhum diz nada — 5 ms de jitter é ótimo numa rede metropolitana e péssimo dentro de uma máquina só."
+
+  pratica_guiada:
+    - instrucao: "Meça os fluxos da gravação de referência, pedindo ao leitor que decodifique as duas portas como RTP."
+      modelo: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -q -z ____"
+      resposta: "tshark -r /usr/share/devlab/midia-do-cliente.pcap -d udp.port==6000,rtp -d udp.port==6100,rtp -q -z rtp,streams"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Um fluxo mostra `Pkts 250`, `Lost 0 (0.0%)` e jitter médio de 45 ms. O cliente reclama de áudio picotado. Faz sentido?"
+      resposta: |
+        Faz, e é o caso que mais confunde. Não se perdeu nada **na rede**: os
+        250 pacotes chegaram, a numeração está inteira.
+
+        Mas eles chegaram fora de ritmo, e 45 ms de variação média estoura o
+        jitter buffer da maioria dos aparelhos. O que chega tarde demais é
+        descartado por quem recebe — perda que não aparece como perda na
+        captura, porque aconteceu depois dela, dentro do telefone.
+
+        É por isso que as duas medidas andam juntas: `Lost 0` não quer dizer
+        "áudio bom", quer dizer "nada se perdeu até aqui".
+    - tipo: predicao
+      pergunta: "Você captura 5 segundos de uma chamada de 3 minutos e mede 0% de perda. O que pode concluir sobre a chamada?"
+      resposta: |
+        Sobre aqueles 5 segundos, que estavam limpos. Sobre a chamada, quase
+        nada.
+
+        Degradação de rede costuma ser intermitente — o congestionamento tem
+        hora. Uma amostra curta pega o momento em que você estava olhando, e é
+        justamente a queixa "só acontece de vez em quando" que ela não
+        consegue reproduzir.
+
+        A saída é capturar a chamada inteira, ou capturar por tempo suficiente
+        para conter uma reclamação. E, se a captura precisa ser longa, é aí que
+        o filtro de captura vira obrigatório.
+    - tipo: transferencia
+      pergunta: "A operadora responde que \"do lado dela está tudo certo\" e manda a captura do próprio equipamento. Como usar isso?"
+      resposta: |
+        Comparando as duas medições do **mesmo sentido**, cada uma feita num
+        ponto. Se no equipamento dela o fluxo que vem para você sai com 0% de
+        perda e na sua ponta ele chega com 9%, a perda aconteceu **entre** os
+        dois pontos — e isso já não é uma questão de opinião.
+
+        Se as duas capturas mostram o mesmo 9%, o problema é anterior ao ponto
+        dela, e a conversa muda de assunto. As duas conclusões valem mais do
+        que qualquer troca de e-mails, e as duas dependem de medir por sentido.
+
+objetivo_md: |
+  O lab reproduz a chamada de que o cliente reclama com
+  `devlab-chamada --destino picotado`. Uma chamada normal é
+  `devlab-chamada`, sem opção.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `-z rtp,streams` | uma linha por fluxo: pacotes, perda, jitter |
+  | `Lost` | o buraco na numeração, com a porcentagem |
+  | `Mean Jitter(ms)` | a variação média do intervalo de chegada |
+  | `-d udp.port==N,rtp` | necessário quando a gravação não tem a sinalização |
+
+  ### Sua tarefa
+
+  1. Grave a chamada de que o cliente reclama em `/root/picotada.pcap`, com a
+     sinalização junto — a chamada inteira, os dois sentidos.
+  2. Grave em `/root/medicao.txt` a tabela de fluxos dessa chamada.
+  3. Escreva em `/root/laudo.txt` **uma linha** dizendo qual porta recebia o
+     áudio degradado e quantos pacotes se perderam.
+
+verificar:
+  - descricao: "/root/picotada.pcap tem a chamada inteira, com os dois sentidos de áudio"
+    script: |
+      #!/bin/bash
+      ARQ=/root/picotada.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"picotada.pcap nao existe","dica_diagnostica":"grave a chamada com tcpdump e reproduza-a com devlab-chamada --destino picotado"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump com pkill -x tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      if [ "$(tshark -r "$ARQ" -Y sip 2>/dev/null | grep -c .)" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a captura nao tem a sinalizacao junto","dica_diagnostica":"grave sem filtro de captura, ou com um que inclua as portas do SIP: e o SDP que faz o leitor reconhecer o RTP"}'
+        exit 1
+      fi
+      IDA=$(tshark -r "$ARQ" -Y "rtp and not icmp and udp.dstport==6000" 2>/dev/null | grep -c .)
+      VOLTA=$(tshark -r "$ARQ" -Y "rtp and not icmp and udp.dstport==6100" 2>/dev/null | grep -c .)
+      if [ "${IDA:-0}" -lt 1 ] || [ "${VOLTA:-0}" -lt 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura nao tem os dois sentidos (para 6000: $IDA, para 6100: $VOLTA)\",\"dica_diagnostica\":\"a captura precisa cobrir a chamada inteira: a midia so comeca depois do ACK\"}"
+        exit 1
+      fi
+      # O sentido degradado tem de estar la: com a chamada normal a tarefa
+      # perde o objeto, e o laudo seria sobre outra coisa.
+      if [ "${VOLTA:-0}" -ge 250 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o sentido que vem de quem atende chegou completo ($VOLTA pacotes); esta e a chamada normal, nao a do chamado\",\"dica_diagnostica\":\"reproduza a chamada de que o cliente reclama: devlab-chamada --destino picotado\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/medicao.txt tem a tabela de fluxos, com os dois sentidos"
+    script: |
+      #!/bin/bash
+      ARQ=/root/medicao.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"medicao.txt nao existe","dica_diagnostica":"redirecione para o arquivo a saida de -z rtp,streams"}'
+        exit 1
+      fi
+      if ! grep -q 'RTP Streams' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao tem a tabela de fluxos","dica_diagnostica":"a tabela sai de tshark -r <captura> -q -z rtp,streams"}'
+        exit 1
+      fi
+      for porta in 6000 6100; do
+        if ! grep -q "$porta" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"a tabela nao traz o fluxo da porta $porta\",\"dica_diagnostica\":\"a medicao vale por sentido: os DOIS fluxos precisam aparecer\"}"
+          exit 1
+        fi
+      done
+      exit 0
+
+  - descricao: "/root/laudo.txt nomeia a porta degradada e a quantidade perdida"
+    script: |
+      #!/bin/bash
+      ARQ=/root/laudo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"laudo.txt nao existe","dica_diagnostica":"escreva uma linha com a porta que recebia o audio degradado e quantos pacotes faltaram"}'
+        exit 1
+      fi
+      if ! grep -q '6100' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao nomeia a porta que recebia o audio degradado","dica_diagnostica":"olhe a tabela: o fluxo com perda e o que vai de 6000 para 6100; a porta que RECEBE e a de destino"}'
+        exit 1
+      fi
+      # Sem numero nao e laudo: e a mesma reclamacao do cliente com outras
+      # palavras. 24 e a contagem, 9.6/9,6 e a porcentagem — vale qualquer uma.
+      if ! grep -qE '(^|[^0-9])24([^0-9]|$)|9[.,]6' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao traz quanto se perdeu","dica_diagnostica":"a coluna Lost da tabela traz os dois numeros: a contagem e a porcentagem; escreva um deles"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/picotada.pcap -q 2>/dev/null &
+  sleep 2
+  devlab-chamada -q --destino picotado
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  tshark -r /root/picotada.pcap -q -z rtp,streams 2>/dev/null > /root/medicao.txt
+  printf 'O audio que chega na porta 6100 (o sentido de quem atende para quem liga) perdeu 24 pacotes, 9,6%%; o sentido contrario chegou completo.\n' > /root/laudo.txt
+
+dicas:
+  - "A tabela sai de `tshark -r <captura> -q -z rtp,streams`, e mostra uma linha por sentido. Redirecione a saída para o arquivo com `>`."
+  - "A coluna `Lost` traz o buraco de numeração e a porcentagem. A porta que RECEBE o áudio degradado é a de destino da linha que tem perda."
+  - "tshark -r /root/picotada.pcap -q -z rtp,streams > /root/medicao.txt, e depois escreva o laudo citando a porta 6100 e os 24 pacotes perdidos."
+
+erros_comuns:
+  - match: "-d requires \"==\" instead of \"=\""
+    digita: "tshark -r /root/picotada.pcap -d udp.port=6000,rtp -q -z rtp,streams"
+    mensagem: "tshark: WARNING: -d requires \"==\" instead of \"=\". Option will be treated as \"udp.port==6000,rtp\""
+    causa: "o `-d` usa a mesma comparação do filtro de exibição, com dois sinais de igual; com um só ele avisa e segue"
+    conserto: "escreva `-d udp.port==6000,rtp`; aqui deu certo mesmo assim, mas o aviso é o mesmo que precede um erro em versões diferentes"
+    categoria: sintaxe
+  - match: "tshark: Invalid -z argument \"rtp\""
+    digita: "tshark -r /root/picotada.pcap -q -z rtp"
+    mensagem: "tshark: Invalid -z argument \"rtp\"; it must be one of:"
+    causa: "`rtp` sozinho não é um relatório; o que existe é `rtp,streams`"
+    conserto: "peça `-z rtp,streams`"
+    categoria: sintaxe
+
+cards_revisao:
+  - perda-e-buraco-de-sequencia
+  - jitter-e-variacao-nao-atraso
+  - medir-por-sentido

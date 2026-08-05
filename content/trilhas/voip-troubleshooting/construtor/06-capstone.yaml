@@ -1,0 +1,255 @@
+id: voip-con-06-capstone
+trilha: voip-troubleshooting
+nivel: construtor
+ordem: 6
+titulo: "Chamado 3042: engasga, e a operadora diz que está tudo bem"
+capacidade: "Sei escolher o ponto, capturar o que prova, medir por sentido e entregar um laudo que se sustenta."
+xp: 90
+capstone: true
+prereqs: [voip-con-05-rtcp]
+
+lab:
+  imagem: devlab/voip-tools:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  capacidades: [NET_RAW]
+  # Decisão 26: quem escolhe o defeito é o break, não a linha de comando do
+  # aluno. Ele reproduz a chamada do cliente e descobre o que ela tem.
+  #
+  # A topologia com proxy NÃO é defeito nem pegadinha: é a informação que o
+  # chamado traz, e está dita no enunciado. O que ela cobra é a decisão da
+  # lição 2 — capturar no proxy aqui não responde à pergunta, porque por ele
+  # não passa áudio nenhum.
+  break: |
+    echo picotado > /var/lib/devlab/destino-padrao
+
+ensina:
+  conceitos: []
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 3042, reaberto pela terceira vez:
+
+    > "A ligação cai não, mas engasga o tempo todo. A gente entende, mas
+    > cansa. E olha que eu já troquei o telefone."
+
+    O chamado anterior foi fechado como "sem evidência". A operadora respondeu
+    duas vezes que do lado dela está tudo normal, e a última resposta dela veio
+    com uma captura anexada — feita no proxy de sinalização — dizendo que
+    **não há um único pacote de áudio com problema**.
+
+    Você tem o lab e uma chamada reproduzível. Ninguém vai dizer qual comando
+    usar, e o chamado não se fecha com adjetivo: se fecha com número.
+
+  objetivos:
+    - verbo: diagnosticar
+      texto: "diagnosticar uma chamada que completa e tem áudio degradado, separando sinalização de mídia"
+    - verbo: executar
+      texto: "escolher um ponto de captura que possa provar o que se afirma"
+    - verbo: construir
+      texto: "construir um laudo com o sentido afetado e o número que o sustenta"
+
+  modelo_mental: |
+    Nada de novo. O que muda é que ninguém separa os passos.
+
+    O método que atravessa as cinco lições do nível:
+
+    1. **O ponto primeiro.** Antes de capturar, pergunte o que aquele ponto
+       veria. Um ponto que não está no caminho da voz não pode dizer nada
+       sobre a voz — nem para acusar, nem para inocentar.
+    2. **O filtro decide o que você poderá provar.** O que ficar de fora não
+       volta, e uma captura de mídia sem sinalização ainda precisa do `-d`
+       para ser lida.
+    3. **Sinalização ou mídia?** Se houve `200 OK` e `ACK`, a sinalização fez
+       o trabalho dela. Uma chamada que engasga quase nunca é sinalização.
+    4. **Meça por sentido.** Perda pelo buraco de numeração, jitter pela
+       variação. Os dois fluxos são independentes, e é o sentido afetado que
+       aponta o responsável.
+    5. **Escreva o número.** "Está ruim" reabre chamado; "9,6% de perda no
+       sentido que vem da operadora, zero no sentido contrário" o fecha.
+
+    O passo 1 é o que a resposta da operadora errou — e é por isso que a
+    captura dela não prova o que ela diz que prova.
+
+  demonstracao:
+    - comando: "devlab-chamada --por-proxy"
+      saida: |-2
+        → atendendo em 127.0.0.3:5060 (aguardando INVITE)
+        → proxy de sinalização em 127.0.0.2:5060 (a mídia não passa por ele)
+        → ligando de 127.0.0.1:5061
+        ✔ chamada concluída — quem ligou contabilizou 1 chamada(s) bem-sucedida(s)
+      nota: "O ponto de partida. A chamada do cliente passa por um proxy de sinalização: quem liga está em 127.0.0.1, o proxy em 127.0.0.2, e quem atende em 127.0.0.3. Ela completa normalmente — e é justamente esse o problema do chamado. A partir daqui é com você."
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Antes de capturar qualquer coisa: por que a captura que a operadora anexou não sustenta a conclusão dela?"
+      resposta: |
+        Porque ela foi feita no proxy, e por um proxy de sinalização não passa
+        áudio: as duas pontas combinam os endereços de mídia no SDP e a voz vai
+        direta entre elas.
+
+        Naquele ponto **nunca** haveria RTP — nem numa chamada perfeita, nem
+        numa péssima. "Não há pacote de áudio com problema" ali é uma frase
+        verdadeira e vazia: o ponto não veria o problema se ele existisse.
+    - tipo: transferencia
+      pergunta: "Você prova 9,6% de perda no áudio que chega ao cliente. Como isso vira uma ação, e não só um número?"
+      resposta: |
+        O número diz **o quê** e **em qual sentido**; a ação depende de onde a
+        perda acontece, e para isso é preciso um segundo ponto de medição.
+
+        Se a captura na saída da operadora mostrar o mesmo sentido sem perda, o
+        trecho suspeito é o que vem depois dela — link, roteador, o cliente. Se
+        mostrar a mesma perda, o problema é anterior. O relatório RTCP do
+        endpoint remoto serve para o mesmo fim quando não há acesso ao outro
+        equipamento: ele é a contabilidade de quem recebeu, viajando dentro da
+        sua própria captura.
+
+        É a diferença entre "há perda" e "a perda está entre X e Y" — só a
+        segunda tem dono.
+
+objetivo_md: |
+  Este é o capstone do nível: ele integra as cinco lições e não dá o passo a
+  passo.
+
+  A chamada do chamado 3042 se reproduz com `devlab-chamada --por-proxy` —
+  quem liga em `127.0.0.1`, o proxy em `127.0.0.2`, quem atende em
+  `127.0.0.3`. O lab já está com o defeito do cliente.
+
+  ### Sua entrega
+
+  Quatro arquivos:
+
+  1. **`/root/prova.pcap`** — a gravação que sustenta o laudo. Ela precisa
+     conter a chamada inteira: a sinalização **e** o áudio nos dois sentidos.
+  2. **`/root/ponto.txt`** — uma ou duas frases dizendo de qual ponto você
+     capturou e **por que o ponto do proxy não serviria**.
+  3. **`/root/medicao.txt`** — a medição por fluxo, com os dois sentidos.
+  4. **`/root/laudo.txt`** — a conclusão: que a sinalização completou, qual
+     sentido está degradado e **quanto** ele perdeu.
+
+  Não há dicas nesta lição. Tudo o que ela cobra já foi ensinado.
+
+verificar:
+  - descricao: "/root/prova.pcap tem a chamada inteira: sinalização e áudio nos dois sentidos"
+    script: |
+      #!/bin/bash
+      ARQ=/root/prova.pcap
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"prova.pcap nao existe","dica_diagnostica":"reproduza a chamada com a captura de pe e grave em /root/prova.pcap"}'
+        exit 1
+      fi
+      if ! tcpdump -r "$ARQ" -c 1 >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo existe mas nao e um pcap legivel","dica_diagnostica":"pare o tcpdump para que ele feche o arquivo"}'
+        exit 1
+      fi
+      for filtro in "sip.Method==INVITE" "sip.Status-Code==200" "sip.Method==BYE"; do
+        N=$(tshark -r "$ARQ" -Y "$filtro" 2>/dev/null | grep -c .)
+        if [ "${N:-0}" -lt 1 ]; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"a captura nao tem a chamada inteira (falta $filtro)\",\"dica_diagnostica\":\"a captura precisa comecar antes do INVITE e so parar depois do BYE\"}"
+          exit 1
+        fi
+      done
+      # Um ponto que nao esta no caminho da voz nao produz esta evidencia: e o
+      # que reprova quem capturou no proxy.
+      IDA=$(tshark -r "$ARQ" -Y "rtp and not icmp and udp.dstport==6000" 2>/dev/null | grep -c .)
+      VOLTA=$(tshark -r "$ARQ" -Y "rtp and not icmp and udp.dstport==6100" 2>/dev/null | grep -c .)
+      if [ "${IDA:-0}" -lt 1 ] || [ "${VOLTA:-0}" -lt 1 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a captura nao tem os dois sentidos do audio (para 6000: $IDA, para 6100: $VOLTA)\",\"dica_diagnostica\":\"o ponto escolhido precisa estar no caminho da MIDIA, e a captura precisa cobrir a chamada inteira\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/ponto.txt justifica o ponto escolhido e descarta o do proxy"
+    script: |
+      #!/bin/bash
+      ARQ=/root/ponto.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"ponto.txt nao existe","dica_diagnostica":"escreva de qual ponto voce capturou e por que o ponto do proxy nao serviria"}'
+        exit 1
+      fi
+      if ! grep -qiE 'proxy|127\.0\.0\.2' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o texto nao trata do ponto do proxy","dica_diagnostica":"o chamado foi fechado com uma captura feita no proxy; diga por que ela nao responde a pergunta"}'
+        exit 1
+      fi
+      if ! grep -qiE 'midia|mídia|rtp|audio|áudio|voz' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o texto nao diz o que falta na captura do proxy","dica_diagnostica":"nomeie o que nao passa por la: a midia, que vai direta entre as pontas"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/medicao.txt traz a medição dos dois fluxos de áudio"
+    script: |
+      #!/bin/bash
+      ARQ=/root/medicao.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"medicao.txt nao existe","dica_diagnostica":"grave no arquivo a medicao por fluxo da sua captura"}'
+        exit 1
+      fi
+      for porta in 6000 6100; do
+        if ! grep -q "$porta" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"a medicao nao traz o fluxo da porta $porta\",\"dica_diagnostica\":\"os DOIS sentidos precisam estar medidos: e a comparacao entre eles que localiza o defeito\"}"
+          exit 1
+        fi
+      done
+      # Sem numero de perda nao ha o que sustentar o laudo.
+      if ! grep -qE '\(9[.,]6%\)|(^|[^0-9])24([^0-9]|$)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a medicao nao mostra a perda do sentido degradado","dica_diagnostica":"a tabela de fluxos traz a coluna Lost; e ela que precisa estar no arquivo"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/laudo.txt conclui: sinalização completou, qual sentido caiu e quanto"
+    script: |
+      #!/bin/bash
+      ARQ=/root/laudo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"laudo.txt nao existe","dica_diagnostica":"escreva a conclusao: sinalizacao, sentido afetado e quanto se perdeu"}'
+        exit 1
+      fi
+      if ! grep -qiE 'sinaliza|200 ok|ack|complet' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao diz o que aconteceu com a sinalizacao","dica_diagnostica":"a primeira coisa que um laudo descarta e a sinalizacao: diga que ela completou, e com que evidencia"}'
+        exit 1
+      fi
+      if ! grep -qE '6100|127\.0\.0\.1' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao identifica o sentido degradado","dica_diagnostica":"nomeie o sentido pelo destino: a porta (ou o endereco) de quem estava RECEBENDO o audio ruim"}'
+        exit 1
+      fi
+      if ! grep -qE '(^|[^0-9])24([^0-9]|$)|9[.,]6' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o laudo nao traz o numero","dica_diagnostica":"e o numero que fecha o chamado: quantos pacotes faltaram, ou a porcentagem"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  tcpdump -i lo -w /root/prova.pcap -q host 127.0.0.1 2>/dev/null &
+  sleep 2
+  devlab-chamada -q --por-proxy
+  sleep 2
+  pkill -x tcpdump
+  sleep 1
+  printf 'Capturei no ponto de quem liga (127.0.0.1), que esta no caminho da midia. O ponto do proxy (127.0.0.2) nao serviria: por ele passa apenas sinalizacao, e o audio vai direto entre as pontas, entao la nao existe RTP nem quando a chamada esta perfeita.\n' > /root/ponto.txt
+  tshark -r /root/prova.pcap -q -z rtp,streams 2>/dev/null > /root/medicao.txt
+  printf 'A sinalizacao completou (200 OK e ACK, com BYE no fim), entao o problema nao esta nela. O audio que CHEGA a quem ligou (destino 127.0.0.1, porta 6100) perdeu 24 pacotes, 9,6%%, com o intervalo entre pacotes variando de 8 a 60 ms; o sentido contrario chegou completo, com 250 pacotes e nenhuma perda. O defeito e de midia, num sentido so: o que vem de quem atende.\n' > /root/laudo.txt
+
+dicas: []
+
+erros_comuns:
+  - match: "0 packets captured"
+    digita: "tcpdump -i lo -w /root/prova.pcap -q host 127.0.0.3"
+    mensagem: "0 packets captured"
+    causa: "a chamada foi originada sem `--por-proxy`, e nesse caso os dois lados conversam em 127.0.0.1: ninguém fala com 127.0.0.3"
+    conserto: "esta chamada é a do chamado, com proxy no caminho: `devlab-chamada --por-proxy`"
+    categoria: conceitual
+  - match: "RTP Streams[\\s\\S]*=====\\s*$"
+    digita: "tshark -r /root/prova.pcap -q -z rtp,streams"
+    mensagem: "(a tabela sai com cabeçalho e nenhuma linha)"
+    causa: "a captura não tem mídia — ou o ponto escolhido não está no caminho da voz, ou o filtro de captura a descartou"
+    conserto: "capture de um ponto que esteja no caminho do áudio e sem filtro que exclua as portas de mídia"
+    categoria: conceitual
+
+cards_revisao:
+  - ponto-de-captura-limita-a-prova
+  - medir-por-sentido
+  - perda-e-buraco-de-sequencia
