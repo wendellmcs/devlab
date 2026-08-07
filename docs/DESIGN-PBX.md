@@ -394,6 +394,179 @@ uma chamada com `--duracao 4` só completa se for atendida antes disso — com a
 espera de dez segundos ativa, o chamador desiste primeiro e o `devlab-ramal`
 sai com erro.
 
+---
+
+# As decisões do nível Construtor (2026-08-07)
+
+O Construtor é o nível em que o aluno **escreve config** pela primeira vez —
+directory e dialplan. Isso muda a natureza do lab: até aqui ele interrogava um
+PBX pronto; agora ele o modifica, e um erro dele tem de produzir um sintoma que
+ENSINE. As seis decisões abaixo saíram de medição, e três delas mudaram o
+desenho do nível.
+
+## 49. O aluno escreve num contexto PRÓPRIO, não no `default`
+
+A escolha óbvia era pôr as extensões do aluno em `dialplan/default/`, que é
+onde o FreeSWITCH manda pôr (`X-PRE-PROCESS include data="default/*.xml"`, na
+linha 796 do `default.xml` vanilla). Ela está errada, e o que a derruba é a
+linha 839 — **depois** do include:
+
+```xml
+<extension name="acknowledge_call">
+  <condition field="destination_number" expression="^(.*)$">
+    <action application="acknowledge_call"/>
+    <action application="ring_ready"/>
+    <action application="playback" data="local_stream://moh"/>
+```
+
+O contexto `default` termina num **catch-all que atende qualquer número e toca
+música**. Medido, com um número sem rota nenhuma:
+
+| | no contexto `default` | em contexto próprio |
+|---|---|---|
+| o que o chamador ouve | música de espera, para sempre | nada; a chamada é recusada |
+| resposta final | nenhuma — o chamador desiste (`487`) | **`404 Not Found`** |
+| CDR | `ORIGINATOR_CANCEL` | **`NO_ROUTE_DESTINATION`** |
+| log | silêncio sobre o problema | `No Route, Aborting` |
+
+Ou seja: no `default`, um erro de regex do aluno vira *música de espera* —
+sintoma que não aponta para causa nenhuma, e que ele leria como "minha extensão
+não carregou". Em contexto próprio, o mesmo erro vira `404` com o CDR dizendo o
+nome do defeito.
+
+O segundo motivo é o log. O FreeSWITCH narra o dialplan enquanto o percorre —
+`parsing [contexto->extensão]`, `Regex (PASS|FAIL) [nome] destination_number(N)
+=~ /regex/` — e essa narração é o melhor material de ensino que o nível tem,
+porque mostra **ordem de avaliação** (PRD §7 F.5) acontecendo. Medido no mesmo
+número: **mais de 100 linhas** de walk no `default`, contra **5 linhas** no
+contexto do aluno. A mesma lição, legível ou ilegível, pela escolha do contexto.
+
+Ligar um usuário ao contexto é uma variável do directory, e isso emenda com a
+decisão seguinte: `<variable name="user_context" value="oficina"/>`.
+
+O `default` não vira inimigo — ele continua lá, e é onde os ramais 1000–1019
+moram. O aluno vê os dois, e a diferença entre eles é conteúdo.
+
+## 50. `reloadxml` mente três vezes, e a terceira é a cara
+
+Este é o trecho mais caro do nível, porque o sintoma é *nada acontecer*. Com um
+`</extension>` faltando no arquivo do aluno:
+
+```
+$ devlab-pbx cli reloadxml
++OK [[error near line 7029]: unexpected closing tag </section>]
+$ echo $?
+0
+```
+
+1. **O erro vem dentro de um `+OK`.** Quem lê a primeira palavra conclui que
+   deu certo.
+2. **O código de saída é 0.** Um check que testasse `reloadxml` por status
+   aprovaria XML quebrado — e é por isso que nenhum check do nível faz isso.
+3. **O documento ANTERIOR continua vivo.** Medido: com o arquivo quebrado no
+   disco, `xml_locate dialplan context name oficina` devolveu as extensões da
+   versão *antiga*, e uma chamada continuou sendo roteada por elas. O PBX
+   rejeitou o documento novo inteiro e seguiu com o que já tinha.
+
+O número da linha (`7029`) é do documento MONTADO — todos os arquivos
+concatenados —, não do arquivo do aluno. Procurar a linha 7029 no próprio
+arquivo é perda de tempo, e é o primeiro impulso de quem lê.
+
+A imagem **não tem `xmllint`** (medido). Quem valida o XML do aluno é o próprio
+PBX, e a leitura certa da resposta do `reloadxml` é conteúdo da lição 3.
+
+Consequência de projeto: **o oráculo de "a sua config entrou" nunca é o
+`reloadxml`** — é o que o PBX tem VIVO na memória (decisão 51) ou o
+comportamento de uma chamada.
+
+## 51. O PBX responde três perguntas sobre o directory, e elas são o oráculo
+
+A decisão 46 já dizia que quem sabe se um ramal registrou é o PBX. O Construtor
+precisa de mais do que isso — precisa saber se o *usuário existe* e se as
+variáveis dele são as que o aluno escreveu. O FreeSWITCH tem as três respostas
+prontas, e todas leem a config VIVA (o que as faz atravessar a decisão 50):
+
+```
+user_exists id 1050 127.0.0.1              → true | false
+user_data 1050@127.0.0.1 param password    → devlab
+user_data 1050@127.0.0.1 var user_context  → oficina
+```
+
+Medido: com o XML quebrado no disco, essas três continuam respondendo o valor
+ANTIGO — que é exatamente o comportamento desejado num oráculo, porque é o que
+o PBX vai de fato usar quando a chamada chegar.
+
+Um quarto fato, do CDR: a **coluna 4 é o `context`**. `"1002","1002","7300",
+"oficina",…` prova, sem ambiguidade, qual contexto roteou a chamada — é o
+oráculo do capstone.
+
+E o `a1-hash` fecha sozinho, medido nos dois sentidos: com
+`a1-hash = md5("1051:127.0.0.1:outrasenha")` o ramal registra com
+`outrasenha` e é recusado com qualquer outra. O realm é o `domain`
+(`127.0.0.1` no lab) — trocar o realm quebra o hash sem mudar a senha, que é o
+`403` clássico do PRD §7 G.5, aqui pela porta de quem CRIOU o usuário.
+
+## 52. `--no-vad` é o que torna a aplicação `record` ensinável
+
+`record` está no PRD §7 F.6 e quase não coube, por uma razão que não aparece em
+lugar nenhum da documentação do FreeSWITCH: **o detector de silêncio do
+softphone**.
+
+Com o `pjsua` no padrão (VAD ligado) e `--null-audio` lhe entregando silêncio
+digital, ele para de transmitir RTP em cerca de meio segundo. O que a central
+grava então não é a chamada. Medido, numa chamada de 8 segundos com
+`record <arquivo> 4`:
+
+| | VAD ligado (padrão) | `--no-vad` |
+|---|---|---|
+| `record_seconds` | **0** | **4** |
+| `record_ms` | 580 | 4380 |
+| tamanho | 9324 bytes | ~70 KB |
+
+E o pior: os 9324 bytes eram **idênticos em três execuções**. Determinístico e
+errado — um check apoiado neles passaria para sempre, ensinando que uma
+gravação de 4 segundos tem meio segundo.
+
+`--no-vad` entrou no `devlab-ramal` por isso. O que se grava continua sendo
+silêncio (não há microfone num lab), então **a lição cobra a duração e o
+caminho do arquivo, nunca o conteúdo sonoro** — e diz isso ao aluno, em vez de
+deixá-lo procurar áudio que não existe.
+
+Corolário para a decisão 27: `record_seconds` é estável (é o limite pedido),
+mas `record_ms` **não** é — 4380 numa execução, 4340 noutra, e o tamanho em
+bytes acompanha (70124 × 69484 × 65964 em três rodadas). Check e demonstração
+usam `record_seconds`; tamanho, só como piso.
+
+## 53. `--digitos` manda DTMF, e espera o canal ficar `ACTIVE`
+
+`play_and_get_digits` está no PRD §7 F.6 e não havia como exercitá-lo: o
+`pjsua` só manda DTMF pelo console interativo (`#`, e a sequência na linha
+seguinte). A opção `--digitos` do `devlab-ramal` embrulha isso.
+
+O quando é que era o problema. Dígito mandado antes de o dialplan chegar ao
+`play_and_get_digits` cai no vazio, e um `sleep` chutado troca uma corrida por
+outra — o defeito que este script existe para matar (decisão 42). O oráculo, de
+novo, é o PBX: `show channels` traz uma linha CSV por canal vivo, com o destino
+discado e a coluna `callstate`, e **`ACTIVE` é o estado em que o dialplan já
+passou do `answer`**.
+
+Medido ponta a ponta: `devlab-ramal 1002 --discar 7400 --digitos "1234#"`
+devolve `escolha=1234` na variável de canal, com o FreeSWITCH registrando os
+cinco dígitos RFC 2833.
+
+## 54. Condição de horário: quem calcula o ramo esperado é o check
+
+Roteamento por horário está no PRD §7 F.6, e `<condition hour="8-17">` com
+`anti-action` funciona (medido: às 19:48 UTC o `Date/TimeMatch (FAIL)` levou ao
+ramo de fora de hora). Mas um check que exigisse "caiu no ramo comercial"
+**reprovaria o aluno que estudasse de madrugada** — e o relógio do container é o
+do host, então não há como fixá-lo sem mentir sobre o ambiente.
+
+A saída: o check lê a hora corrente e cobra o ramo que ELA implica. O aluno é
+avaliado por ter escrito a condição certa, não por estudar no horário
+comercial. Vale a decisão 27 pelo avesso: quando a saída não pode ser fixa, o
+oráculo é que se torna função do relógio.
+
 ## O que ainda não foi decidido
 
 - **Multi-container ou um só.** O PRD §4.2 prevê `compose.yaml` para labs de

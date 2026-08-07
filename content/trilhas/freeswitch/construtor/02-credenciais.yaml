@@ -1,0 +1,364 @@
+id: pbx-con-02-credenciais
+trilha: freeswitch
+nivel: construtor
+ordem: 2
+titulo: "A senha que a central não guarda — e o nome que viaja junto"
+capacidade: "Sei guardar a credencial de um ramal como hash e fazer as variáveis do usuário aparecerem na chamada."
+xp: 40
+prereqs: [pbx-con-01-usuario]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # O 1050 chega pronto e funcionando com senha em claro — é o resultado da
+  # lição 1, e o ponto de partida desta. O 1000 sobe atendendo porque a segunda
+  # metade da tarefa se prova numa chamada de verdade, e o siptrace fica ligado
+  # de propósito: ler o trace já é matéria do operador, e aqui ele é
+  # instrumento, não tarefa.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    cat > "$C/directory/default/1050.xml" <<'XML'
+    <include>
+      <user id="1050">
+        <params>
+          <param name="password" value="devlab"/>
+        </params>
+        <variables>
+          <variable name="user_context" value="default"/>
+          <variable name="effective_caller_id_number" value="1050"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    devlab-pbx iniciar >/dev/null
+    devlab-pbx cli "sofia global siptrace on" >/dev/null
+    devlab-ramal 1000 --atender --silencioso
+
+ensina:
+  conceitos:
+    - id: a1-hash-guarda-a-prova-nao-a-senha
+      titulo: "o directory pode guardar o resumo `md5(usuário:realm:senha)` no lugar da senha — a central confere quem entra sem nunca ter a senha em claro para vazar"
+    - id: variaveis-do-usuario-entram-na-chamada
+      titulo: "o que está em `<variables>` não fica no arquivo: entra em toda chamada daquele usuário, e o `effective_caller_id_name` chega ao aparelho de quem recebe"
+  comandos: []
+
+ensino:
+  gancho: |
+    Você criou o 1050 e ele registrou. Agora repare no que a central te
+    respondeu quando você perguntou a senha dele:
+
+    ```
+    devlab-pbx cli "user_data 1050@127.0.0.1 param password"
+    devlab
+    ```
+
+    **A senha, em claro, para quem perguntar no console.** E ela está assim no
+    arquivo, e no backup do arquivo, e no repositório onde alguém versionou o
+    arquivo.
+
+    Existe um jeito de a central conferir a senha sem nunca guardá-la — e é o
+    mesmo mecanismo que ela já usava para autenticar, só que agora do lado de
+    quem escreve a config. Enquanto estamos aqui, tem uma segunda pergunta:
+    quando o 1050 liga para alguém, **o que aparece no telefone da outra
+    pessoa?**
+
+  objetivos:
+    - verbo: explicar
+      texto: "explicar por que um resumo da senha basta para autenticar sem guardar a senha"
+    - verbo: construir
+      texto: "calcular o a1-hash de um ramal e trocá-lo pela senha em claro no directory"
+    - verbo: executar
+      texto: "declarar variáveis de usuário que identificam quem está ligando"
+    - verbo: diagnosticar
+      texto: "diagnosticar por que um ramal com a senha certa passa a ser recusado"
+
+  modelo_mental: |
+    Quando um softphone registra, ele **não manda a senha**. A central desafia,
+    e ele responde com um resumo calculado a partir de três coisas: o nome de
+    usuário, o **realm** (o domínio que a central declara) e a senha. Você já
+    viu esse desafio no trace do operador — o `401` e o REGISTER seguinte.
+
+    A conta que a central precisa fazer para conferir essa resposta usa sempre
+    o mesmo pedaço fixo:
+
+    ```
+    a1-hash = md5( usuário : realm : senha )
+    ```
+
+    Repare no que isso significa: **para conferir, a central não precisa da
+    senha — precisa desse resumo.** Então guarde o resumo:
+
+    ```xml
+    <params>
+      <param name="a1-hash" value="e2498ea61d4c02d698846e1ab1723eb5"/>
+    </params>
+    ```
+
+    No lugar de `password`, e nunca os dois. O softphone continua provando a
+    senha normalmente; ninguém que leia o arquivo consegue lê-la de volta.
+
+    E o realm é o pulo do gato: ele está **dentro** do hash. Trocar o domínio
+    da central invalida todos os hashes do directory sem ninguém ter mexido em
+    senha nenhuma. No lab o realm é `127.0.0.1`, e a própria central diz qual é
+    (`global_getvar domain`).
+
+    ### O que o usuário carrega para dentro da chamada
+
+    O bloco `<variables>` não é anotação. Cada variável ali entra na chamada
+    daquele usuário, e duas delas decidem o que aparece no telefone de quem
+    recebe:
+
+    | variável | efeito |
+    |---|---|
+    | `effective_caller_id_name` | o **nome** que a central põe na chamada |
+    | `effective_caller_id_number` | o **número** que ela apresenta |
+
+    Sem elas, quem recebe vê só o que o softphone mandou — normalmente o número
+    cru. Com elas, a central reescreve a identificação quando cria a perna B
+    (aquela segunda chamada da lição 4 do operador). É por isso que a prova
+    disso não está no arquivo: está no `From:` da perna B, no trace.
+
+  anatomia:
+    - linha: "printf %s \"1050:127.0.0.1:exemplo\" | md5sum"
+      partes:
+        - trecho: "printf %s"
+          papel: comando
+          explica: "imprime o texto EXATAMENTE, sem acrescentar quebra de linha — que entraria no resumo e o mudaria"
+        - trecho: "\"1050:127.0.0.1:exemplo\""
+          papel: argumento
+          explica: "os três pedaços na ordem fixa, colados por dois-pontos: usuário, realm, senha"
+        - trecho: "|"
+          papel: operador
+          explica: "manda o texto para o comando seguinte em vez de para a tela"
+        - trecho: "md5sum"
+          papel: comando
+          explica: "calcula o resumo; ele imprime o hash seguido de um `-`, que é o nome da entrada — o `-` NÃO faz parte do hash"
+
+  demonstracao:
+    - comando: "devlab-pbx cli \"user_data 1050@127.0.0.1 param password\""
+      saida: |-2
+        devlab
+      nota: "O problema, em uma linha: a senha do ramal está em claro, e a central a devolve a quem perguntar. Esse é o estado que a lição vem desfazer."
+    - comando: "devlab-pbx cli \"global_getvar domain\""
+      saida: |-2
+        127.0.0.1
+      nota: "O **realm** desta central — o segundo pedaço do hash. Não invente: pergunte. Num PBX de produção ele costuma ser o domínio da empresa, e é o que entra aqui."
+    - comando: "printf %s \"1050:127.0.0.1:exemplo\" | md5sum"
+      saida: |-2
+        e2498ea61d4c02d698846e1ab1723eb5  -
+      nota: "O cálculo do `a1-hash` para a senha `exemplo`: os três pedaços colados por dois-pontos. O `-` no fim é o nome da entrada que o md5sum leu, e **não** faz parte do valor — copiar ele junto é o erro mais comum aqui."
+    - comando: "devlab-ramal 1050 --senha nao-e-essa"
+      saida: |-2
+        ramal 1050: registrando em 127.0.0.1 (porta local 6050)...
+        --- ramal 1050 ---
+        registro=falhou
+        log completo: /var/lib/devlab/ramal-1050.log
+      nota: "Com hash ou com senha em claro, quem não prova a senha certa não entra. Guardar o resumo não afrouxa nada — muda só o que a central tem no disco."
+    - comando: "devlab-pbx cli \"user_data 1000@127.0.0.1 var effective_caller_id_name\""
+      saida: |-2
+        Extension 1000
+      nota: "A segunda metade da lição. O 1000 veio da caixa com nome de exibição; o seu 1050 não tem nenhum — e é por isso que quem recebe uma chamada dele vê só o número."
+    - comando: "devlab-ramal 1050 --discar 1000 --duracao 3"
+      saida: |-2
+        ramal 1050: registrando em 127.0.0.1 (porta local 6050)...
+        --- ramal 1050 ---
+        registro=ok
+        chamada=atendida
+        motivo_do_fim=200 (OK)
+        log completo: /var/lib/devlab/ramal-1050.log
+      nota: "Uma chamada de teste, com o trace já ligado por este lab. Ela completa — o que interessa aqui não é o resultado, é o que ela deixou gravado."
+    - comando: "grep -oE \"From: [^;]+\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sort -u"
+      saida: |-2
+        From: "1050" <sip:1050@127.0.0.1>
+        From: <sip:1000@127.0.0.1>
+        From: <sip:1050@127.0.0.1>
+        From: sip:1050@127.0.0.1
+      nota: "O `From:` de cada mensagem, sem a etiqueta que muda a cada chamada. A linha com aspas é a perna B — a que a central criou — e é ali que a identificação aparece para quem recebe. Repare **no que está escrito entre as aspas**: o número, porque o 1050 não tem nome declarado. É essa linha que a sua tarefa vai mudar."
+
+  pratica_guiada:
+    - instrucao: "Pergunte à central qual é o realm dela."
+      modelo: "devlab-pbx cli \"____ domain\""
+      resposta: "devlab-pbx cli \"global_getvar domain\""
+    - instrucao: "Calcule o a1-hash do ramal 1050 com a senha `girassol`."
+      modelo: "printf %s \"1050:____:girassol\" | md5sum"
+      resposta: "printf %s \"1050:127.0.0.1:girassol\" | md5sum"
+    - instrucao: "Confira, pela central, qual credencial ela guarda para o 1050."
+      modelo: "devlab-pbx cli \"user_data 1050@127.0.0.1 param ____\""
+      resposta: "devlab-pbx cli \"user_data 1050@127.0.0.1 param a1-hash\""
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Uma central em produção muda de domínio, de `pbx.local` para `voip.empresa.com.br`. Ninguém tocou em senha nenhuma. Na manhã seguinte, todos os ramais que usam `a1-hash` param de registrar — e os que usam senha em claro continuam funcionando. Por quê?"
+      resposta: |
+        Porque **o realm está dentro do hash**. O resumo guardado foi calculado
+        com `pbx.local` no meio; com o domínio novo, a conta que a central faz
+        para conferir dá outro número, e nenhuma senha do mundo bate.
+
+        Os ramais com senha em claro sobrevivem porque ali a central recalcula
+        tudo na hora, com o realm novo — ela tem a senha.
+
+        É o mesmo defeito que aparece do lado de quem só observa como um `403`
+        com a senha certa. Do lado de quem configura, a leitura é outra: o
+        `a1-hash` amarra a credencial ao domínio, e mudar de domínio é
+        recalcular todos.
+    - tipo: predicao
+      pergunta: "Você deixa no arquivo o `a1-hash` E o `password` antigo, para não perder o valor anterior. O que acontece?"
+      resposta: |
+        Você guardou a senha em claro. O objetivo da troca era exatamente **não
+        ter** esse valor no arquivo — manter os dois entrega de volta tudo o
+        que o hash protegia, com a agravante de parecer resolvido.
+
+        Se precisar guardar o valor antigo em algum lugar, o lugar não é o
+        arquivo de configuração.
+    - tipo: transferencia
+      pergunta: "Quem tem o `a1-hash` de um ramal, mas não a senha, consegue registrar esse ramal?"
+      resposta: |
+        **Consegue.** E é a limitação honesta deste esquema: o hash não é a
+        senha, mas é tudo o que o protocolo exige para provar a identidade —
+        quem o tem responde ao desafio sem nunca descobrir a senha.
+
+        Ou seja: `a1-hash` protege a senha **do usuário** (que provavelmente a
+        repete em outros lugares), não protege o **ramal**. Um arquivo de
+        directory vazado continua sendo um incidente; deixa de ser um incidente
+        de senha reutilizada. Vale a pena, e não é blindagem.
+
+objetivo_md: |
+  O ramal 1050 está no ar com a senha em claro no directory, e sem nome de
+  exibição — quem recebe uma chamada dele vê só o número.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `global_getvar domain` | o realm desta central, que entra no meio do hash |
+  | `printf %s "usuário:realm:senha" \| md5sum` | calcula o `a1-hash` |
+  | `<param name="a1-hash" value="…"/>` | guarda o resumo no lugar da senha |
+  | `effective_caller_id_name` | o nome que a central apresenta na chamada |
+  | `user_data … param a1-hash` | o que a central guarda, perguntado a ela |
+
+  ### Sua tarefa
+
+  No arquivo `/usr/local/freeswitch/etc/freeswitch/directory/default/1050.xml`:
+
+  1. Troque a senha em claro pelo **`a1-hash`** correspondente à senha
+     **`girassol`**. O `password` tem de sair do arquivo — não fique com os
+     dois.
+  2. Dê ao 1050 o nome de exibição **`Suporte N1`**.
+  3. Aplique, e prove ligando para o **1000** (que está no ar atendendo): o
+     nome tem de aparecer no `From:` da perna que a central cria.
+
+verificar:
+  - descricao: "o arquivo guarda a1-hash e não guarda mais a senha em claro"
+    script: |
+      #!/bin/bash
+      ARQ=/usr/local/freeswitch/etc/freeswitch/directory/default/1050.xml
+      if ! python3 -c 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$ARQ" 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"o 1050.xml nao e um XML bem formado","dica_diagnostica":"alguma tag nao fechou; a central recusa o documento inteiro e segue com o anterior"}'
+        exit 1
+      fi
+      if ! grep -q 'a1-hash' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao tem nenhum param a1-hash","dica_diagnostica":"troque o <param name=\"password\"> por <param name=\"a1-hash\"> com o resumo calculado"}'
+        exit 1
+      fi
+      if grep -qE '<param[^>]*name="password"' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o param password continua no arquivo","dica_diagnostica":"guardar os dois devolve em claro exatamente o que o hash veio esconder: apague a linha do password"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "a central guarda o hash certo para a senha girassol"
+    script: |
+      #!/bin/bash
+      # O oraculo e a config VIVA: com XML quebrado o disco mostra o hash novo
+      # e a central segue com o anterior (decisao 50 em docs/DESIGN-PBX.md).
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      ESPERADO=$(printf %s "1050:127.0.0.1:girassol" | md5sum | cut -d' ' -f1)
+      VIVO=$($CLI -x "user_data 1050@127.0.0.1 param a1-hash" 2>/dev/null | tr -d '\r')
+      if [ -z "$VIVO" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a central nao tem a1-hash nenhum para o 1050","dica_diagnostica":"o arquivo mudou mas a central ainda nao releu a arvore — falta o reloadxml"}'
+        exit 1
+      fi
+      if [ "$VIVO" != "$ESPERADO" ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o hash vivo nao corresponde a md5(1050:127.0.0.1:girassol)\",\"dica_diagnostica\":\"confira tres coisas: o realm no meio (pergunte com global_getvar domain), que a senha e girassol, e que voce nao copiou o ' -' que o md5sum imprime depois do hash\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o ramal registra com girassol e é recusado com outra senha"
+    script: |
+      #!/bin/bash
+      if ! devlab-ramal 1050 --senha girassol --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o softphone nao registrou com a senha girassol","dica_diagnostica":"o hash guardado nao corresponde a essa senha; recalcule com o realm que a central declara"}'
+        exit 1
+      fi
+      if devlab-ramal 1050 --senha nao-e-essa --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o ramal aceitou uma senha errada","dica_diagnostica":"isso nao deveria acontecer com a1-hash; confira se sobrou algum param password no arquivo"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o nome Suporte N1 aparece no From da chamada para o 1000"
+    script: |
+      #!/bin/bash
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      NOME=$($CLI -x "user_data 1050@127.0.0.1 var effective_caller_id_name" 2>/dev/null | tr -d '\r')
+      if [ "$NOME" != "Suporte N1" ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o nome de exibicao vivo do 1050 e '$NOME'; a tarefa pede 'Suporte N1'\",\"dica_diagnostica\":\"a variavel e effective_caller_id_name, dentro do bloco <variables>\"}"
+        exit 1
+      fi
+      # A prova de que a variavel VIAJA, e nao so existe: o From da perna B.
+      $CLI -x "sofia global siptrace on" >/dev/null 2>&1
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      : > "$L"
+      devlab-ramal 1050 --senha girassol --discar 1000 --duracao 3 --silencioso >/dev/null 2>&1
+      if ! grep -q 'From: "Suporte N1" <sip:1050@' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada de teste nao levou o nome no From","dica_diagnostica":"o 1000 precisa estar no ar atendendo e a chamada precisa completar; se o registro falhou, o nome nunca chega a viajar"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import hashlib, pathlib
+  hash_a1 = hashlib.md5(b'1050:127.0.0.1:girassol').hexdigest()
+  pathlib.Path(
+      '/usr/local/freeswitch/etc/freeswitch/directory/default/1050.xml'
+  ).write_text(f'''<include>
+    <user id="1050">
+      <params>
+        <param name="a1-hash" value="{hash_a1}"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="default"/>
+        <variable name="effective_caller_id_name" value="Suporte N1"/>
+        <variable name="effective_caller_id_number" value="1050"/>
+      </variables>
+    </user>
+  </include>
+  ''')
+  PY
+  devlab-pbx cli "reloadxml"
+
+dicas:
+  - "O hash tem três pedaços na ordem `usuário:realm:senha`. O realm você não adivinha: `devlab-pbx cli \"global_getvar domain\"`."
+  - "O `md5sum` imprime o hash, dois espaços e um `-`. Só o hash entra no `value=` — o resto é o nome da entrada que ele leu."
+  - "Depois de salvar e recarregar, confira pela central: `devlab-pbx cli \"user_data 1050@127.0.0.1 param a1-hash\"`. Se vier vazio, o documento não carregou."
+
+erros_comuns:
+  - match: "registro=falhou"
+    digita: "devlab-ramal 1050 --senha girassol"
+    mensagem: "--- ramal 1050 ---\nregistro=falhou"
+    causa: "o hash guardado não corresponde a `md5(1050:realm:girassol)` — quase sempre o realm errado no meio, ou o `-` do md5sum copiado junto"
+    conserto: "recalcule com o realm que a central declara e copie só os 32 caracteres do hash"
+    categoria: conceitual
+  - match: "-ERR no reply"
+    digita: "devlab-pbx cli \"user_data 1050@127.0.0.1 param a1-hash\""
+    mensagem: "-ERR no reply"
+    causa: "a central não tem esse parâmetro para esse usuário — ou o documento novo não carregou, ou o nome do param está escrito diferente"
+    conserto: "devlab-pbx cli \"reloadxml\" e confira que o atributo é exatamente `name=\"a1-hash\"`, com o hífen"
+    categoria: config_nao_recarregada
+
+cards_revisao:
+  - a1-hash-guarda-a-prova-nao-a-senha
+  - variaveis-do-usuario-entram-na-chamada
+  - pergunte-ao-pbx-o-que-esta-vivo

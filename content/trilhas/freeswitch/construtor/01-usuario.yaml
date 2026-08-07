@@ -1,0 +1,395 @@
+id: pbx-con-01-usuario
+trilha: freeswitch
+nivel: construtor
+ordem: 1
+titulo: "O directory: criar um ramal que não existia"
+capacidade: "Sei criar um usuário no directory e provar pelo próprio PBX que ele está vivo."
+xp: 40
+prereqs: [pbx-op-05-capstone]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # O molde nasce no lugar DEFINITIVO, e não em /root, de propósito: mover
+  # arquivo exigiria um comando da Fase 0, que esta trilha não tem como
+  # pré-requisito. Ele é XML bem formado e não define usuário nenhum — então o
+  # PBX carrega a árvore inteira sem reclamar e `user_exists 1050` responde
+  # `false`. É o estado de partida honesto: o arquivo existe, o ramal não.
+  setup: |
+    devlab-pbx iniciar >/dev/null
+    C=/usr/local/freeswitch/etc/freeswitch
+    cat > "$C/directory/default/1050.xml" <<'XML'
+    <include>
+
+      <!-- COMPLETE AQUI: o bloco <user> do ramal 1050.
+
+           Ele precisa de, nesta ordem:
+
+             <user id="1050">
+               <params>      um <param> chamado password
+               <variables>   três <variable>: user_context,
+                             effective_caller_id_name
+                             e effective_caller_id_number
+
+           O vizinho 1000.xml, nesta mesma pasta, é um usuário completo e
+           funcionando — leia-o antes de escrever.  -->
+
+    </include>
+    XML
+
+ensina:
+  conceitos:
+    - id: directory-diz-quem-entra
+      titulo: "o directory é a lista de quem pode entrar na central — quem tem conta e qual senha ele prova; não tem nada a ver com para onde a chamada vai"
+    - id: config-e-um-documento-montado
+      titulo: "a config não é um arquivo: é um documento montado a partir de muitos, e `<include>` é o embrulho que permite a um arquivo novo entrar sem ninguém editar o antigo"
+    - id: pergunte-ao-pbx-o-que-esta-vivo
+      titulo: "o disco é o plano, a memória do PBX é o fato: `user_exists` e `user_data` respondem sobre a config VIVA, que é a que vai atender a chamada"
+  comandos: []
+
+ensino:
+  gancho: |
+    Até aqui você **operou** uma central que outra pessoa configurou: subiu,
+    interrogou, registrou os ramais que já existiam, leu o trace e fechou um
+    chamado. Todos os ramais que você usou — 1000 a 1019 — vieram prontos na
+    caixa.
+
+    Chega o pedido mais banal do mundo do suporte: *"entrou gente nova, cria o
+    ramal 1050 pra ela"*.
+
+    É a primeira vez que você vai **escrever** configuração. E o susto é que o
+    lugar onde se cria um ramal não é onde a maioria das pessoas procura: não
+    tem nada a ver com números discáveis nem com roteamento. Ramal é conta de
+    acesso. Está no **directory**.
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar no directory onde mora um usuário e o que cada bloco do arquivo declara"
+    - verbo: construir
+      texto: "criar um usuário novo escrevendo o XML dele"
+    - verbo: executar
+      texto: "fazer o PBX vivo carregar o usuário novo e registrar um softphone nele"
+    - verbo: explicar
+      texto: "explicar por que perguntar ao PBX vale mais do que reler o arquivo que você acabou de salvar"
+
+  modelo_mental: |
+    Um PBX responde a **duas perguntas diferentes**, e elas moram em lugares
+    diferentes:
+
+    | pergunta | quem responde | o que é |
+    |---|---|---|
+    | *quem é você, e prova* | **directory** | a lista de contas: id, senha, variáveis |
+    | *para onde vai essa chamada* | **dialplan** | o roteiro por número discado |
+
+    Confundir as duas é o erro nº 1 de quem começa. Criar um usuário **não**
+    torna um número discável, e criar uma regra de dialplan **não** cria conta
+    para ninguém. Nesta lição você mexe só na primeira; a segunda é a lição 3.
+
+    ### O arquivo de um usuário
+
+    ```xml
+    <include>
+      <user id="1050">
+        <params>
+          <param name="password" value="devlab"/>
+        </params>
+        <variables>
+          <variable name="user_context" value="default"/>
+          <variable name="effective_caller_id_name" value="Recepcao"/>
+          <variable name="effective_caller_id_number" value="1050"/>
+        </variables>
+      </user>
+    </include>
+    ```
+
+    Três camadas, e cada uma responde uma coisa:
+
+    - **`<user id="1050">`** — o nome da conta. É o que o softphone manda como
+      usuário, e é o que aparece na tabela de registro.
+    - **`<params>`** — o que a central **exige** dele. `password` é a senha que
+      o softphone vai ter de provar.
+    - **`<variables>`** — o que a central **sabe** sobre ele, e que passa a
+      valer em toda chamada dele. `user_context` é a mais importante: diz em
+      qual contexto do dialplan as chamadas desse usuário entram. Guarde essa
+      palavra.
+
+    E o `<include>` de fora? A configuração do FreeSWITCH **não é um arquivo**:
+    é um documento único, montado na hora a partir de dezenas. A pasta
+    `directory/default/` inteira é puxada por um `*.xml`, e `<include>` é o
+    embrulho que permite ao seu arquivo entrar sem que ninguém precise editar
+    o de ninguém. Por isso criar um ramal é criar um arquivo — não é achar
+    onde encaixar uma linha.
+
+    ### Salvar não é aplicar
+
+    O arquivo salvo é um plano no disco. O PBX que está de pé segue com o que
+    carregou quando subiu. `reloadxml` é o que faz ele reler a árvore — você já
+    conhece isso da lição 2 do operador.
+
+    E depois de recarregar, **não releia o arquivo para conferir**: pergunte ao
+    PBX. Ele responde sobre o que tem VIVO na memória, que é o que vai atender
+    a chamada:
+
+    | pergunta | resposta |
+    |---|---|
+    | `user_exists id 1050 127.0.0.1` | `true` ou `false` |
+    | `user_data 1050@127.0.0.1 param password` | a senha que ele vai exigir |
+    | `user_data 1050@127.0.0.1 var user_context` | o contexto em que ele entra |
+
+    A diferença não é preciosismo. O arquivo no disco é o que você quis; a
+    resposta do PBX é o que ele entendeu.
+
+  anatomia:
+    - linha: "devlab-pbx cli \"user_data 1050@127.0.0.1 var user_context\""
+      partes:
+        - trecho: "devlab-pbx cli"
+          papel: comando
+          explica: "manda uma linha para o console da central e imprime a resposta"
+        - trecho: "user_data"
+          papel: argumento
+          explica: "a pergunta: 'o que você sabe sobre este usuário?' — respondida a partir da config VIVA"
+        - trecho: "1050@127.0.0.1"
+          papel: argumento
+          explica: "o usuário e o domínio dele; no lab o domínio é o próprio endereço da central"
+        - trecho: "var"
+          papel: argumento
+          explica: "onde procurar: `var` olha o bloco `<variables>`; `param` olharia o `<params>`"
+        - trecho: "user_context"
+          papel: argumento
+          explica: "o nome do que se quer saber — aqui, em qual contexto do dialplan as chamadas dele entram"
+
+  demonstracao:
+    - comando: "devlab-pbx cli \"user_exists id 1000 127.0.0.1\""
+      saida: |-2
+        true
+      nota: "A pergunta mais direta que se pode fazer sobre uma conta. O 1000 veio pronto na caixa e a central o conhece."
+    - comando: "devlab-pbx cli \"user_exists id 1050 127.0.0.1\""
+      saida: |-2
+        false
+      nota: "E o 1050, que ninguém criou ainda, não existe. Este é o estado de partida da sua tarefa — e é também o único jeito honesto de saber se você terminou."
+    - comando: "grep -v \"^ *$\" /usr/local/freeswitch/etc/freeswitch/directory/default/1000.xml"
+      saida: |-2
+        <include>
+          <user id="1000">
+            <params>
+              <param name="password" value="$${default_password}"/>
+              <param name="vm-password" value="1000"/>
+            </params>
+            <variables>
+              <variable name="toll_allow" value="domestic,international,local"/>
+              <variable name="accountcode" value="1000"/>
+              <variable name="user_context" value="default"/>
+              <variable name="effective_caller_id_name" value="Extension 1000"/>
+              <variable name="effective_caller_id_number" value="1000"/>
+              <variable name="outbound_caller_id_name" value="$${outbound_caller_name}"/>
+              <variable name="outbound_caller_id_number" value="$${outbound_caller_id}"/>
+              <variable name="callgroup" value="techsupport"/>
+            </variables>
+          </user>
+        </include>
+      nota: "O usuário completo, do vizinho de porta. É o molde que você tem à mão: `<user id>` com `<params>` (o que a central exige) e `<variables>` (o que ela sabe). O 1000 traz variáveis a mais do que você vai precisar — repare que `user_context` está entre elas."
+    - comando: "devlab-pbx cli \"user_data 1000@127.0.0.1 param password\""
+      saida: |-2
+        devlab
+      nota: "O arquivo diz `$${default_password}`; a central responde o valor já **resolvido**. É a diferença entre ler o plano e perguntar ao processo — a senha que ela vai de fato exigir é esta."
+    - comando: "devlab-pbx cli \"user_data 1000@127.0.0.1 var user_context\""
+      saida: |-2
+        default
+      nota: "A variável que liga o usuário ao dialplan: as chamadas do 1000 entram no contexto `default`. Você ainda não escreveu dialplan nenhum, então é isso que o seu 1050 também vai usar por enquanto."
+    - comando: "devlab-pbx cli \"reloadxml\""
+      saida: |-2
+        +OK [Success]
+      nota: "O passo que falta entre salvar e valer: a central relê a árvore inteira do disco. Sem ele, o arquivo novo é um plano que ninguém leu."
+
+  pratica_guiada:
+    - instrucao: "Pergunte à central se o ramal 1007 existe."
+      modelo: "devlab-pbx cli \"user_exists ____ 1007 127.0.0.1\""
+      resposta: "devlab-pbx cli \"user_exists id 1007 127.0.0.1\""
+    - instrucao: "Descubra a senha que a central vai exigir do ramal 1007."
+      modelo: "devlab-pbx cli \"user_data 1007@127.0.0.1 ____ password\""
+      resposta: "devlab-pbx cli \"user_data 1007@127.0.0.1 param password\""
+    - instrucao: "Mande a central reler a árvore de configuração."
+      modelo: "devlab-pbx cli \"____\""
+      resposta: "devlab-pbx cli \"reloadxml\""
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você cria o usuário 1050 no directory, recarrega, e o ramal registra. Um colega então disca 1050 e a chamada não completa. O que faltou?"
+      resposta: |
+        Faltou o **dialplan**. Criar o usuário deu a ele uma conta para
+        entrar — não fez o número 1050 ser discável.
+
+        No lab as duas coisas coincidem por acaso, porque o contexto `default`
+        que veio na caixa já tem uma regra para a faixa 1000–1019. Fora dela,
+        um usuário 2500 registra perfeitamente e ninguém consegue ligar para
+        ele: **directory e dialplan são duas perguntas**, e você só respondeu
+        a primeira.
+    - tipo: diagnostico
+      pergunta: "Você edita o arquivo, salva, recarrega — e `user_exists` responde `false`. O arquivo está aberto na sua frente, com o `<user id=\"1050\">` bem visível. O que isso te diz?"
+      resposta: |
+        Que a central **não conseguiu carregar o que você escreveu**. Ver o
+        texto na tela prova que o disco tem o que você quis; `user_exists`
+        responde sobre o que ela tem vivo.
+
+        A causa quase sempre é XML mal formado — uma tag que não fechou. E aí
+        vem a parte cruel, que é material da lição 3: o PBX **rejeita o
+        documento novo inteiro e continua com o antigo**, sem derrubar nada.
+        Tudo segue funcionando, e a sua mudança não existe.
+    - tipo: transferencia
+      pergunta: "Numa central de produção com 400 ramais, por que criar cada usuário num arquivo próprio é melhor do que manter os 400 num arquivo só?"
+      resposta: |
+        Porque o raio do erro fica do tamanho de um ramal. Um arquivo com 400
+        usuários é 400 chances de uma tag mal fechada derrubar o carregamento
+        de **todos** — e o PBX não carrega "quase tudo": ou o documento monta,
+        ou ele fica com a versão anterior.
+
+        Some-se o resto do dia a dia: dois técnicos mexem em ramais diferentes
+        sem se atropelar, o histórico diz quem criou o quê, e apagar um ramal
+        é apagar um arquivo. É por isso que a pasta `directory/default/` é uma
+        pasta, e não um arquivo.
+
+objetivo_md: |
+  Entrou gente nova e você precisa criar o **ramal 1050**.
+
+  O arquivo dele já está no lugar certo, vazio, esperando:
+  `/usr/local/freeswitch/etc/freeswitch/directory/default/1050.xml`. Abra-o com
+  `nano` (ou `vim`) e leia os comentários — eles listam o que falta. O vizinho
+  `1000.xml`, na mesma pasta, é um usuário completo e funcionando.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `<user id="…">` | o nome da conta |
+  | `<params>` → `password` | a senha que a central vai exigir |
+  | `<variables>` → `user_context` | em qual contexto do dialplan as chamadas dele entram |
+  | `devlab-pbx cli "reloadxml"` | faz o PBX vivo reler a árvore |
+  | `devlab-pbx cli "user_exists id …"` | a pergunta que diz se deu certo |
+
+  ### Sua tarefa
+
+  1. Complete o `1050.xml` com o usuário **1050**, senha **`devlab`**,
+     `user_context` igual ao do 1000, e o nome de exibição
+     **`Recepcao`** (sem cedilha nem acento — é config, não texto de tela).
+  2. Faça a central carregar o que você escreveu.
+  3. Prove que funcionou registrando um softphone nesse ramal.
+
+verificar:
+  - descricao: "o arquivo 1050.xml foi completado e é XML bem formado"
+    script: |
+      #!/bin/bash
+      ARQ=/usr/local/freeswitch/etc/freeswitch/directory/default/1050.xml
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo 1050.xml sumiu","dica_diagnostica":"ele nasce com a licao em directory/default/1050.xml; se voce o apagou, resete a licao"}'
+        exit 1
+      fi
+      if grep -q 'COMPLETE AQUI' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o molde ainda esta com o comentario COMPLETE AQUI","dica_diagnostica":"troque o comentario pelo bloco <user id=\"1050\"> — o vizinho 1000.xml mostra a forma"}'
+        exit 1
+      fi
+      if ! python3 -c 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$ARQ" 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao e um XML bem formado","dica_diagnostica":"alguma tag nao fechou; toda <user> precisa de </user>, e o <include> de fora tambem fecha"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o PBX vivo conhece o usuário 1050"
+    script: |
+      #!/bin/bash
+      # O oraculo e o PBX, nao o arquivo: com XML quebrado o disco mostra o
+      # usuario e a memoria da central segue com a arvore anterior. Ver a
+      # decisao 50 em docs/DESIGN-PBX.md.
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      EXISTE=$($CLI -x "user_exists id 1050 127.0.0.1" 2>/dev/null | tr -d '\r')
+      if [ "$EXISTE" != "true" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a central ainda nao conhece o usuario 1050","dica_diagnostica":"salvar o arquivo nao aplica nada: falta a central reler a arvore. E se voce ja recarregou, o XML pode nao ter carregado — confira que o id do <user> e exatamente 1050"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o 1050 tem senha devlab, o contexto do 1000 e o nome Recepcao"
+    script: |
+      #!/bin/bash
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      pergunta() { $CLI -x "user_data 1050@127.0.0.1 $1 $2" 2>/dev/null | tr -d '\r'; }
+      SENHA=$(pergunta param password)
+      if [ "$SENHA" != "devlab" ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a senha que a central exige do 1050 e '$SENHA', nao 'devlab'\",\"dica_diagnostica\":\"o <param name=\\\"password\\\"> precisa valer devlab; se voce copiou do 1000.xml, ele usa a variavel global e nao o valor literal\"}"
+        exit 1
+      fi
+      CTX=$(pergunta var user_context)
+      if [ "$CTX" != "default" ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o user_context do 1050 e '$CTX'; o do 1000 e 'default'\",\"dica_diagnostica\":\"pergunte o do 1000 com user_data 1000@127.0.0.1 var user_context e use o mesmo\"}"
+        exit 1
+      fi
+      NOME=$(pergunta var effective_caller_id_name)
+      if [ "$NOME" != "Recepcao" ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o nome de exibicao do 1050 e '$NOME'; a tarefa pede 'Recepcao'\",\"dica_diagnostica\":\"a variavel e effective_caller_id_name, e o valor e Recepcao sem acento\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "um softphone registra no ramal 1050"
+    script: |
+      #!/bin/bash
+      # Registro e um fato do PBX (decisao 46): quem responde e a tabela do
+      # perfil, nao o log do softphone.
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      devlab-ramal 1050 --atender --silencioso >/dev/null 2>&1
+      RC=$?
+      REG=$($CLI -x "sofia status profile internal reg" 2>/dev/null | grep -c "^User:[[:space:]]*1050@")
+      devlab-ramal --parar 1050 >/dev/null 2>&1
+      if [ "$RC" != 0 ] || [ "${REG:-0}" -lt 1 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o softphone nao conseguiu registrar no ramal 1050","dica_diagnostica":"a conta existe mas a senha pode nao bater: o devlab-ramal usa devlab por padrao, e e essa que o <param name=\"password\"> precisa declarar"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import pathlib
+  arquivo = pathlib.Path(
+      '/usr/local/freeswitch/etc/freeswitch/directory/default/1050.xml')
+  arquivo.write_text('''<include>
+    <user id="1050">
+      <params>
+        <param name="password" value="devlab"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="default"/>
+        <variable name="effective_caller_id_name" value="Recepcao"/>
+        <variable name="effective_caller_id_number" value="1050"/>
+      </variables>
+    </user>
+  </include>
+  ''')
+  PY
+  devlab-pbx cli "reloadxml"
+
+dicas:
+  - "Ramal é conta, e conta mora no directory. O arquivo já está criado e no lugar: `directory/default/1050.xml` — falta o conteúdo, e o comentário dentro dele diz o que."
+  - "Abra o `1000.xml` da mesma pasta lado a lado: a forma é idêntica, muda o `id`, a senha (que ali é uma variável e no seu tem de ser o valor literal `devlab`) e o nome de exibição."
+  - "Depois de salvar, `devlab-pbx cli \"reloadxml\"` e então `devlab-pbx cli \"user_exists id 1050 127.0.0.1\"` — enquanto isso responder `false`, o que está vivo na central não é o que está no seu arquivo."
+
+erros_comuns:
+  - match: "user_exists id"
+    digita: "devlab-pbx cli \"user_exists id 1050 127.0.0.1\""
+    mensagem: "false"
+    causa: "o arquivo foi salvo mas a central ainda não releu a árvore — ou releu e recusou o XML"
+    conserto: "devlab-pbx cli \"reloadxml\" e pergunte de novo; se continuar `false`, o XML não está bem formado"
+    categoria: config_nao_recarregada
+  - match: "registro=falhou"
+    digita: "devlab-ramal 1050"
+    mensagem: "--- ramal 1050 ---\nregistro=falhou"
+    causa: "a conta existe, mas a senha que a central exige não é a que o softphone provou"
+    conserto: "devlab-pbx cli \"user_data 1050@127.0.0.1 param password\" mostra o que ela exige; o devlab-ramal prova `devlab` por padrão"
+    categoria: conceitual
+
+cards_revisao:
+  - directory-diz-quem-entra
+  - config-e-um-documento-montado
+  - pergunte-ao-pbx-o-que-esta-vivo

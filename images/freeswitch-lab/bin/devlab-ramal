@@ -41,6 +41,7 @@ uso: devlab-ramal <numero> [opções]
 
   --discar <destino>   liga para um número depois de registrar
   --duracao <s>        quanto tempo a chamada fica de pé (padrão: 10)
+  --digitos <seq>      digita estes dígitos (DTMF) depois de a chamada ser atendida
   --senha <senha>      senha do ramal (padrão: devlab)
   --atender            fica registrado e atende o que chegar
   --silencioso         não imprime o andamento
@@ -53,6 +54,7 @@ FIM
 numero=""
 destino=""
 duracao=10
+digitos=""
 senha=$SENHA_PADRAO
 atender=0
 silencioso=0
@@ -62,6 +64,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --discar)     destino="${2:-}"; shift 2 ;;
     --duracao)    duracao="${2:-}"; shift 2 ;;
+    --digitos)    digitos="${2:-}"; shift 2 ;;
     --senha)      senha="${2:-}"; shift 2 ;;
     --atender)    atender=1; shift ;;
     --silencioso) silencioso=1; shift ;;
@@ -158,6 +161,28 @@ esperar_registro() {
   return 1
 }
 
+# "A chamada já foi atendida?" — de novo pela boca do PBX, e pela mesma razão da
+# decisão 46: o log do softphone não é oráculo. `show channels` traz uma linha
+# CSV por canal vivo, com o destino discado e a coluna `callstate`; `ACTIVE` é o
+# estado em que o dialplan está executando ações, ou seja, depois do `answer`.
+#
+# Isto existe para o `--digitos`: mandar DTMF antes de o dialplan chegar ao
+# `play_and_get_digits` é jogar dígito no vazio, e um `sleep` chutado troca uma
+# corrida por outra — que era exatamente o defeito que este script veio matar.
+atendida() {
+  $CLI -x "show channels" 2>/dev/null | grep -qE ",${destino},.*,ACTIVE,"
+}
+
+esperar_atendida() {
+  local i=0
+  while [ $i -lt 200 ]; do
+    atendida && return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 1
+}
+
 # O roteiro que vai pelo stdin do pjsua. Ele roda em PARALELO ao softphone (é
 # um pipe), e é isso que lhe permite esperar por um fato que o pjsua ainda vai
 # produzir.
@@ -175,6 +200,14 @@ roteiro() {
   if [ -n "$destino" ]; then
     echo "m"
     echo "sip:$destino@$PBX"
+    if [ -n "$digitos" ]; then
+      # `#` abre o prompt de DTMF do pjsua e a sequência vem na linha seguinte,
+      # do mesmo jeito que `m` e a URL. Os dígitos saem como RFC 2833.
+      if esperar_atendida; then
+        echo "#"
+        echo "$digitos"
+      fi
+    fi
     sleep "$duracao"
     echo "h"
     sleep 1
@@ -195,8 +228,20 @@ diga "ramal $numero: registrando em $PBX (porta local $porta)..."
 # Ele está aqui para o ALUNO: sem isso o log do softphone fica vazio enquanto a
 # chamada acontece e só se materializa no fim, e um `tail -f` durante o
 # exercício não mostra nada.
+# `--no-vad` não é ajuste de qualidade — é o que torna a aplicação `record`
+# ensinável, e a razão é uma medição. Com o detector de silêncio LIGADO (o
+# padrão), o pjsua para de transmitir RTP assim que o `--null-audio` lhe entrega
+# silêncio digital, coisa de meio segundo. O que a central grava então não é a
+# chamada: uma chamada de 8 s produziu um arquivo de 0,58 s
+# (`record_seconds=0`), idêntico em três execuções — determinístico e errado. O
+# aluno pediria 4 segundos, receberia meio, e não teria como saber por quê.
+#
+# Com `--no-vad` o softphone transmite o tempo todo e a gravação tem a duração
+# pedida: 4 s pedidos, 4 s gravados. O que se grava continua sendo silêncio (não
+# há microfone num lab), então o que a lição cobra é a DURAÇÃO e o caminho do
+# arquivo — nunca o conteúdo sonoro.
 roteiro | stdbuf -oL pjsua \
-  --null-audio --no-tcp \
+  --null-audio --no-vad --no-tcp \
   --id "sip:$numero@$PBX" \
   --registrar "sip:$PBX" \
   --realm '*' --username "$numero" --password "$senha" \

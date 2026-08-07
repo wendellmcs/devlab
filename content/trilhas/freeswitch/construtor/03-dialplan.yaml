@@ -1,0 +1,410 @@
+id: pbx-con-03-dialplan
+trilha: freeswitch
+nivel: construtor
+ordem: 3
+titulo: "O dialplan: o roteiro que a central percorre em voz alta"
+capacidade: "Sei escrever uma extensão num contexto próprio e ler, no log, o roteiro que a central percorreu."
+xp: 40
+prereqs: [pbx-con-02-credenciais]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # O contexto do aluno nasce com UMA extensão pronta e funcionando (7000) e o
+  # lugar da dele marcado. Contexto próprio, e não `dialplan/default/`, é
+  # decisão medida: o contexto vanilla termina num catch-all que ATENDE
+  # qualquer número e toca música, então um erro de regex do aluno viraria
+  # "música de espera" em vez de `404` — decisão 49 em docs/DESIGN-PBX.md.
+  #
+  # O 1050 aponta para esse contexto, o que também é conteúdo: dentro dele o
+  # ramal não alcança mais o 1000, porque o contexto delimita o mundo visível.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    cat > "$C/dialplan/oficina.xml" <<'XML'
+    <include>
+      <context name="oficina">
+
+        <extension name="aviso">
+          <condition field="destination_number" expression="^7000$">
+            <action application="answer"/>
+            <action application="playback" data="ivr/ivr-hello.wav"/>
+            <action application="hangup"/>
+          </condition>
+        </extension>
+
+        <!-- COMPLETE AQUI: a extensão `recado`, para o número 7100.
+             Ela atende, toca ivr/ivr-one_moment_please.wav e desliga.
+             A de cima é o molde: mude o nome, o número e o áudio.  -->
+
+      </context>
+    </include>
+    XML
+    cat > "$C/directory/default/1050.xml" <<'XML'
+    <include>
+      <user id="1050">
+        <params>
+          <param name="password" value="devlab"/>
+        </params>
+        <variables>
+          <variable name="user_context" value="oficina"/>
+          <variable name="effective_caller_id_number" value="1050"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    devlab-pbx iniciar >/dev/null
+
+ensina:
+  conceitos:
+    - id: dialplan-e-roteiro-percorrido-em-ordem
+      titulo: "o dialplan não é uma tabela consultada pelo número: é uma lista percorrida de cima para baixo, e a PRIMEIRA condição que casa decide a chamada"
+    - id: contexto-delimita-o-mundo-do-usuario
+      titulo: "o contexto é o mundo discável de um usuário: ele só alcança o que o contexto dele roteia, e é o `user_context` do directory que os liga"
+    - id: reloadxml-recusa-e-fica-com-o-anterior
+      titulo: "XML mal formado não derruba a central: ela recusa o documento novo INTEIRO e continua com o anterior — tudo segue funcionando, e a sua mudança não existe"
+  comandos: []
+
+ensino:
+  gancho: |
+    Você já sabe criar quem entra. Falta o outro lado: **para onde a chamada
+    vai**.
+
+    E aqui vem a boa notícia desta lição: o FreeSWITCH **narra o que está
+    fazendo**. Enquanto percorre o roteiro, ele escreve no log cada extensão
+    que tentou, a expressão que comparou, se casou ou não, e cada ação que
+    executou. Diagnóstico de dialplan quase nunca é adivinhação — é leitura.
+
+    Você vai escrever uma regra de roteamento e, logo depois, ler a central
+    contando o que fez com ela.
+
+  objetivos:
+    - verbo: identificar
+      texto: "identificar num contexto as três camadas: extensão, condição e ações"
+    - verbo: construir
+      texto: "escrever uma extensão que atende, toca um áudio e desliga"
+    - verbo: diagnosticar
+      texto: "ler no log o percurso do dialplan e dizer por que uma chamada casou ou não"
+    - verbo: explicar
+      texto: "explicar por que um XML mal formado faz a central seguir funcionando como se nada tivesse mudado"
+
+  modelo_mental: |
+    Um contexto tem três camadas encaixadas, e cada uma responde uma pergunta:
+
+    ```xml
+    <context name="oficina">              <!-- o mundo discável -->
+      <extension name="aviso">            <!-- uma regra, com nome -->
+        <condition field="destination_number" expression="^7000$">
+          <action application="answer"/>  <!-- o que fazer, em ordem -->
+          <action application="playback" data="ivr/ivr-hello.wav"/>
+          <action application="hangup"/>
+        </condition>
+      </extension>
+    </context>
+    ```
+
+    | camada | pergunta |
+    |---|---|
+    | `<context>` | **onde** essa regra vale — qual mundo enxerga isso |
+    | `<extension>` | um nome para a regra; é o que aparece no log |
+    | `<condition>` | **quando** ela vale: um campo comparado com uma expressão |
+    | `<action>` | **o que fazer**, na ordem em que estão escritas |
+
+    A condição compara um campo do canal com uma **expressão regular**. O campo
+    mais comum é `destination_number` — o número discado — e a expressão
+    `^7000$` significa "exatamente 7000": o `^` prende no começo, o `$` no fim.
+    Sem eles, `7000` casaria também com `17000` e `70001`.
+
+    ### A ordem manda
+
+    O dialplan é **percorrido de cima para baixo**. A central tenta cada
+    extensão na ordem em que aparece, e **para na primeira que casa**. Duas
+    extensões para o mesmo número não são um conflito que alguém avisa: a de
+    cima ganha, a de baixo nunca roda, e o log mostra isso sem drama.
+
+    E é literal: o log traz uma linha por extensão tentada.
+
+    ```
+    parsing [oficina->aviso] continue=false
+    Regex (PASS) [aviso] destination_number(7000) =~ /^7000$/ break=on-false
+    Action answer()
+    ```
+
+    `parsing` é "vou tentar esta"; `Regex (PASS)` ou `(FAIL)` é o veredito da
+    comparação, **com o valor real ao lado da expressão**; `Action` é cada
+    coisa executada. Quando nenhuma casa, a central não tem para onde mandar a
+    chamada e responde **`404 Not Found`**, com `NO_ROUTE_DESTINATION` no
+    bilhete.
+
+    ### O contexto é uma cerca
+
+    O `user_context` do directory diz em qual contexto as chamadas daquele
+    usuário entram — e ele **só alcança o que aquele contexto roteia**. O 1050
+    deste lab está no `oficina`: os ramais 1000–1019 continuam existindo, e ele
+    não consegue ligar para nenhum, porque quem roteava aquela faixa era o
+    contexto `default`. Não é defeito. É a cerca funcionando, e é assim que se
+    separa um cliente do outro na mesma central.
+
+    ### O `reloadxml` que aceita sem carregar
+
+    Esta é a armadilha mais cara do nível, e o sintoma dela é **nada
+    acontecer**. Com uma tag mal fechada:
+
+    ```
+    devlab-pbx cli "reloadxml"
+    +OK [[error near line 6888]: unexpected closing tag </context>]
+    ```
+
+    Repare: começa com **`+OK`**. E o mais importante — a central **rejeita o
+    documento novo inteiro e continua com o anterior**. Nada cai, nada para de
+    funcionar, e a sua mudança simplesmente não existe. Você edita, recarrega,
+    testa, vê o comportamento antigo e conclui que escreveu a regra errada.
+
+    Duas defesas: **leia a resposta inteira do `reloadxml`**, não a primeira
+    palavra; e confirme pelo comportamento ou perguntando à central, nunca
+    relendo o arquivo. E não procure a "linha 6888" no seu arquivo — ela é do
+    documento montado com todos os outros.
+
+  anatomia:
+    - linha: "grep -oE \"Dialplan: .*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sed \"s/.*1050@127.0.0.1 //\""
+      partes:
+        - trecho: "grep"
+          papel: comando
+          explica: "garimpa o log; toda linha do percurso do dialplan começa com `Dialplan:`"
+        - trecho: "-oE"
+          papel: opcao
+          explica: "imprime só o trecho que casou (-o), com regex estendida (-E)"
+        - trecho: "\"Dialplan: .*\""
+          papel: argumento
+          explica: "o marcador dessas linhas, e todo o resto delas"
+        - trecho: "|"
+          papel: operador
+          explica: "manda o resultado para o comando seguinte"
+        - trecho: "sed \"s/.*1050@127.0.0.1 //\""
+          papel: argumento
+          explica: "corta o nome do canal, que se repete em toda linha e empurra o que interessa para fora da tela"
+
+  demonstracao:
+    - comando: "devlab-pbx cli \"user_data 1050@127.0.0.1 var user_context\""
+      saida: |-2
+        oficina
+      nota: "O ramal 1050 vive no contexto `oficina` — é ali que as chamadas dele entram. Este é o fio que liga a lição 1 a esta."
+    - comando: "devlab-ramal 1050 --discar 7000 --duracao 6"
+      saida: |-2
+        ramal 1050: registrando em 127.0.0.1 (porta local 6050)...
+        --- ramal 1050 ---
+        registro=ok
+        chamada=atendida
+        motivo_do_fim=200 (Normal call clearing)
+        log completo: /var/lib/devlab/ramal-1050.log
+      nota: "A extensão que já veio pronta no seu contexto. `chamada=atendida`, e repare no motivo: **`Normal call clearing`** — quem desligou foi a central, executando o `hangup` do roteiro. Quando quem desliga é o softphone, o motivo é `200 (OK)`."
+    - comando: "grep -oE \"Dialplan: .*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sed \"s/.*1050@127.0.0.1 //\""
+      saida: |-2
+        parsing [oficina->aviso] continue=false
+        Regex (PASS) [aviso] destination_number(7000) =~ /^7000$/ break=on-false
+        Action answer()
+        Action playback(ivr/ivr-hello.wav)
+        Action hangup()
+      nota: "O roteiro inteiro, narrado pela central: a extensão tentada, a expressão comparada **com o número real ao lado**, e cada ação na ordem. Cinco linhas contam toda a chamada — é isto que você lê quando o roteamento não faz o que você esperava."
+    - comando: "devlab-ramal 1050 --discar 7100 --duracao 6"
+      saida: |-2
+        ramal 1050: registrando em 127.0.0.1 (porta local 6050)...
+        --- ramal 1050 ---
+        registro=ok
+        chamada=nao_atendida
+        motivo_do_fim=404 (Not Found)
+        log completo: /var/lib/devlab/ramal-1050.log
+      nota: "O número da sua tarefa, antes de você escrevê-la. `404 (Not Found)`: nenhuma extensão casou, e a central não inventa destino."
+    - comando: "grep -oE \"Dialplan: .*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sed \"s/.*1050@127.0.0.1 //\" | grep 7100"
+      saida: |-2
+        Regex (FAIL) [aviso] destination_number(7100) =~ /^7000$/ break=on-false
+      nota: "A mesma leitura, agora da chamada que falhou: `Regex (FAIL)`, com `destination_number(7100)` comparado a `/^7000$/`. O log te dá o valor E a expressão lado a lado — quase todo erro de regex se resolve olhando estas duas coisas juntas."
+    - comando: "cut -d, -f3,4,10 /usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv"
+      saida: |-2
+        "7000","oficina","NORMAL_CLEARING"
+        "7100","oficina","NO_ROUTE_DESTINATION"
+      nota: "Os dois bilhetes, lado a lado: número discado, **contexto que roteou** e causa do fim. `NO_ROUTE_DESTINATION` é o nome oficial de 'nenhuma extensão casou' — e a coluna do contexto é o que prova qual roteiro atendeu a chamada."
+
+  pratica_guiada:
+    - instrucao: "Descubra em qual contexto entram as chamadas do ramal 1050."
+      modelo: "devlab-pbx cli \"user_data 1050@127.0.0.1 var ____\""
+      resposta: "devlab-pbx cli \"user_data 1050@127.0.0.1 var user_context\""
+    - instrucao: "Ligue do 1050 para a extensão que já existe no contexto."
+      modelo: "devlab-ramal 1050 --discar ____"
+      resposta: "devlab-ramal 1050 --discar 7000"
+    - instrucao: "Extraia do log só as linhas do percurso do dialplan."
+      modelo: "grep -oE \"____\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+      resposta: "grep -oE \"Dialplan: .*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+    - instrucao: "Mande a central reler a árvore depois de salvar o arquivo."
+      modelo: "devlab-pbx cli \"____\""
+      resposta: "devlab-pbx cli \"reloadxml\""
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você escreve uma extensão para `^7100$` e a coloca ABAIXO de outra cuja condição é `^71\\d{2}$`. O que acontece quando alguém disca 7100?"
+      resposta: |
+        Roda a **de cima**. `^71\d{2}$` casa com 7100, a central para na
+        primeira que casou, e a sua extensão nunca é tentada.
+
+        E não há aviso: nada no log diz "existe outra regra para este número".
+        O que o log diz é qual extensão casou — e é por isso que ler o percurso
+        é o primeiro passo quando o roteamento faz algo que você não escreveu.
+        A ordem no arquivo é uma decisão, não um detalhe de arrumação.
+    - tipo: diagnostico
+      pergunta: "Você adiciona a extensão, roda o `reloadxml`, e a chamada continua dando `404`. O arquivo está certo na sua frente. Qual é a primeira coisa a olhar — e por quê?"
+      resposta: |
+        **A resposta inteira do `reloadxml`.** Ela começa com `+OK` mesmo
+        quando o documento foi recusado, e traz o erro entre colchetes logo
+        depois.
+
+        Se o XML não montou, a central **manteve a árvore anterior** — que não
+        tinha a sua extensão. Daí o `404`, que é honesto: para a central viva,
+        a sua regra não existe. O arquivo estar certo na tela prova o que você
+        escreveu, não o que ela carregou.
+
+        A causa é quase sempre uma tag que não fechou. E o número da linha do
+        erro é do documento montado com todos os arquivos — procurá-lo no seu
+        é perda de tempo.
+    - tipo: transferencia
+      pergunta: "Uma central atende duas empresas na mesma máquina. Como os contextos impedem que um ramal de uma disque os ramais internos da outra?"
+      resposta: |
+        Cada empresa ganha o seu contexto, e cada usuário aponta para o dele
+        pelo `user_context`. O ramal só é roteado pelo roteiro do contexto
+        dele — as extensões da outra empresa simplesmente **não existem** para
+        essa chamada.
+
+        Repare que a separação não é uma lista de proibições, e é isso que a
+        torna confiável: não é preciso lembrar de bloquear cada número da
+        outra empresa. O que não está no contexto não é alcançável, e o padrão
+        é negar. É o mesmo princípio que você viu neste lab, quando o 1050
+        deixou de alcançar os ramais 1000–1019.
+
+objetivo_md: |
+  O ramal **1050** vive no contexto **`oficina`**, e esse contexto já tem uma
+  extensão funcionando: **7000**, que atende, toca um áudio e desliga.
+
+  O arquivo é `/usr/local/freeswitch/etc/freeswitch/dialplan/oficina.xml`.
+  Abra com `nano` (ou `vim`): a extensão pronta está lá, e o lugar da sua
+  está marcado.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `<extension name="…">` | uma regra, com nome — é o que aparece no log |
+  | `<condition field="destination_number" expression="^…$">` | quando ela vale |
+  | `<action application="answer\|playback\|hangup"/>` | o que fazer, em ordem |
+  | `devlab-pbx cli "reloadxml"` | aplica — **leia a resposta inteira** |
+  | `grep -oE "Dialplan: .*" …/freeswitch.log` | o percurso, narrado pela central |
+
+  ### Sua tarefa
+
+  1. Escreva a extensão **`recado`** para o número **7100**: ela atende, toca
+     `ivr/ivr-one_moment_please.wav` e desliga.
+  2. Aplique e ligue do 1050 para o 7100 — tem de completar.
+  3. Grave em **`/root/percurso.txt`** as linhas do percurso do dialplan
+     dessa chamada, como na demonstração.
+
+verificar:
+  - descricao: "o dialplan foi completado e é XML bem formado"
+    script: |
+      #!/bin/bash
+      ARQ=/usr/local/freeswitch/etc/freeswitch/dialplan/oficina.xml
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo oficina.xml sumiu","dica_diagnostica":"ele nasce com a licao em dialplan/oficina.xml; se voce o apagou, resete a licao"}'
+        exit 1
+      fi
+      if ! python3 -c 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$ARQ" 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao e um XML bem formado","dica_diagnostica":"alguma tag nao fechou. Repare que a central NAO avisa disso: o reloadxml responde +OK e segue com a arvore anterior"}'
+        exit 1
+      fi
+      if grep -q 'COMPLETE AQUI' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o comentario COMPLETE AQUI ainda esta no arquivo","dica_diagnostica":"troque o comentario pela extensao recado; a extensao aviso logo acima e o molde"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "uma chamada do 1050 para o 7100 completa pelo contexto oficina"
+    script: |
+      #!/bin/bash
+      # Oraculo de comportamento: com XML recusado o disco mostra a extensao e
+      # a central segue sem ela (decisao 50 em docs/DESIGN-PBX.md).
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      if ! devlab-ramal 1050 --discar 7100 --duracao 6 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada do 1050 para o 7100 nao completou","dica_diagnostica":"se o motivo foi 404, a central nao tem a sua extensao: leia a resposta INTEIRA do reloadxml — ela comeca com +OK mesmo quando recusa o documento"}'
+        exit 1
+      fi
+      CSV=/usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv
+      if ! grep '"7100","oficina"' "$CSV" | grep -q 'NORMAL_CLEARING'; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao ha bilhete de uma chamada para 7100 roteada pelo contexto oficina e encerrada normalmente","dica_diagnostica":"a extensao precisa estar DENTRO do <context name=\"oficina\">, e o roteiro precisa terminar em hangup"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/percurso.txt mostra a condição casando e as ações"
+    script: |
+      #!/bin/bash
+      ARQ=/root/percurso.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"percurso.txt nao existe","dica_diagnostica":"extraia as linhas Dialplan: do log com o grep da demonstracao e redirecione para o arquivo"}'
+        exit 1
+      fi
+      if ! grep -qE 'Regex \(PASS\).*destination_number\(7100\)' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao mostra a condicao casando com 7100","dica_diagnostica":"grave o percurso DEPOIS de uma chamada para 7100 que completou; a linha e a do Regex (PASS)"}'
+        exit 1
+      fi
+      for APP in answer playback hangup; do
+        if ! grep -q "Action $APP" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"o percurso nao traz a acao $APP\",\"dica_diagnostica\":\"a extensao precisa das tres acoes, nesta ordem: answer, playback e hangup\"}"
+          exit 1
+        fi
+      done
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import pathlib
+  arquivo = pathlib.Path(
+      '/usr/local/freeswitch/etc/freeswitch/dialplan/oficina.xml')
+  extensao = '''    <extension name="recado">
+        <condition field="destination_number" expression="^7100$">
+          <action application="answer"/>
+          <action application="playback" data="ivr/ivr-one_moment_please.wav"/>
+          <action application="hangup"/>
+        </condition>
+      </extension>'''
+  texto = arquivo.read_text()
+  inicio = texto.index('<!-- COMPLETE AQUI')
+  fim = texto.index('-->', inicio) + 3
+  arquivo.write_text(texto[:inicio] + extensao + texto[fim:])
+  PY
+  devlab-pbx cli "reloadxml"
+  devlab-ramal 1050 --discar 7100 --duracao 6 --silencioso
+  grep -oE "Dialplan: .*" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sed "s/.*1050@127.0.0.1 //" > /root/percurso.txt
+
+dicas:
+  - "A extensão `aviso`, logo acima do lugar marcado, é o molde inteiro: mude o nome, o número da expressão e o arquivo do `playback`. Cuide para o `^` e o `$` continuarem cercando o número."
+  - "Depois de salvar: `devlab-pbx cli \"reloadxml\"` — e leia a resposta INTEIRA. Se vier um `[error near line …]` depois do `+OK`, o documento foi recusado e a central segue com a árvore antiga."
+  - "O percurso sai com `grep -oE \"Dialplan: .*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sed \"s/.*1050@127.0.0.1 //\" > /root/percurso.txt`, depois de a chamada ter completado."
+
+erros_comuns:
+  - match: "error near line"
+    digita: "devlab-pbx cli \"reloadxml\""
+    mensagem: "+OK [[error near line 6888]: unexpected closing tag </context>]"
+    causa: "o XML não montou — quase sempre uma tag que não fechou — e a central recusou o documento novo inteiro, seguindo com o anterior"
+    conserto: "feche a tag que falta e recarregue de novo; a linha citada é do documento montado com todos os arquivos, não do seu"
+    categoria: sintaxe
+  - match: "motivo_do_fim=404"
+    digita: "devlab-ramal 1050 --discar 7100 --duracao 6"
+    mensagem: "--- ramal 1050 ---\nregistro=ok\nchamada=nao_atendida\nmotivo_do_fim=404 (Not Found)"
+    causa: "nenhuma extensão do contexto casou com o número — ou a regra não existe para a central viva, ou a expressão não casa com o que foi discado"
+    conserto: "leia o percurso no log: a linha `Regex (FAIL)` mostra o número real ao lado da expressão que você escreveu"
+    categoria: conceitual
+
+cards_revisao:
+  - dialplan-e-roteiro-percorrido-em-ordem
+  - contexto-delimita-o-mundo-do-usuario
+  - reloadxml-recusa-e-fica-com-o-anterior
