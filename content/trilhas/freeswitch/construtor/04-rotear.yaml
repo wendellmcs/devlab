@@ -1,0 +1,400 @@
+id: pbx-con-04-rotear
+trilha: freeswitch
+nivel: construtor
+ordem: 4
+titulo: "Uma regra para vinte ramais — captura, bridge e a ordem que decide"
+capacidade: "Sei rotear uma faixa de ramais com uma regra só e conectar a chamada ao destino real."
+xp: 40
+prereqs: [pbx-con-03-dialplan]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # O contexto já tem a extensão ESPECÍFICA do 1000, e o lugar da faixa fica
+  # ABAIXO dela de propósito: é o que torna a ordem observável em vez de
+  # afirmada. Com a faixa acima, o 1000 nunca chegaria à portaria — e o check
+  # do percurso pega exatamente isso.
+  #
+  # 1000 e 1001 sobem registrados e atendendo: sem destino de verdade, um
+  # `bridge` não teria como completar e a lição mediria outra coisa.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    cat > "$C/dialplan/oficina.xml" <<'XML'
+    <include>
+      <context name="oficina">
+
+        <extension name="portaria">
+          <condition field="destination_number" expression="^1000$">
+            <action application="answer"/>
+            <action application="playback" data="ivr/ivr-hello.wav"/>
+            <action application="hangup"/>
+          </condition>
+        </extension>
+
+        <!-- COMPLETE AQUI: a extensão `ramais`.
+
+             Ela vale para a faixa 1000 a 1019, captura o número discado e
+             conecta a chamada ao ramal real, apresentando o nome `Oficina`
+             para quem recebe.
+
+             A expressão da faixa é:   ^(10[01]\d)$
+             O que ela capturar volta como $1.  -->
+
+      </context>
+    </include>
+    XML
+    cat > "$C/directory/default/1050.xml" <<'XML'
+    <include>
+      <user id="1050">
+        <params>
+          <param name="password" value="devlab"/>
+        </params>
+        <variables>
+          <variable name="user_context" value="oficina"/>
+          <variable name="effective_caller_id_number" value="1050"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    devlab-pbx iniciar >/dev/null
+    devlab-pbx cli "sofia global siptrace on" >/dev/null
+    devlab-ramal 1000 --atender --silencioso
+    devlab-ramal 1001 --atender --silencioso
+
+ensina:
+  conceitos:
+    - id: captura-da-condicao-alimenta-a-acao
+      titulo: "o que a expressão captura entre parênteses volta como `$1` e vira argumento da ação — é assim que UMA regra serve uma faixa inteira de ramais"
+    - id: bridge-cria-e-emenda-a-perna-b
+      titulo: "`bridge` é a ação que cria a segunda perna e emenda as duas; `user/N@domínio` manda a central consultar o directory para descobrir ONDE aquele usuário está registrado"
+    - id: variavel-de-canal-vale-o-que-o-caminho-decidir
+      titulo: "`set` grava uma variável na chamada em curso: o que o directory declarou sobre o usuário pode ser sobrescrito pelo dialplan, e quem escreve por último manda"
+  comandos: []
+
+ensino:
+  gancho: |
+    A extensão que você escreveu atende um número. Vinte ramais dariam vinte
+    extensões quase idênticas — e vinte lugares para errar quando a faixa
+    mudar.
+
+    Não é assim que se faz. A condição não precisa dizer *qual* número: ela
+    pode dizer **que forma** o número tem, e **guardar** o que casou para a
+    ação usar. Uma regra, vinte ramais.
+
+    E aí entra a ação que faltava no seu repertório — a que realmente conecta
+    duas pessoas: **`bridge`**. É ela que cria aquela segunda perna que você
+    viu no trace do operador.
+
+  objetivos:
+    - verbo: construir
+      texto: "escrever uma condição que casa uma faixa e captura o número discado"
+    - verbo: executar
+      texto: "conectar a chamada ao ramal real com bridge, usando o valor capturado"
+    - verbo: explicar
+      texto: "explicar por que a extensão específica precisa vir antes da faixa que a contém"
+    - verbo: diagnosticar
+      texto: "provar pelo percurso no log qual das duas regras atendeu a chamada"
+
+  modelo_mental: |
+    ### A condição que guarda o que casou
+
+    Parênteses numa expressão regular não são só agrupamento: eles
+    **capturam**. O que estiver dentro deles fica guardado e volta como `$1`
+    nas ações daquela condição.
+
+    ```xml
+    <condition field="destination_number" expression="^(10[01]\d)$">
+      <action application="bridge" data="user/$1@${domain_name}"/>
+    </condition>
+    ```
+
+    A expressão `^(10[01]\d)$` lê-se: começa, `10`, depois `0` ou `1`, depois
+    um dígito qualquer, acaba. Isso é a faixa **1000 a 1019** — e o parêntese
+    em volta guarda o número inteiro, que a ação recebe como `$1`.
+
+    | pedaço | o que faz |
+    |---|---|
+    | `\d` | um dígito qualquer |
+    | `[01]` | um caractere, `0` ou `1` |
+    | `( … )` | captura: o que casar aqui vira `$1` |
+
+    Repare que há dois tipos de coisa com cifrão, e eles não são a mesma:
+
+    - **`$1`** vem da captura desta condição, agora.
+    - **`${domain_name}`** é uma variável do canal — o domínio da central.
+
+    ### `bridge`: a ação que conecta
+
+    `bridge` cria a **perna B** e emenda as duas — é literalmente aquela
+    segunda chamada que a central originava sozinha, e que você leu no trace
+    do operador. O destino `user/1001@${domain_name}` significa: *procure no
+    directory o usuário 1001 e entregue onde ele estiver registrado*.
+
+    E é por isso que `bridge` depende do registro: o directory diz que o
+    usuário existe, a tabela de registro diz **onde** ele está. Sem registro,
+    não há para onde entregar.
+
+    Uma diferença que se nota no fim da chamada: com `playback` + `hangup`
+    quem desliga é a central (`Normal call clearing`); numa chamada em
+    `bridge` quem desliga é gente (`200 (OK)`), porque a central fica fora do
+    caminho até alguém encerrar.
+
+    ### `set`: decidir no caminho
+
+    `set` grava uma variável **na chamada em curso**. É o que permite a uma
+    rota mudar algo que o usuário trouxe do directory:
+
+    ```xml
+    <action application="set" data="effective_caller_id_name=Oficina"/>
+    ```
+
+    A identificação que o 1050 traz do directory é uma; esta rota decide
+    outra. Não há conflito: o dialplan roda depois, e **quem escreve por
+    último manda**. É assim que uma rota de saída apresenta o número da
+    empresa no lugar do ramal de quem ligou.
+
+    Ordem também aqui: o `set` tem de vir **antes** do `bridge`. Depois de a
+    perna B ser criada, mudar a identificação já não muda o que foi mandado.
+
+    ### A específica antes da faixa
+
+    A faixa `^(10[01]\d)$` casa com 1000 também. Se ela vier acima da regra
+    específica do 1000, é ela que roda — a central para na primeira que casa,
+    e a específica nunca é tentada. Não há aviso; há só o comportamento
+    errado.
+
+    **Regra prática: do mais específico para o mais geral, sempre.** É a razão
+    pela qual a ordem no arquivo é uma decisão de projeto.
+
+  anatomia:
+    - linha: "<action application=\"bridge\" data=\"user/$1@${domain_name}\"/>"
+      partes:
+        - trecho: "application=\"bridge\""
+          papel: argumento
+          explica: "a ação que cria a segunda perna e emenda as duas"
+        - trecho: "user/"
+          papel: argumento
+          explica: "o tipo de destino: procure no DIRECTORY, e entregue onde esse usuário estiver registrado"
+        - trecho: "$1"
+          papel: argumento
+          explica: "o que a condição capturou entre parênteses — aqui, o número discado"
+        - trecho: "@${domain_name}"
+          papel: argumento
+          explica: "o domínio da central, lido de uma variável; usuário e domínio juntos identificam a conta"
+
+  demonstracao:
+    - comando: "devlab-ramal 1050 --discar 1000 --duracao 5"
+      saida: |-2
+        ramal 1050: registrando em 127.0.0.1 (porta local 6050)...
+        --- ramal 1050 ---
+        registro=ok
+        chamada=atendida
+        motivo_do_fim=200 (Normal call clearing)
+        log completo: /var/lib/devlab/ramal-1050.log
+      nota: "O 1000 já tem regra própria neste contexto: atende, toca e desliga. Repare no motivo do fim — **`Normal call clearing`**, quem desligou foi a central."
+    - comando: "grep -oE \"Dialplan: .*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sed \"s/.*1050@127.0.0.1 //\""
+      saida: |-2
+        parsing [oficina->portaria] continue=false
+        Regex (PASS) [portaria] destination_number(1000) =~ /^1000$/ break=on-false
+        Action answer()
+        Action playback(ivr/ivr-hello.wav)
+        Action hangup()
+      nota: "O percurso dessa chamada: a extensão `portaria` casou e a história acabou ali. Guarde esta leitura — no fim da lição ela vai provar que a sua faixa não roubou o 1000."
+    - comando: "devlab-ramal 1050 --discar 1001 --duracao 5"
+      saida: |-2
+        ramal 1050: registrando em 127.0.0.1 (porta local 6050)...
+        --- ramal 1050 ---
+        registro=ok
+        chamada=nao_atendida
+        motivo_do_fim=404 (Not Found)
+        log completo: /var/lib/devlab/ramal-1050.log
+      nota: "O 1001 está registrado e atendendo, mas **nenhuma regra do contexto o alcança**: `404`. É este o buraco que a sua tarefa fecha — e fechar com dezenove extensões copiadas seria o jeito errado."
+    - comando: "devlab-pbx cli \"sofia status profile internal reg\" | grep \"^User:\""
+      saida: |-2
+        User:       	1000@127.0.0.1
+        User:       	1001@127.0.0.1
+      nota: "Quem o `bridge` vai conseguir alcançar: a tabela de registro diz ONDE cada usuário está. O directory diz que ele existe; esta tabela diz para onde entregar. Sem linha aqui, não há perna B."
+    - comando: "devlab-pbx cli \"global_getvar domain_name\""
+      saida: |-2
+        127.0.0.1
+      nota: "O valor por trás de `${domain_name}`. Escrever a variável em vez do valor é o que faz a mesma regra funcionar quando a central muda de domínio — o mesmo raciocínio do realm da lição 2."
+
+  pratica_guiada:
+    - instrucao: "Veja onde os ramais registrados podem ser alcançados."
+      modelo: "devlab-pbx cli \"sofia status profile internal ____\""
+      resposta: "devlab-pbx cli \"sofia status profile internal reg\""
+    - instrucao: "Ligue do 1050 para o 1001 e confirme que ainda não há rota."
+      modelo: "devlab-ramal 1050 --discar ____ --duracao 5"
+      resposta: "devlab-ramal 1050 --discar 1001 --duracao 5"
+    - instrucao: "Leia o percurso do dialplan da última chamada."
+      modelo: "grep -oE \"____\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+      resposta: "grep -oE \"Dialplan: .*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você escreve a faixa `^(10[01]\\d)$` e a coloca ACIMA da extensão `portaria`. Alguém disca 1000. O que acontece, e o que o cliente relata?"
+      resposta: |
+        A faixa casa com 1000 e roda primeiro: em vez do aviso da portaria, a
+        chamada é entregue ao ramal 1000 registrado. A `portaria` nunca é
+        tentada.
+
+        E o relato do cliente não vai ser "a ordem do dialplan está errada" —
+        vai ser *"o aviso da portaria sumiu"*. É por isso que o percurso no
+        log é a primeira parada: ele mostra qual regra pegou a chamada, e a
+        resposta quase sempre é "a de cima, que você esqueceu que também
+        casava".
+    - tipo: diagnostico
+      pergunta: "A sua regra de faixa está certa, o percurso mostra `Regex (PASS)` e `Action bridge(user/1005@…)` — e a chamada morre sem completar. O 1005 existe no directory. O que falta?"
+      resposta: |
+        O 1005 não está **registrado**. O directory diz que a conta existe; a
+        tabela de registro é que diz onde entregar, e sem ela o `bridge` não
+        tem destino.
+
+        Repare no que o log te deu: a regra casou e a ação executou. O
+        problema não está no roteamento — está depois dele. Confundir os dois
+        faz alguém reescrever um dialplan correto por horas.
+
+        (No lab, um ramal cadastrado e fora do ar pode ainda ser "atendido"
+        pela caixa postal — o que você viu no operador. Aqui, no seu contexto,
+        não há esse desvio: o que não completa, não completa.)
+    - tipo: transferencia
+      pergunta: "Uma empresa quer que toda chamada externa apresente o número da recepção, e não o ramal de quem ligou. Onde isso se resolve — no directory de cada ramal ou no dialplan?"
+      resposta: |
+        **No dialplan, na rota de saída.** No directory você teria de editar
+        todos os ramais, e ainda assim quebraria a identificação interna: quem
+        liga de um ramal para outro deve continuar aparecendo como ele mesmo.
+
+        A rota externa é o único lugar que sabe que *aquela* chamada é
+        externa. Um `set` de `effective_caller_id_number` ali resolve para
+        todo mundo de uma vez, e o interno segue intacto. É a diferença entre
+        uma propriedade da pessoa e uma decisão do caminho.
+
+objetivo_md: |
+  No contexto `oficina` só existe uma regra: o número **1000**, que atende com
+  um aviso. Os ramais **1001 a 1019** estão registrados e ninguém os alcança.
+
+  O arquivo é `/usr/local/freeswitch/etc/freeswitch/dialplan/oficina.xml`, e o
+  lugar da sua extensão está marcado — **abaixo** da `portaria`, e isso
+  importa.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `expression="^(10[01]\d)$"` | casa a faixa 1000–1019 e **captura** o número |
+  | `$1` | o que a condição capturou, disponível nas ações |
+  | `<action application="set" data="…"/>` | grava uma variável na chamada em curso |
+  | `<action application="bridge" data="user/$1@${domain_name}"/>` | cria a perna B para o ramal real |
+
+  ### Sua tarefa
+
+  Escreva a extensão **`ramais`**, no lugar marcado:
+
+  1. Ela vale para a faixa **1000–1019** e captura o número discado.
+  2. Antes de conectar, ela apresenta o nome **`Oficina`** para quem recebe.
+  3. Ela conecta a chamada ao ramal real com `bridge`.
+
+  Ligar para o **1001** tem de completar. E ligar para o **1000** tem de
+  continuar caindo na `portaria` — se a sua regra roubar o 1000, a ordem está
+  errada.
+
+verificar:
+  - descricao: "o dialplan foi completado e é XML bem formado"
+    script: |
+      #!/bin/bash
+      ARQ=/usr/local/freeswitch/etc/freeswitch/dialplan/oficina.xml
+      if ! python3 -c 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$ARQ" 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"o oficina.xml nao e um XML bem formado","dica_diagnostica":"alguma tag nao fechou; lembre que o reloadxml responde +OK e segue com a arvore anterior"}'
+        exit 1
+      fi
+      if grep -q 'COMPLETE AQUI' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o comentario COMPLETE AQUI ainda esta no arquivo","dica_diagnostica":"escreva a extensao ramais no lugar dele, ABAIXO da portaria"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "uma chamada do 1050 para o 1001 completa pela sua regra de faixa"
+    script: |
+      #!/bin/bash
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      : > "$L"
+      if ! devlab-ramal 1050 --discar 1001 --duracao 4 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada do 1050 para o 1001 nao completou","dica_diagnostica":"se o motivo foi 404, a central nao tem a sua regra: leia a resposta INTEIRA do reloadxml. Se o percurso mostra o bridge executando, o problema e o destino, nao a rota"}'
+        exit 1
+      fi
+      if ! grep -qE 'Action bridge\(user/1001@' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada completou, mas nao foi um bridge para user/1001","dica_diagnostica":"a acao precisa ser bridge com destino user/$1@${domain_name} — e o $1 e o que a condicao capturou entre parenteses"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "a chamada apresenta o nome Oficina para quem recebe"
+    script: |
+      #!/bin/bash
+      # A prova e o From da perna B, no trace — nao o arquivo. Um `set` depois
+      # do `bridge` estaria escrito no XML e nao chegaria a viajar.
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      if ! grep -q 'From: "Oficina" <sip:1050@' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada nao levou o nome Oficina na identificacao","dica_diagnostica":"o set de effective_caller_id_name precisa vir ANTES do bridge: depois que a perna B nasce, mudar a identificacao nao muda o que ja foi mandado"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o 1000 continua caindo na portaria — a ordem foi respeitada"
+    script: |
+      #!/bin/bash
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      : > "$L"
+      devlab-ramal 1050 --discar 1000 --duracao 5 --silencioso >/dev/null 2>&1
+      if ! grep -qE 'Regex \(PASS\) \[portaria\]' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada para 1000 nao foi atendida pela extensao portaria","dica_diagnostica":"a sua faixa casa com 1000 tambem, e se ela estiver ACIMA da portaria e ela que roda: a central para na primeira que casa. Do mais especifico para o mais geral"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import pathlib
+  arquivo = pathlib.Path(
+      '/usr/local/freeswitch/etc/freeswitch/dialplan/oficina.xml')
+  extensao = '''    <extension name="ramais">
+        <condition field="destination_number" expression="^(10[01]\\d)$">
+          <action application="set" data="effective_caller_id_name=Oficina"/>
+          <action application="bridge" data="user/$1@${domain_name}"/>
+        </condition>
+      </extension>'''
+  texto = arquivo.read_text()
+  inicio = texto.index('<!-- COMPLETE AQUI')
+  fim = texto.index('-->', inicio) + 3
+  arquivo.write_text(texto[:inicio] + extensao + texto[fim:])
+  PY
+  devlab-pbx cli "reloadxml"
+
+dicas:
+  - "A expressão da faixa está no próprio comentário do arquivo: `^(10[01]\\d)$`. O parêntese não é enfeite — é ele que faz o número discado voltar como `$1`."
+  - "São duas ações, nesta ordem: primeiro o `set` de `effective_caller_id_name`, depois o `bridge` para `user/$1@${domain_name}`. Invertê-las escreve a identificação depois de a perna B já ter saído."
+  - "Escreva a extensão no lugar marcado, que fica ABAIXO da `portaria`. Depois `devlab-pbx cli \"reloadxml\"` e teste os dois números: 1001 tem de completar, e 1000 tem de continuar tocando o aviso."
+
+erros_comuns:
+  - match: "Regex (PASS) [ramais] destination_number(1000)"
+    digita: "devlab-ramal 1050 --discar 1000 --duracao 5"
+    mensagem: "Regex (PASS) [ramais] destination_number(1000) =~ /^(10[01]\\d)$/ break=on-false"
+    causa: "a faixa foi escrita ACIMA da extensão específica e casa com 1000 também — a central para na primeira que casa, e a `portaria` nunca é tentada"
+    conserto: "mova a extensão da faixa para baixo da específica; a regra é do mais específico para o mais geral"
+    categoria: conceitual
+  - match: "motivo_do_fim=404"
+    digita: "devlab-ramal 1050 --discar 1005 --duracao 4"
+    mensagem: "--- ramal 1050 ---\nregistro=ok\nchamada=nao_atendida\nmotivo_do_fim=404 (Not Found)"
+    causa: "nenhuma regra casou com o número — a expressão da faixa não cobre o que foi discado, ou o documento não chegou a carregar"
+    conserto: "veja no percurso a linha `Regex (FAIL)`: ela mostra o número real ao lado da sua expressão"
+    categoria: conceitual
+
+cards_revisao:
+  - captura-da-condicao-alimenta-a-acao
+  - bridge-cria-e-emenda-a-perna-b
+  - variavel-de-canal-vale-o-que-o-caminho-decidir

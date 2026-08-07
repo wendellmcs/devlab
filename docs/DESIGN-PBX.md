@@ -532,10 +532,21 @@ silêncio (não há microfone num lab), então **a lição cobra a duração e o
 caminho do arquivo, nunca o conteúdo sonoro** — e diz isso ao aluno, em vez de
 deixá-lo procurar áudio que não existe.
 
-Corolário para a decisão 27: `record_seconds` é estável (é o limite pedido),
-mas `record_ms` **não** é — 4380 numa execução, 4340 noutra, e o tamanho em
-bytes acompanha (70124 × 69484 × 65964 em três rodadas). Check e demonstração
-usam `record_seconds`; tamanho, só como piso.
+Corolário para a decisão 27, e ele **corrige o que esta decisão dizia antes**:
+nem `record_ms`, nem o tamanho em bytes, nem **`record_seconds`** servem para
+demonstração ou check exato.
+
+A primeira versão desta decisão afirmava que `record_seconds` era estável, por
+ser "o limite pedido". Não é. O `record` para **perto** do limite, não nele, e
+a folga é grande: sete execuções do mesmo roteiro de 4 segundos produziram
+arquivos de **65004 a 78444 bytes** — de 4,06 s a 4,9 s de áudio — e a variável
+`record_seconds` veio `4` em seis delas e `5` na sétima, que foi justamente a
+que o `capturar-demonstracao.py` gravou. Um número que aparece uma vez em sete
+é a pior espécie de saída de demonstração: passa em toda conferência que você
+roda de propósito e quebra sozinho semanas depois.
+
+O que uma lição pode cobrar de uma gravação é que **ela exista, no caminho
+declarado, com conteúdo**. Duração é cronômetro, e vale a decisão 27.
 
 ## 53. `--digitos` manda DTMF, e espera o canal ficar `ACTIVE`
 

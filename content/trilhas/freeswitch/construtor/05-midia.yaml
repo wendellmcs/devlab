@@ -1,0 +1,464 @@
+id: pbx-con-05-midia
+trilha: freeswitch
+nivel: construtor
+ordem: 5
+titulo: "Quando a condição não é o número — relógio, senão e transferência"
+capacidade: "Sei rotear por horário com anti-action e mandar a chamada de volta ao dialplan com transfer."
+xp: 40
+prereqs: [pbx-con-04-rotear]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # Três extensões prontas — eco, recados e menu — são os exemplos resolvidos
+  # das aplicações de mídia, e a `recados` é também o destino real que a tarefa
+  # vai precisar para o `transfer`. O que o aluno escreve é a condição de
+  # horário, que é o assunto novo desta lição.
+  #
+  # A extensão de horário NÃO aparece em nenhuma demonstração, e isso é
+  # deliberado: a saída dela depende da hora em que rodar, e uma demonstração
+  # assim quebraria o `capturar-demonstracao.py --conferir` de madrugada
+  # (decisões 27 e 54). Quem confere o ramo é o check, que lê o relógio.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    mkdir -p /root/recados
+    cat > "$C/dialplan/oficina.xml" <<'XML'
+    <include>
+      <context name="oficina">
+
+        <extension name="eco">
+          <condition field="destination_number" expression="^7900$">
+            <action application="answer"/>
+            <action application="echo"/>
+          </condition>
+        </extension>
+
+        <extension name="recados">
+          <condition field="destination_number" expression="^7300$">
+            <action application="answer"/>
+            <action application="playback" data="ivr/ivr-recording_started.wav"/>
+            <action application="record" data="/root/recados/${caller_id_number}.wav 4"/>
+            <action application="log" data="CRIT RECADO seg=${record_seconds}"/>
+            <action application="hangup"/>
+          </condition>
+        </extension>
+
+        <extension name="menu">
+          <condition field="destination_number" expression="^7400$">
+            <action application="answer"/>
+            <action application="play_and_get_digits" data="4 4 3 5000 # ivr/ivr-please_enter_extension_followed_by_pound.wav ivr/ivr-that_was_an_invalid_entry.wav escolha \d+"/>
+            <action application="log" data="CRIT O ALUNO DIGITOU: ${escolha}"/>
+            <action application="hangup"/>
+          </condition>
+        </extension>
+
+        <!-- COMPLETE AQUI: a extensão `atendimento`, para o número 7200.
+
+             Ela precisa de DUAS condições:
+               1) o número discado é 7200
+               2) a hora está entre 8 e 17
+
+             Casando as duas, ela conecta ao ramal 1000.
+             Não casando a segunda, ela transfere para 7300.  -->
+
+      </context>
+    </include>
+    XML
+    cat > "$C/directory/default/1050.xml" <<'XML'
+    <include>
+      <user id="1050">
+        <params>
+          <param name="password" value="devlab"/>
+        </params>
+        <variables>
+          <variable name="user_context" value="oficina"/>
+          <variable name="effective_caller_id_number" value="1050"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    devlab-pbx iniciar >/dev/null
+    devlab-ramal 1000 --atender --silencioso
+
+ensina:
+  conceitos:
+    - id: condicao-pode-ser-o-relogio
+      titulo: "condição não é só o número discado: `hour`, `wday` e parentes comparam o relógio da central — e várias condições numa mesma extensão precisam valer TODAS"
+    - id: anti-action-e-o-ramo-do-senao
+      titulo: "`anti-action` é o 'senão' da própria condição: as ações rodam quando ela casa, as anti-ações quando ela não casa — um desvio sem escrever uma segunda extensão"
+    - id: transfer-recomeca-o-percurso
+      titulo: "`transfer` não conecta ninguém: joga a chamada de volta ao dialplan com outro número, e o percurso recomeça do topo — o log mostra isso literalmente"
+  comandos: []
+
+ensino:
+  gancho: |
+    Toda condição que você escreveu até agora comparou a mesma coisa: o número
+    discado. Mas o roteamento real quase nunca depende só dele.
+
+    *"Depois das 18h manda para a caixa de recados."* *"No fim de semana ninguém
+    atende."* Isso não é regra sobre número — é regra sobre **quando**. E o
+    dialplan compara o relógio com a mesma naturalidade com que compara um
+    número.
+
+    Junto com isso vem a peça que dá forma de decisão ao roteiro: o **senão**.
+    E uma ação que muda o jogo — a que devolve a chamada ao dialplan por outro
+    caminho.
+
+  objetivos:
+    - verbo: construir
+      texto: "escrever uma extensão com duas condições, uma delas sobre o horário"
+    - verbo: executar
+      texto: "usar anti-action para dar um destino ao caso em que a condição não casa"
+    - verbo: explicar
+      texto: "explicar a diferença entre transfer e bridge no percurso da chamada"
+    - verbo: identificar
+      texto: "identificar no log qual ramo da condição de horário foi executado"
+
+  modelo_mental: |
+    ### Mais de uma condição: todas têm de valer
+
+    Uma extensão pode ter várias `<condition>`. Elas são avaliadas em ordem, e
+    **todas precisam casar** para as ações rodarem — é um "e", não um "ou".
+
+    ```xml
+    <extension name="atendimento">
+      <condition field="destination_number" expression="^7200$"/>
+      <condition hour="8-17">
+        <action application="bridge" data="user/1000@${domain_name}"/>
+        <anti-action application="transfer" data="7300"/>
+      </condition>
+    </extension>
+    ```
+
+    Repare no detalhe de escrita: a primeira condição **fecha em si mesma**
+    (`/>`), sem ações. Ela é só um filtro — "isto vale para o 7200" — e quem
+    carrega as ações é a última.
+
+    ### A condição que olha o relógio
+
+    `hour="8-17"` não é um campo comparado com expressão: é um atributo de
+    tempo, e o FreeSWITCH tem uma família deles.
+
+    | atributo | o que compara |
+    |---|---|
+    | `hour` | a hora, de 0 a 23 |
+    | `wday` | o dia da semana, 1 (domingo) a 7 |
+    | `mday` | o dia do mês |
+    | `minute-of-day` | o minuto do dia, de 1 a 1440 — o mais fino |
+
+    No log, o veredito dessas condições não sai como `Regex`, e sim assim:
+
+    ```
+    Date/TimeMatch (PASS) [atendimento] break=on-false
+    ```
+
+    E o relógio é o **da central**. Um PBX cujo fuso está errado roteia como
+    se fosse outra hora, e o sintoma que chega ao suporte é "a URA noturna
+    entrou às três da tarde".
+
+    ### `anti-action`: o senão
+
+    As `<action>` rodam quando a condição casa. As **`<anti-action>`** rodam
+    quando ela **não** casa — dentro da mesma condição.
+
+    Sem isso, cada desvio exigiria uma segunda extensão com a condição
+    invertida, e as duas teriam de ser mantidas em sincronia para sempre. Com
+    `anti-action`, os dois ramos ficam lado a lado, onde se leem juntos.
+
+    No log, o ramo do senão aparece com nome próprio:
+
+    ```
+    Date/TimeMatch (FAIL) [atendimento] break=on-false
+    ANTI-Action transfer(7300)
+    ```
+
+    ### `transfer` não é `bridge`
+
+    Esta distinção vale a lição inteira:
+
+    | | o que faz |
+    |---|---|
+    | `bridge` | **conecta** a chamada a um destino: cria a perna B e emenda |
+    | `transfer` | **devolve** a chamada ao dialplan com outro número discado |
+
+    Depois de um `transfer`, o percurso **recomeça do topo do contexto**, como
+    se a pessoa tivesse discado o número novo. O log mostra isso literalmente:
+    as linhas `parsing [...]` aparecem outra vez, agora com o destino novo.
+
+    É a peça que permite montar fluxo: um ponto de entrada decide, e manda a
+    chamada para a extensão que sabe tratar aquele caso — sem duplicar o que
+    ela faz.
+
+    ### As aplicações de mídia que este lab já traz
+
+    Três extensões prontas, para você ver funcionando antes de precisar delas:
+
+    | número | aplicação | o que faz |
+    |---|---|---|
+    | 7900 | `application="echo"` | devolve o áudio que chega — o teste de caminho de mídia |
+    | 7300 | `record` | grava o que entra, num arquivo por chamador |
+    | 7400 | `play_and_get_digits` | toca um aviso e **espera dígitos** |
+
+    Sobre `record`, uma honestidade do lab: o softphone daqui não tem
+    microfone, então **o que se grava é silêncio**. O que a gravação prova é a
+    duração pedida e o caminho do arquivo, não o conteúdo sonoro — e repare
+    que o nome do arquivo sai de `${caller_id_number}`, ou seja, cada chamador
+    tem o seu.
+
+    `play_and_get_digits` recebe uma fila de argumentos que vale decorar em
+    ordem: mínimo de dígitos, máximo, tentativas, tempo de espera, tecla que
+    encerra, aviso, aviso de erro, **variável onde guardar** e a expressão que
+    valida.
+
+  anatomia:
+    - linha: "devlab-ramal 1050 --discar 7400 --digitos \"1234#\" --duracao 3"
+      partes:
+        - trecho: "devlab-ramal"
+          papel: comando
+          explica: "registra o ramal e só então disca — a ordem que a lição 3 do operador explicou"
+        - trecho: "--discar 7400"
+          papel: opcao
+          explica: "o número a discar; aqui, a extensão que faz uma pergunta"
+        - trecho: "--digitos \"1234#\""
+          papel: opcao
+          explica: "os dígitos a teclar depois de a chamada ser ATENDIDA; o `#` é a tecla que encerra a coleta"
+        - trecho: "--duracao 3"
+          papel: opcao
+          explica: "quanto tempo a chamada fica de pé depois disso"
+
+  demonstracao:
+    - comando: "devlab-ramal 1050 --discar 7900 --duracao 4"
+      saida: |-2
+        ramal 1050: registrando em 127.0.0.1 (porta local 6050)...
+        --- ramal 1050 ---
+        registro=ok
+        chamada=atendida
+        motivo_do_fim=200 (OK)
+        log completo: /var/lib/devlab/ramal-1050.log
+      nota: "A aplicação de eco: a central devolve o áudio que recebe. Repare no motivo do fim — **`200 (OK)`**, quem desligou foi o softphone: essa extensão não tem `hangup`, então ela fica no ar até alguém encerrar."
+    - comando: "devlab-ramal 1050 --discar 7300 --duracao 9"
+      saida: |-2
+        ramal 1050: registrando em 127.0.0.1 (porta local 6050)...
+        --- ramal 1050 ---
+        registro=ok
+        chamada=atendida
+        motivo_do_fim=200 (Normal call clearing)
+        log completo: /var/lib/devlab/ramal-1050.log
+      nota: "A caixa de recados: atende, avisa e grava por 4 segundos. Aqui quem desliga é a central, ao fim do roteiro."
+    - comando: "find /root/recados -type f"
+      saida: |-2
+        /root/recados/1050.wav
+      nota: "A gravação, com o nome vindo de `${caller_id_number}` — cada chamador tem o seu arquivo."
+    - comando: "grep -c \"RECADO\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+      saida: |-2
+        3
+      nota: "A central registrou a passagem pela gravação. Repare no que esta lição **não** te mostra: a duração exata. `record` para perto do limite pedido, não nele — medido, o mesmo roteiro de 4 segundos produziu arquivos de 65 a 78 KB, e a variável `record_seconds` já veio 4 numas execuções e 5 noutras. O que se cobra de uma gravação é que ela exista, onde foi pedida; cronômetro, não."
+    - comando: "devlab-ramal 1050 --discar 7400 --digitos \"1234#\" --duracao 3"
+      saida: |-2
+        ramal 1050: registrando em 127.0.0.1 (porta local 6050)...
+        --- ramal 1050 ---
+        registro=ok
+        chamada=atendida
+        motivo_do_fim=200 (Normal call clearing)
+        log completo: /var/lib/devlab/ramal-1050.log
+      nota: "A extensão que pergunta. O `--digitos` teclou `1234#` assim que a chamada foi atendida — é o que um usuário faria no teclado do telefone."
+    - comando: "grep -oE \"O ALUNO DIGITOU: [0-9]+\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sort -u"
+      saida: |-2
+        O ALUNO DIGITOU: 1234
+      nota: "E o que ela guardou: os dígitos foram parar na variável `escolha`, que o roteiro leu logo depois. É esse valor que uma URA usa para decidir para onde mandar a chamada."
+    - comando: "grep -oE \"Action play_and_get_digits.*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sort -u"
+      saida: |-2
+        Action play_and_get_digits(4 4 3 5000 # ivr/ivr-please_enter_extension_followed_by_pound.wav ivr/ivr-that_was_an_invalid_entry.wav escolha \d+)
+      nota: "A fila de argumentos inteira, como a central a executou: `4 4 3 5000 #` são mínimo de dígitos, máximo, tentativas, espera em milissegundos e a tecla que encerra; depois vêm o aviso, o aviso de erro, a variável `escolha` onde guardar, e a expressão que valida o que foi teclado."
+
+  pratica_guiada:
+    - instrucao: "Ligue para a extensão que devolve o áudio que chega."
+      modelo: "devlab-ramal 1050 --discar ____ --duracao 4"
+      resposta: "devlab-ramal 1050 --discar 7900 --duracao 4"
+    - instrucao: "Ligue para a pergunta e tecle 42, encerrando com a tecla de cerquilha."
+      modelo: "devlab-ramal 1050 --discar 7400 ____ \"42#\" --duracao 3"
+      resposta: "devlab-ramal 1050 --discar 7400 --digitos \"42#\" --duracao 3"
+    - instrucao: "Depois de escrever a sua extensão, aplique a mudança."
+      modelo: "devlab-pbx cli \"____\""
+      resposta: "devlab-pbx cli \"reloadxml\""
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você escreve `<condition hour=\"8-17\">` com as ações dentro e ESQUECE a `anti-action`. Alguém liga às 22h. O que acontece com a chamada?"
+      resposta: |
+        A condição não casa, não há anti-ação para rodar, e a extensão termina
+        sem fazer nada. A central segue percorrendo as extensões seguintes — e
+        se nenhuma casar, a chamada morre em `404`, com
+        `NO_ROUTE_DESTINATION` no bilhete.
+
+        O relato do cliente vai ser *"à noite a ligação simplesmente cai"*.
+        Não é a condição que está errada: é o ramo do senão que não existe.
+        Toda condição de horário sem `anti-action` é um buraco no horário
+        oposto.
+    - tipo: diagnostico
+      pergunta: "A URA noturna começou a atender às três da tarde. O dialplan não foi alterado. Onde você olha primeiro?"
+      resposta: |
+        **No relógio da central.** A condição compara com a hora do sistema
+        onde o FreeSWITCH roda — se o fuso ou o horário do servidor mudou (ou
+        se ele subiu em UTC depois de uma reinstalação), o dialplan continua
+        correto e o comportamento fica errado.
+
+        É um caso em que a leitura do log ajuda a não perder tempo: o
+        `Date/TimeMatch` diz PASS ou FAIL, e comparar esse veredito com a hora
+        que você acha que é já resolve a dúvida.
+    - tipo: transferencia
+      pergunta: "Um mesmo aviso precisa ser tocado por seis rotas diferentes. Por que `transfer` para uma extensão dedicada é melhor do que repetir as ações nas seis?"
+      resposta: |
+        Porque o aviso passa a ter **um dono**. Repetido em seis lugares, ele
+        tem seis versões que só coincidem enquanto alguém as mantém iguais — e
+        a primeira mudança que esquecer uma delas cria um comportamento
+        diferente numa rota só, que ninguém vai procurar ali.
+
+        Com `transfer`, as seis rotas dizem *para onde ir*, e a extensão
+        dedicada diz *o que fazer*. É o mesmo motivo pelo qual o directory tem
+        um arquivo por ramal: o raio de uma mudança fica do tamanho do que ela
+        deveria mudar.
+
+objetivo_md: |
+  O contexto `oficina` já tem três extensões funcionando, e você as viu na
+  demonstração: **7900** (eco), **7300** (caixa de recados) e **7400** (a
+  pergunta com dígitos).
+
+  Falta o ponto de entrada do atendimento. O lugar dele está marcado em
+  `/usr/local/freeswitch/etc/freeswitch/dialplan/oficina.xml`.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `<condition field="destination_number" expression="^7200$"/>` | filtra o número e **fecha em si mesma** |
+  | `<condition hour="8-17">` | compara o relógio da central |
+  | `<action …/>` | roda quando a condição casa |
+  | `<anti-action …/>` | roda quando ela **não** casa |
+  | `transfer` | devolve a chamada ao dialplan com outro número |
+
+  ### Sua tarefa
+
+  Escreva a extensão **`atendimento`**, para o número **7200**, com duas
+  condições:
+
+  1. O número discado é **7200** — essa condição não leva ações.
+  2. A hora está entre **8 e 17**. Casando, a chamada é **conectada ao ramal
+     1000**. Não casando, ela é **transferida para o 7300**, a caixa de
+     recados.
+
+  O ramal 1000 está no ar atendendo. Ligue para o 7200 e confira no percurso
+  qual ramo rodou — e lembre que isso depende da hora em que você estiver
+  fazendo a lição.
+
+verificar:
+  - descricao: "o dialplan foi completado e é XML bem formado"
+    script: |
+      #!/bin/bash
+      ARQ=/usr/local/freeswitch/etc/freeswitch/dialplan/oficina.xml
+      if ! python3 -c 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$ARQ" 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"o oficina.xml nao e um XML bem formado","dica_diagnostica":"alguma tag nao fechou; a condicao que so filtra o numero fecha em si mesma, com />"}'
+        exit 1
+      fi
+      if grep -q 'COMPLETE AQUI' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o comentario COMPLETE AQUI ainda esta no arquivo","dica_diagnostica":"escreva a extensao atendimento no lugar dele"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "a extensão tem as duas condições e os dois ramos"
+    script: |
+      #!/bin/bash
+      # Leitura do que a central tem VIVO, e nao do arquivo: com XML recusado
+      # o disco mostra a extensao e a memoria segue sem ela (decisao 50).
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      VIVO=$($CLI -x "xml_locate dialplan context name oficina" 2>/dev/null | tr -d '\r')
+      if ! echo "$VIVO" | grep -q '\^7200\$'; then
+        echo 'DEVLAB_JSON:{"mensagem":"a central viva nao tem nenhuma extensao para o numero 7200","dica_diagnostica":"salvou e recarregou? leia a resposta INTEIRA do reloadxml — ela comeca com +OK mesmo quando recusa o documento"}'
+        exit 1
+      fi
+      if ! echo "$VIVO" | grep -qE 'hour="?8-17'; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao ha condicao de horario 8-17 na extensao","dica_diagnostica":"a segunda condicao e <condition hour=\"8-17\">, e e ela que leva as acoes"}'
+        exit 1
+      fi
+      if ! echo "$VIVO" | grep -q 'anti-action'; then
+        echo 'DEVLAB_JSON:{"mensagem":"a extensao nao tem anti-action","dica_diagnostica":"sem o ramo do senao, quem ligar no horario oposto nao encontra destino nenhum e a chamada morre em 404"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o ramo certo para a hora de agora é o que roda"
+    script: |
+      #!/bin/bash
+      # Decisao 54 (docs/DESIGN-PBX.md): o relogio do container e o do host, e
+      # nao ha como fixa-lo sem mentir sobre o ambiente. Entao o check LE a
+      # hora e cobra o ramo que ela implica — o aluno e avaliado por ter
+      # escrito a condicao certa, nao por estudar em horario comercial.
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      HORA=$(date +%-H)
+      : > "$L"
+      rm -f /root/recados/1050.wav
+      devlab-ramal 1050 --discar 7200 --duracao 9 --silencioso >/dev/null 2>&1
+      if ! grep -qE 'Date/TimeMatch \((PASS|FAIL)\)' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada para 7200 nao chegou a avaliar nenhuma condicao de horario","dica_diagnostica":"o percurso no log mostra o que aconteceu: a primeira condicao filtra o numero, e a segunda e a do relogio"}'
+        exit 1
+      fi
+      if [ "$HORA" -ge 8 ] && [ "$HORA" -le 17 ]; then
+        if ! grep -qE 'Action bridge\(user/1000@' "$L"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"sao ${HORA}h, dentro do horario, e a chamada nao foi conectada ao ramal 1000\",\"dica_diagnostica\":\"a acao do ramo que CASA e o bridge para user/1000@\\\${domain_name}\"}"
+          exit 1
+        fi
+      else
+        if ! grep -qE 'ANTI-Action transfer\(7300\)' "$L"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"sao ${HORA}h, fora do horario, e a chamada nao foi transferida para o 7300\",\"dica_diagnostica\":\"o ramo do senao e uma <anti-action> com application=transfer e data=7300\"}"
+          exit 1
+        fi
+        if [ ! -s /root/recados/1050.wav ]; then
+          echo 'DEVLAB_JSON:{"mensagem":"a transferencia aconteceu mas nenhum recado foi gravado","dica_diagnostica":"o transfer devolve a chamada ao dialplan: confira no percurso se ela recomecou do topo e chegou a extensao recados"}'
+          exit 1
+        fi
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import pathlib
+  arquivo = pathlib.Path(
+      '/usr/local/freeswitch/etc/freeswitch/dialplan/oficina.xml')
+  extensao = '''    <extension name="atendimento">
+        <condition field="destination_number" expression="^7200$"/>
+        <condition hour="8-17">
+          <action application="bridge" data="user/1000@${domain_name}"/>
+          <anti-action application="transfer" data="7300"/>
+        </condition>
+      </extension>'''
+  texto = arquivo.read_text()
+  inicio = texto.index('<!-- COMPLETE AQUI')
+  fim = texto.index('-->', inicio) + 3
+  arquivo.write_text(texto[:inicio] + extensao + texto[fim:])
+  PY
+  devlab-pbx cli "reloadxml"
+
+dicas:
+  - "São duas `<condition>` na mesma extensão. A primeira só filtra o número e fecha em si mesma (`/>`); a segunda, a do relógio, é que carrega as ações."
+  - "O ramo do senão não é outra extensão: é `<anti-action>` dentro da mesma condição, ao lado das `<action>`."
+  - "Conectar ao ramal é `bridge` com `user/1000@${domain_name}`; mandar para a caixa de recados é `transfer` com `7300` — e depois do transfer o percurso recomeça do topo do contexto."
+
+erros_comuns:
+  - match: "Date/TimeMatch (FAIL)"
+    digita: "devlab-ramal 1050 --discar 7200 --duracao 9"
+    mensagem: "Date/TimeMatch (FAIL) [atendimento] break=on-false"
+    causa: "a hora corrente está fora da faixa da condição — o que é normal fora do horário comercial, e é exatamente para isso que existe a anti-action"
+    conserto: "se não houver `anti-action`, a chamada não encontra destino: escreva o ramo do senão"
+    categoria: conceitual
+  - match: "-ERR no reply"
+    digita: "devlab-pbx cli \"xml_locate dialplan context name oficina\""
+    mensagem: "-ERR no reply"
+    causa: "a central não tem esse contexto vivo — o documento novo foi recusado e ela ficou com uma árvore anterior que também não o tinha"
+    conserto: "recarregue e leia a resposta inteira do reloadxml; o erro vem entre colchetes depois do `+OK`"
+    categoria: config_nao_recarregada
+
+cards_revisao:
+  - condicao-pode-ser-o-relogio
+  - anti-action-e-o-ramo-do-senao
+  - transfer-recomeca-o-percurso

@@ -1,0 +1,316 @@
+id: pbx-con-06-capstone
+trilha: freeswitch
+nivel: construtor
+ordem: 6
+titulo: "Chamado 4120: a clínica entra no ar na segunda-feira"
+capacidade: "Sei entregar um atendimento inteiro: conta no directory, contexto próprio e uma URA que conecta ou grava."
+xp: 90
+capstone: true
+prereqs: [pbx-con-05-midia]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # Os dois arquivos nascem VAZIOS e no lugar certo. É andaime de LOCALIZAÇÃO,
+  # não de conteúdo: a trilha F não tem a Fase 0 como pré-requisito, então o
+  # aluno não tem comando ensinado para criar arquivo, e fazê-lo descobrir o
+  # caminho de instalação não é o que este capstone mede. O que vai dentro é
+  # com ele, e nenhum dos dois traz forma nem exemplo.
+  #
+  # O 1000 sobe atendendo: é a recepcionista do chamado, e sem um destino real
+  # o `bridge` da opção 1 não teria como completar.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    mkdir -p /root/recados
+    cat > "$C/directory/default/1060.xml" <<'XML'
+    <include>
+      <!-- o ramal 1060 -->
+    </include>
+    XML
+    cat > "$C/dialplan/clinica.xml" <<'XML'
+    <include>
+      <!-- o contexto clinica -->
+    </include>
+    XML
+    devlab-pbx iniciar >/dev/null
+    devlab-ramal 1000 --atender --silencioso
+
+ensina:
+  conceitos: []
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 4120, do gerente de operações:
+
+    > "Fechamos com a clínica. Eles entram na segunda. Precisam de **um número
+    > de entrada** que atenda, dê duas opções — falar com a recepção ou deixar
+    > recado — e de **um ramal** para a recepcionista de lá, com senha que não
+    > fique escrita em lugar nenhum."
+
+    A recepcionista da clínica já está no ar no ramal **1000**. O resto não
+    existe: nem a conta, nem o contexto, nem a URA.
+
+    Você tem tudo o que precisa das cinco lições. Ninguém vai dizer a ordem
+    dos passos.
+
+  objetivos:
+    - verbo: construir
+      texto: "criar a conta do cliente no directory, com a credencial guardada como resumo"
+    - verbo: construir
+      texto: "montar um contexto próprio com um ponto de entrada que decide e dois destinos"
+    - verbo: executar
+      texto: "fazer a central viva carregar tudo e provar cada caminho com uma chamada"
+
+  modelo_mental: |
+    Nada de novo aqui — o capstone é integrar o que as cinco lições deram:
+
+    1. **Conta é directory; roteamento é dialplan.** São dois arquivos e duas
+       perguntas (lição 1).
+    2. **Credencial pode ser resumo.** `md5(usuário:realm:senha)`, e o realm
+       você pergunta, não inventa (lição 2).
+    3. **Contexto próprio, e o usuário aponta para ele.** É o `user_context`
+       que amarra os dois (lições 1 e 3).
+    4. **Do mais específico para o mais geral**, e o percurso no log diz qual
+       regra pegou a chamada (lições 3 e 4).
+    5. **`transfer` devolve a chamada ao dialplan; `bridge` conecta.** Uma URA
+       decide e transfere; quem conecta é a extensão do destino (lições 4 e 5).
+    6. **Salvar não é aplicar, e `+OK` não é sucesso.** Leia a resposta
+       inteira do `reloadxml`, e confirme pelo comportamento (lição 3).
+
+  anatomia: []
+
+  demonstracao:
+    - comando: "devlab-pbx cli \"user_exists id 1060 127.0.0.1\""
+      saida: |-2
+        false
+      nota: "O ponto de partida: a conta da clínica não existe. Esta mesma pergunta é o que vai te dizer que a primeira metade ficou pronta."
+    - comando: "devlab-pbx cli \"sofia status profile internal reg\" | grep \"^User:\""
+      saida: |-2
+        User:       	1000@127.0.0.1
+      nota: "Quem já está no ar: só a recepcionista, no ramal 1000. É a ela que a opção 1 da sua URA vai ter de conectar — e o `bridge` só alcança quem tem linha nesta tabela."
+
+  pratica_guiada: []
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você escreve tudo, roda o `reloadxml`, e a chamada para o número de entrada dá `404`. O arquivo está correto na sua frente. Onde está o erro mais provável?"
+      resposta: |
+        Em uma de duas coisas, e as duas se descobrem perguntando à central em
+        vez de reler o arquivo:
+
+        1. **O documento não carregou.** O `reloadxml` responde `+OK` mesmo
+           quando recusa o XML, e nesse caso a central seguiu com a árvore
+           anterior — que não tem o seu contexto. O erro vem entre colchetes,
+           depois do `+OK`.
+        2. **O usuário não está no contexto certo.** Se o `user_context` dele
+           aponta para outro lugar, a chamada entra num roteiro onde o seu
+           número não existe. `user_data … var user_context` responde isso.
+
+        O `404` é honesto nos dois casos: para a chamada que aconteceu, aquela
+        regra não existia.
+    - tipo: predicao
+      pergunta: "Na URA, você usa `bridge` em vez de `transfer` para mandar a chamada ao destino escolhido. O que muda?"
+      resposta: |
+        `bridge` tentaria **conectar** a chamada a um endpoint chamado, por
+        exemplo, `8002` — e não existe endpoint nenhum com esse nome. Número
+        de dialplan não é destino de bridge: é número discado.
+
+        `transfer` é o que devolve a chamada ao roteiro, como se a pessoa
+        tivesse discado aquilo. Aí sim a extensão correspondente é encontrada,
+        e é **ela** que decide conectar (com `bridge`) ou gravar.
+
+        A diferença aparece inteira no log: com `transfer`, as linhas
+        `parsing [...]` recomeçam com o número novo.
+
+objetivo_md: |
+  A clínica entra no ar na segunda. A recepcionista dela já está no ramal
+  **1000**, atendendo. Falta tudo o mais, e é o que você vai entregar.
+
+  Dois arquivos estão criados, vazios, no lugar certo:
+
+  - `/usr/local/freeswitch/etc/freeswitch/directory/default/1060.xml`
+  - `/usr/local/freeswitch/etc/freeswitch/dialplan/clinica.xml`
+
+  ### Sua entrega
+
+  **1. A conta da clínica** — ramal **1060**:
+
+  - senha **`girassol`**, guardada de modo que ela **não apareça em claro** no
+    arquivo;
+  - as chamadas dele entram no contexto **`clinica`**;
+  - ele se apresenta como **`Clinica`**.
+
+  **2. O contexto `clinica`**, com o número de entrada **8000** e dois
+  destinos:
+
+  - **8000** atende e pergunta **um dígito**, aceitando só **1 ou 2**. Use
+    `ivr/ivr-please_enter_extension_followed_by_pound.wav` como aviso e
+    `ivr/ivr-that_was_an_invalid_entry.wav` como aviso de erro. O que for
+    teclado leva a chamada ao **8001** (se 1) ou ao **8002** (se 2).
+  - **8001** conecta a chamada ao ramal **1000**.
+  - **8002** atende, avisa que vai gravar com
+    `ivr/ivr-recording_started.wav`, e grava **4 segundos** em
+    `/root/recados/`, num arquivo com o **número de quem ligou** no nome.
+
+  **3. Prove os dois caminhos.** Ligue do 1060 para o 8000 e tecle 1; depois
+  de novo, teclando 2.
+
+  Não há dicas nesta lição. Tudo o que ela cobra já foi ensinado.
+
+verificar:
+  - descricao: "os dois arquivos são XML bem formado"
+    script: |
+      #!/bin/bash
+      C=/usr/local/freeswitch/etc/freeswitch
+      for ARQ in "$C/directory/default/1060.xml" "$C/dialplan/clinica.xml"; do
+        if ! python3 -c 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$ARQ" 2>/dev/null; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"$(basename "$ARQ") nao e um XML bem formado\",\"dica_diagnostica\":\"alguma tag nao fechou — e a central nao avisa: o reloadxml responde +OK e segue com a arvore anterior\"}"
+          exit 1
+        fi
+      done
+      exit 0
+
+  - descricao: "o ramal 1060 existe, guarda a senha como resumo e entra no contexto clinica"
+    script: |
+      #!/bin/bash
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      if [ "$($CLI -x 'user_exists id 1060 127.0.0.1' 2>/dev/null | tr -d '\r')" != "true" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a central nao conhece o usuario 1060","dica_diagnostica":"criou o <user id=\"1060\"> e mandou a central reler a arvore? a resposta do reloadxml comeca com +OK mesmo quando recusa o documento"}'
+        exit 1
+      fi
+      ARQ=/usr/local/freeswitch/etc/freeswitch/directory/default/1060.xml
+      if grep -qE '<param[^>]*name="password"' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a senha do 1060 esta em claro no arquivo","dica_diagnostica":"o chamado pede que ela nao apareca escrita: guarde o resumo md5(usuario:realm:senha) num param a1-hash, e nada de password"}'
+        exit 1
+      fi
+      ESPERADO=$(printf %s "1060:127.0.0.1:girassol" | md5sum | cut -d' ' -f1)
+      VIVO=$($CLI -x "user_data 1060@127.0.0.1 param a1-hash" 2>/dev/null | tr -d '\r')
+      if [ "$VIVO" != "$ESPERADO" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o resumo guardado nao corresponde a senha girassol neste realm","dica_diagnostica":"sao tres pedacos colados por dois-pontos: usuario, realm e senha. O realm voce pergunta com global_getvar domain, e o md5sum imprime um traco depois do hash que nao faz parte dele"}'
+        exit 1
+      fi
+      CTX=$($CLI -x "user_data 1060@127.0.0.1 var user_context" 2>/dev/null | tr -d '\r')
+      if [ "$CTX" != "clinica" ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"as chamadas do 1060 entram no contexto '$CTX', e nao em 'clinica'\",\"dica_diagnostica\":\"e a variavel user_context, no bloco <variables> do usuario, que amarra a conta ao contexto\"}"
+        exit 1
+      fi
+      if ! devlab-ramal 1060 --senha girassol --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o softphone nao conseguiu registrar no 1060 com a senha girassol","dica_diagnostica":"o resumo confere com o que a central calcula? recalcule com o realm que ela declara"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "teclando 1 na entrada, a chamada é conectada à recepção"
+    script: |
+      #!/bin/bash
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      : > "$L"
+      devlab-ramal 1060 --senha girassol --discar 8000 --digitos 1 --duracao 5 --silencioso >/dev/null 2>&1
+      if ! grep -qE 'Action play_and_get_digits' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada para 8000 nao chegou a perguntar nada","dica_diagnostica":"o percurso no log mostra ate onde ela foi; se nao ha nem parsing do contexto clinica, o problema e antes: o usuario nao esta nesse contexto ou o documento nao carregou"}'
+        exit 1
+      fi
+      if ! grep -qE 'transfer\(8001\)' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"teclar 1 nao levou a chamada ao 8001","dica_diagnostica":"a acao depois da pergunta e um transfer para o numero montado com o digito guardado — a variavel que voce declarou no play_and_get_digits"}'
+        exit 1
+      fi
+      if ! grep -qE 'Action bridge\(user/1000@' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a extensao 8001 nao conectou a chamada ao ramal 1000","dica_diagnostica":"quem conecta e o bridge, com destino user/1000@${domain_name}"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "teclando 2 na entrada, um recado do 1060 fica gravado"
+    script: |
+      #!/bin/bash
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      : > "$L"
+      rm -f /root/recados/1060.wav
+      devlab-ramal 1060 --senha girassol --discar 8000 --digitos 2 --duracao 9 --silencioso >/dev/null 2>&1
+      if ! grep -qE 'transfer\(8002\)' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"teclar 2 nao levou a chamada ao 8002","dica_diagnostica":"o mesmo transfer da opcao 1 tem de montar o numero com o digito teclado, e nao com um valor fixo"}'
+        exit 1
+      fi
+      if [ ! -s /root/recados/1060.wav ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao ha recado gravado em /root/recados/1060.wav","dica_diagnostica":"o nome do arquivo tem de sair do numero de quem ligou, e nao ser fixo: a variavel de canal caller_id_number carrega esse valor"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import hashlib, pathlib
+  C = pathlib.Path('/usr/local/freeswitch/etc/freeswitch')
+  hash_a1 = hashlib.md5(b'1060:127.0.0.1:girassol').hexdigest()
+  (C / 'directory/default/1060.xml').write_text(f'''<include>
+    <user id="1060">
+      <params>
+        <param name="a1-hash" value="{hash_a1}"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="clinica"/>
+        <variable name="effective_caller_id_name" value="Clinica"/>
+        <variable name="effective_caller_id_number" value="1060"/>
+      </variables>
+    </user>
+  </include>
+  ''')
+  (C / 'dialplan/clinica.xml').write_text('''<include>
+    <context name="clinica">
+
+      <extension name="ura">
+        <condition field="destination_number" expression="^8000$">
+          <action application="answer"/>
+          <action application="play_and_get_digits" data="1 1 3 5000 # ivr/ivr-please_enter_extension_followed_by_pound.wav ivr/ivr-that_was_an_invalid_entry.wav opcao [12]"/>
+          <action application="transfer" data="800${opcao}"/>
+        </condition>
+      </extension>
+
+      <extension name="recepcao">
+        <condition field="destination_number" expression="^8001$">
+          <action application="bridge" data="user/1000@${domain_name}"/>
+        </condition>
+      </extension>
+
+      <extension name="recado">
+        <condition field="destination_number" expression="^8002$">
+          <action application="answer"/>
+          <action application="playback" data="ivr/ivr-recording_started.wav"/>
+          <action application="record" data="/root/recados/${caller_id_number}.wav 4"/>
+          <action application="hangup"/>
+        </condition>
+      </extension>
+
+    </context>
+  </include>
+  ''')
+  PY
+  devlab-pbx cli "reloadxml"
+
+dicas: []
+
+erros_comuns:
+  - match: "transfer(800${opcao})"
+    digita: "devlab-ramal 1060 --senha girassol --discar 8000 --digitos 1 --duracao 5"
+    mensagem: "Action transfer(800${opcao})"
+    causa: "no percurso, o destino do transfer aparece com a variável por expandir — é assim que o log escreve o dado CRU da ação, e não significa erro; o número real aparece na linha `parsing` seguinte"
+    conserto: "confira a linha seguinte do percurso: ela mostra o contexto sendo percorrido de novo, com o número já montado"
+    categoria: conceitual
+  - match: "motivo_do_fim=404"
+    digita: "devlab-ramal 1060 --senha girassol --discar 8000 --duracao 5"
+    mensagem: "--- ramal 1060 ---\nregistro=ok\nchamada=nao_atendida\nmotivo_do_fim=404 (Not Found)"
+    causa: "a chamada entrou num contexto que não tem o 8000 — ou o `user_context` do 1060 aponta para outro lugar, ou o documento novo foi recusado e a central ficou com a árvore anterior"
+    conserto: "pergunte à central: `user_data 1060@127.0.0.1 var user_context`, e leia a resposta inteira do reloadxml"
+    categoria: config_nao_recarregada
+
+cards_revisao:
+  - directory-diz-quem-entra
+  - a1-hash-guarda-a-prova-nao-a-senha
+  - transfer-recomeca-o-percurso
