@@ -1,0 +1,237 @@
+id: pbx-op-05-capstone
+trilha: freeswitch
+nivel: operador
+ordem: 5
+titulo: "Chamado 3401: 'toda chamada demora dez segundos'"
+capacidade: "Sei transformar 'as chamadas estão lentas' em causa provada no log — e consertar sem derrubar o PBX."
+xp: 60
+capstone: true
+prereqs: [pbx-op-04-chamada]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  setup: |
+    devlab-pbx iniciar >/dev/null
+  # O defeito do chamado: o PBX ficou com a senha padrão de exemplo (1234) na
+  # variável global — e o dialplan vanilla PUNE isso com 4 [CRIT] no log e dez
+  # segundos de espera em TODA chamada (decisão 45 em docs/DESIGN-PBX.md). É o
+  # defeito real de um PBX que alguém subiu com a config de exemplo.
+  #
+  # O primeiro sed DESACOPLA a senha dos ramais da variável global (deixa nos
+  # 1000–1019 o valor literal devlab, que é o que o devlab-ramal usa): sem
+  # isso, voltar a global para 1234 mudaria também a senha que os ramais
+  # precisam provar, e o sintoma viraria "nada registra" em vez de "as
+  # chamadas estão lentas" — medido, decisão 48. É também um estado plausível:
+  # alguém trocou as senhas dos ramais e esqueceu a variável global.
+  #
+  # O reloadxml é o que faz o PBX vivo carregar o estado quebrado; o ramal
+  # 1000 (a recepção do chamado) sobe por último, já no estado final.
+  break: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    sed -i 's|\$\${default_password}|devlab|' "$C"/directory/default/10*.xml
+    sed -i 's|default_password=devlab|default_password=1234|' "$C/vars.xml"
+    fs_cli -x reloadxml >/dev/null
+    devlab-ramal 1000 --atender --silencioso
+
+ensina:
+  conceitos: []
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 3401, aberto pela recepção:
+
+    > "Faz uns dias que TODA chamada demora uns dez segundos para completar.
+    > E quando a pessoa desiste e desliga antes, a ligação simplesmente cai —
+    > nem toca na recepção."
+
+    O ramal 1000 (a recepção) está no ar. Ninguém mexeu em nada — "só
+    reinstalaram a central semana passada".
+
+    Você tem tudo o que precisa das lições anteriores. Ninguém vai dizer a
+    ordem dos passos — e uma advertência: o bilhete da chamada que cai vai
+    apontar para o lado errado. Não pare nele.
+
+  objetivos:
+    - verbo: diagnosticar
+      texto: "diagnosticar a causa de chamadas lentas lendo o que o próprio PBX escreve"
+    - verbo: executar
+      texto: "corrigir a configuração e recarregá-la sem derrubar a central"
+    - verbo: construir
+      texto: "construir a prova de antes e depois: evidência gravada e chamada de teste completando"
+
+  modelo_mental: |
+    Nada de novo aqui — o capstone é integrar o que as quatro lições deram:
+
+    1. **Reproduza.** "Está lento" vira fato quando VOCÊ faz uma chamada de
+       teste e mede o que acontece (lição 4).
+    2. **Pergunte ao PBX, não adivinhe.** O log é a central contando o que
+       ela fez — inclusive o que ela fez de propósito (lições 1 e 2).
+    3. **Desconfie do rótulo do bilhete.** O CDR de uma chamada que o
+       chamador cancelou descreve o cancelamento, não a causa dele (lição 4).
+    4. **Conserto de configuração tem dois passos.** Editar o arquivo muda o
+       disco; o processo vivo só muda quando relê a árvore (lição 2).
+    5. **Prove que consertou.** A mesma chamada de teste do passo 1, agora
+       completando rápido. Sem a prova, o chamado não fecha — reabre.
+
+  anatomia: []
+
+  demonstracao:
+    - comando: "devlab-ramal 1001 --discar 1000 --duracao 4"
+      saida: |-2
+        ramal 1001: registrando em 127.0.0.1 (porta local 6001)...
+        --- ramal 1001 ---
+        registro=ok
+        chamada=nao_atendida
+        motivo_do_fim=487 (Request Terminated)
+        log completo: /var/lib/devlab/ramal-1001.log
+      nota: "O chamado, reproduzido: registro perfeito, e a chamada morre sem ser atendida — `487` é o pedido encerrado porque o próprio chamador desistiu. A recepção estava no ar o tempo todo. A partir daqui é com você."
+
+  pratica_guiada: []
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "O CDR da chamada que cai diz `ORIGINATOR_CANCEL`. Por que isso NÃO encerra a investigação com 'o usuário que desligou'?"
+      resposta: |
+        Porque `ORIGINATOR_CANCEL` descreve **quem** encerrou, não **por
+        quê**. O chamador cancelou depois de segundos de silêncio — o
+        cancelamento é consequência da espera, não a causa dela.
+
+        Um bilhete que aponta o cliente é o jeito mais rápido de fechar um
+        chamado errado. A pergunta seguinte é sempre: o que aconteceu ANTES
+        do cancelamento? E isso está no log, não no CDR.
+    - tipo: predicao
+      pergunta: "Você corrige o arquivo de configuração e refaz a chamada de teste — sem rodar mais nada. O que muda?"
+      resposta: |
+        **Nada.** O processo vivo segue com o valor que carregou; o arquivo
+        corrigido é um plano no disco. A chamada de teste continua lenta, e a
+        conclusão precipitada seria "não era isso" — abandonando o diagnóstico
+        certo por causa de um passo que faltou.
+
+        `reloadxml` primeiro; depois o teste. Conserto de config são dois
+        passos, e o segundo é o que o processo vê.
+
+objetivo_md: |
+  Este é o capstone do nível: ele integra as quatro lições e não dá o passo a
+  passo.
+
+  A recepção do chamado 3401 relata que toda chamada demora uns dez segundos
+  para completar, e que desligar antes disso derruba a ligação. O ramal 1000
+  está no ar. Este lab já está no estado do chamado.
+
+  ### Sua entrega
+
+  Quatro coisas, nesta ordem:
+
+  1. **Reproduza** o problema com uma chamada de teste.
+  2. **Documente a evidência** em `/root/evidencia.txt`: as linhas do log em
+     que o PBX diz o que está acontecendo (a forma de listar só as linhas
+     graves você já usa desde a lição 1).
+  3. **Escreva a causa** em `/root/causa.txt`, em uma ou duas frases: qual
+     configuração provoca a espera, e o que você fez a respeito.
+  4. **Conserte sem derrubar a central** — reinstalar não é conserto, e o
+     chamado só fecha com uma chamada curta completando.
+
+  Não há dicas nesta lição. Tudo o que ela cobra já foi ensinado.
+
+verificar:
+  - descricao: "/root/evidencia.txt traz as linhas em que o PBX aponta a causa"
+    script: |
+      #!/bin/bash
+      ARQ=/root/evidencia.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"evidencia.txt nao existe","dica_diagnostica":"reproduza o problema e grave as linhas graves do log num arquivo — a evidencia vem antes do conserto"}'
+        exit 1
+      fi
+      if ! grep -q 'change the default_password' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao traz as linhas em que o PBX aponta a causa","dica_diagnostica":"faca uma chamada de teste ANTES de consertar e leia o que o log ganhou de grave; o PBX diz o que fazer, com todas as letras"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/causa.txt nomeia a configuração e o mecanismo"
+    script: |
+      #!/bin/bash
+      ARQ=/root/causa.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"causa.txt nao existe","dica_diagnostica":"escreva em uma ou duas frases qual configuracao provoca a espera e o que voce fez"}'
+        exit 1
+      fi
+      if ! grep -qi 'default_password' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a causa nao nomeia a configuracao envolvida","dica_diagnostica":"a evidencia do log diz o NOME da variavel; a causa precisa nomea-la"}'
+        exit 1
+      fi
+      if ! grep -qiE '1234|exemplo|padr|espera|atras|dez|10' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a causa nao liga a configuracao ao sintoma","dica_diagnostica":"diga o que o valor de exemplo provoca: a central impoe uma espera de dez segundos em toda chamada"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o conserto chegou ao arquivo E ao processo vivo"
+    script: |
+      #!/bin/bash
+      V=/usr/local/freeswitch/etc/freeswitch/vars.xml
+      if grep -q 'default_password=1234' "$V"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o vars.xml ainda esta com a senha de exemplo","dica_diagnostica":"a evidencia do log diz qual arquivo abrir e o que trocar"}'
+        exit 1
+      fi
+      G=$(/usr/local/freeswitch/bin/fs_cli -x "global_getvar default_password" 2>/dev/null | tr -d '\r')
+      if [ -z "$G" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao respondeu — ele esta de pe?","dica_diagnostica":"o conserto nao exige derrubar a central; se ela caiu, suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      if [ "$G" = "1234" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo mudou, mas o processo vivo ainda carrega 1234","dica_diagnostica":"editar o disco nao muda a central; falta ela reler a arvore"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "uma chamada curta volta a completar"
+    script: |
+      #!/bin/bash
+      # Oraculo de comportamento, nao de relogio: uma chamada com 4 s de
+      # duracao so completa se for atendida ANTES disso. Com a espera de dez
+      # segundos do defeito ativa, o chamador desiste antes do atendimento e
+      # o devlab-ramal sai com erro — nenhuma medicao de tempo e necessaria.
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar; o conserto nao exigia derruba-lo"}'
+        exit 1
+      fi
+      if ! devlab-ramal 1019 --atender --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o ramal de teste 1019 nao conseguiu registrar","dica_diagnostica":"algo alem da variavel global mudou; confira o log com devlab-pbx erros"}'
+        exit 1
+      fi
+      devlab-ramal 1018 --discar 1019 --duracao 4 --silencioso >/dev/null 2>&1
+      RC=$?
+      devlab-ramal --parar 1019 >/dev/null 2>&1
+      if [ "$RC" != 0 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"uma chamada curta ainda nao completa: quem liga desiste antes de ser atendido","dica_diagnostica":"se voce ja editou o vars.xml, lembre que o processo vivo so muda quando rele a arvore"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  devlab-ramal 1001 --discar 1000 --duracao 4 --silencioso || true
+  devlab-pbx erros > /root/evidencia.txt
+  printf 'A variavel global default_password ainda estava no valor de exemplo (1234), e o roteiro de chamadas da central pune isso com dez segundos de espera em toda chamada. Troquei o valor no vars.xml e mandei a central reler a arvore com reloadxml.\n' > /root/causa.txt
+  sed -i 's|default_password=1234|default_password=trocada-pelo-suporte|' /usr/local/freeswitch/etc/freeswitch/vars.xml
+  fs_cli -x reloadxml
+
+dicas: []
+
+erros_comuns:
+  - match: "motivo_do_fim=487"
+    digita: "devlab-ramal 1001 --discar 1000 --duracao 4 (depois de corrigir o vars.xml, sem recarregar)"
+    mensagem: "registro=ok\nchamada=nao_atendida\nmotivo_do_fim=487 (Request Terminated)"
+    causa: "o processo vivo ainda usa o valor antigo: a árvore corrigida no disco só passa a valer quando a central a relê"
+    conserto: "fs_cli -x reloadxml e refaça a chamada de teste"
+    categoria: config_nao_recarregada
+
+cards_revisao:
+  - log-de-subida-e-a-linha-de-base
+  - reloadxml-rele-a-arvore
+  - cdr-e-o-bilhete-da-chamada

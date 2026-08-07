@@ -348,6 +348,52 @@ Medido, com os limites padrão de um lab (1 CPU, 512 MB, 256 pids): o PBX sobe
 em ~4 s, ocupa **29 pids dos 256** e **54 MB dos 512**. A trilha F não precisa
 mexer nos limites nem pedir capacidade nenhuma além do que a G já pede.
 
+## 47. A trilha F não declara prereq da G — e não cita as ferramentas dela
+
+A pergunta ficou registrada no CONTINUAR: `tcpdump`, `tshark` e `sngrep` têm
+dono na trilha G, a imagem da F os traz, e as lições da F vão querer
+diagnóstico. Decidido: **a F fica dentro das próprias ferramentas, sem
+pré-requisito da G**, por três razões que se somam:
+
+1. **A ordem do PRD §7 põe F antes de G.** Um prereq de lição da F para lição
+   da G inverteria o currículo sugerido — quem seguisse a ordem oficial
+   esbarraria numa trilha trancada pela trilha seguinte.
+2. **A decisão 18 já dizia o porquê pedagógico:** na F o objeto de estudo é o
+   comportamento do PBX, e o instrumento natural é o próprio PBX — `fs_cli`,
+   o siptrace do sofia, a tabela de registro, o log, o CDR. "Ler o trace" do
+   PRD §7 F.3 é o **siptrace**, não captura de pacote: a mesma história, pela
+   boca de quem a conduziu.
+3. **O validador varre até crase em prosa.** Nenhum bloco visível ao aluno
+   (incluindo `dicas` e `solucao_referencia`) pode citar `tcpdump`, `tshark`
+   ou `sngrep` sem o dono no fecho de prereqs. Os scripts de `verificar`,
+   `lab.setup` e `lab.break` não são varridos — se um check da F um dia
+   precisar de captura, é lá que ela mora.
+
+As ferramentas continuam na imagem de propósito: quem já fez a G pode
+capturar por conta própria dentro do lab da F, e o custo delas já está pago.
+
+## 48. O break do capstone desacopla a senha dos ramais da variável global
+
+O capstone do operador devolve `default_password=1234` (decisão 45) — e a
+primeira tentativa produziu o sintoma errado. Medido: com a global em `1234`
+depois do `reloadxml`, o **registro** passa a falhar (`403`), porque o
+diretório vanilla define a senha de cada ramal como `$${default_password}` —
+mudar a global muda junto a senha que os ramais precisam provar. O chamado
+viraria "nada registra" em vez de "as chamadas estão lentas".
+
+O break então faz duas trocas, nesta ordem: fixa nos ramais 1000–1019 o valor
+**literal** `devlab` (o padrão do `devlab-ramal`) e só então põe a global em
+`1234`. O dialplan pune a global (4 `[CRIT]` + `sleep` de dez segundos em toda
+chamada), os registros continuam saudáveis, e o estado é plausível em campo:
+alguém trocou as senhas dos ramais e esqueceu a variável global de exemplo.
+
+Dois fatos medidos que as lições usam: `reloadxml` **reprocessa** o
+`vars.xml` (o conserto não exige derrubar o PBX — `global_getvar` confirma o
+valor vivo), e o oráculo de "voltou ao normal" é comportamento, não relógio:
+uma chamada com `--duracao 4` só completa se for atendida antes disso — com a
+espera de dez segundos ativa, o chamador desiste primeiro e o `devlab-ramal`
+sai com erro.
+
 ## O que ainda não foi decidido
 
 - **Multi-container ou um só.** O PRD §4.2 prevê `compose.yaml` para labs de

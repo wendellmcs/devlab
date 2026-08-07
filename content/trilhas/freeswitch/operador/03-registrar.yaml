@@ -1,0 +1,255 @@
+id: pbx-op-03-registrar
+trilha: freeswitch
+nivel: operador
+ordem: 3
+titulo: "Registrar é dizer ao PBX onde o ramal mora"
+capacidade: "Sei registrar um ramal e provar, pela tabela do PBX, quem está no ar."
+xp: 25
+prereqs: [pbx-op-02-console]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  setup: |
+    devlab-pbx iniciar >/dev/null
+
+ensina:
+  conceitos:
+    - id: registro-diz-onde-o-ramal-esta
+      titulo: "número no cadastro não é telefone no ar: o registro informa ao PBX ONDE entregar as chamadas"
+    - id: tabela-de-registro-e-o-fato
+      titulo: "quem responde 'está registrado?' é a tabela do PBX — o log do softphone é a versão de quem pediu"
+    - id: sem-prova-de-senha-nao-entra
+      titulo: "o PBX exige prova da senha antes de aceitar o registro; sem prova, 403 e a tabela não muda"
+  comandos: [devlab-ramal]
+
+ensino:
+  gancho: |
+    "Instalei o aplicativo, coloquei o número 1001… e não toca nada."
+
+    O número 1001 existe no cadastro da central desde que ela nasceu — junto
+    com todos os outros de 1000 a 1019. E mesmo assim nenhuma chamada chega
+    nele. Falta a metade que ninguém vê: o PBX sabe QUE o 1001 existe, mas não
+    sabe **onde ele está**. Cadastro é uma promessa; telefone tocando exige
+    endereço.
+
+    Essa metade chama-se **registro**, e é a primeira coisa que um softphone
+    faz ao ligar. É também a primeira coisa a conferir em todo chamado de
+    "ramal não recebe chamada" — e o lugar de conferir não é o telefone: é a
+    central.
+
+  objetivos:
+    - verbo: executar
+      texto: "registrar um ramal do lab e derrubá-lo, com devlab-ramal"
+    - verbo: identificar
+      texto: "identificar na tabela do PBX quem está no ar agora"
+    - verbo: prever
+      texto: "prever o que o softphone vê e o que a tabela mostra quando a senha está errada"
+
+  modelo_mental: |
+    Registrar é o softphone dizer à central: *"o ramal 1001 sou eu, estou
+    neste endereço — entregue aqui"*. O PBX anota isso numa **tabela de
+    registros**, e é essa tabela que ele consulta quando alguém disca 1001.
+
+    Três consequências práticas:
+
+    - **Sem registro, chamada não chega.** O número existe no cadastro
+      (`directory/`), mas não há endereço para entregar.
+    - **Registro expira.** O softphone renova de tempos em tempos; se ele
+      morre ou perde a rede, a entrada some da tabela sozinha, dali a alguns
+      minutos.
+    - **Registrar exige a senha do cadastro.** O PBX recusa o primeiro pedido
+      e exige prova; softphone com senha errada recebe **403** e a tabela
+      fica como estava. Neste lab, a senha dos ramais é `devlab` — e é a que
+      o `devlab-ramal` usa por padrão.
+
+    A ferramenta do lab é o `devlab-ramal`, e ela impõe uma ordem que importa:
+    **registra e só então age**. Um softphone que disca antes de terminar o
+    próprio registro produz falhas difíceis de ler — o lab já resolve a
+    corrida para o seu raciocínio ficar no protocolo.
+
+    ### Onde mora o fato
+
+    O softphone diz "registrado com sucesso"; a central tem uma tabela. Quando
+    as duas versões divergem — e divergem, na vida real — **vale a tabela**:
+
+    ```
+    fs_cli -x "sofia status profile internal reg"
+    ```
+
+    Cada entrada tem a linha `User:` com `numero@endereço`. É a lista de quem
+    está no ar AGORA, pela boca de quem entrega as chamadas. O log do
+    softphone conta o que ele pediu; a tabela mostra o que a central aceitou.
+
+  anatomia:
+    - linha: "devlab-ramal 1001 --atender"
+      partes:
+        - trecho: "devlab-ramal"
+          papel: comando
+          explica: "o softphone do lab: registra na central e, só depois de confirmado, age"
+        - trecho: "1001"
+          papel: argumento
+          explica: "o número do ramal — um dos 1000 a 1019 do cadastro"
+        - trecho: "--atender"
+          papel: opcao
+          explica: "fica no ar atendendo o que chegar; sem opção nenhuma, ele apenas prova o registro e sai"
+
+  demonstracao:
+    - comando: "devlab-ramal 1001 --atender"
+      saida: |-2
+        ramal 1001: registrando em 127.0.0.1 (porta local 6001)...
+        ramal 1001: registrado e atendendo. Para desligar: devlab-ramal --parar 1001
+      nota: "O terminal só volta depois que a CENTRAL confirma o registro — repare que a mensagem final já ensina como derrubar. A partir daqui o 1001 está no ar, atendendo, com um processo de softphone rodando por trás."
+    - comando: "fs_cli -x \"sofia status profile internal reg\" | grep \"^User:\""
+      saida: |-2
+        User:       	1001@127.0.0.1
+      nota: "A tabela de registros, reduzida à linha que importa: o 1001 está no ar, no endereço da casa. Esta é a resposta oficial para 'quem está registrado?' — veio de quem entrega as chamadas."
+    - comando: "devlab-ramal 1003 --senha errada"
+      saida: |-2
+        ramal 1003: registrando em 127.0.0.1 (porta local 6003)...
+        --- ramal 1003 ---
+        registro=falhou
+        log completo: /var/lib/devlab/ramal-1003.log
+      nota: "Senha que não é a do cadastro. O softphone espera a confirmação por vinte segundos, ela nunca vem, e o veredito é `registro=falhou`. Sem drama na tela — a recusa mora no protocolo, e o lab aponta onde ler mais."
+    - comando: "grep -oE \"registration failed.*\" /var/lib/devlab/ramal-1003.log"
+      saida: |-2
+        registration failed, status=403 (Forbidden)
+      nota: "O log do softphone, filtrado: a central respondeu **403 (Forbidden)** — pediu prova da senha, a prova não fechou, entrada negada. 403 em registro se lê assim: credencial recusada."
+    - comando: "fs_cli -x \"sofia status profile internal reg\" | grep \"^User:\""
+      saida: |-2
+        User:       	1001@127.0.0.1
+      nota: "A tabela não mudou: só o 1001. Quem não provou a senha **não entra** — e é por isso que a tabela é o fato: ela só registra o que a central aceitou."
+    - comando: "devlab-ramal --parar 1001; fs_cli -x \"sofia status profile internal reg\" | grep \"^User:\""
+      saida: |-2
+        ramal 1001: desligado
+        User:       	1001@127.0.0.1
+      nota: "Pegadinha final, e ela é o retrato de todo softphone TRAVADO: o processo morreu — e a entrada **continua** na tabela. Derrubado à força, o softphone não se despede; a entrada só sai quando expira, minutos depois. (Na saída limpa é diferente: o `devlab-ramal 1001` sem opções, que se despede sozinho, remove a entrada na hora.) Guarde a leitura completa: a tabela diz quem PEDIU entrega — 'registrado' com aparelho morto é exatamente o chamado 'aparece registrado e não toca'."
+
+  pratica_guiada:
+    - instrucao: "Registre o ramal 1002 e deixe-o no ar."
+      modelo: "devlab-ramal 1002 ____"
+      resposta: "devlab-ramal 1002 --atender"
+    - instrucao: "Confira na tabela da central quem está no ar."
+      modelo: "fs_cli -x \"sofia status profile internal ____\""
+      resposta: "fs_cli -x \"sofia status profile internal reg\""
+    - instrucao: "Derrube o 1002."
+      modelo: "devlab-ramal ____ 1002"
+      resposta: "devlab-ramal --parar 1002"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "O 1003 estava registrado ontem; hoje não recebe chamada, e a tabela não o lista. O que aconteceu?"
+      resposta: |
+        O registro **expirou e não foi renovado**: o softphone morreu, perdeu
+        a rede ou foi fechado. A entrada some sozinha quando ninguém a mantém.
+
+        Repare no método: a tabela já entregou o diagnóstico pela metade. Não
+        é "a central quebrou" — é "o 1003 não está mais dizendo onde mora". A
+        investigação vai para o lado do softphone, não do PBX.
+    - tipo: predicao
+      pergunta: "Registro com senha errada: o que o softphone vê, e o que a tabela mostra?"
+      resposta: |
+        O softphone vê **403 (Forbidden)** — a central pediu prova da senha e
+        a prova não fechou. A tabela **não muda**: quem não provou não entra.
+
+        Os dois lados contam a mesma história por ângulos diferentes, e é
+        assim que se confere: o 403 no softphone explica POR QUE o ramal não
+        aparece na tabela.
+    - tipo: transferencia
+      pergunta: "Em outra central — um Asterisk, digamos — o comando é outro. O que você procura, seja qual for o software?"
+      resposta: |
+        A **tabela de registros do próprio servidor**: a lista de quem está no
+        ar agora, pela boca de quem entrega as chamadas.
+
+        Todo PBX tem uma (`sofia status profile internal reg` aqui, `pjsip
+        show registrations` lá). O conceito viaja: cadastro é promessa,
+        registro é presença — e o fato mora sempre no servidor, nunca no
+        aparelho que reclama.
+
+objetivo_md: |
+  Cadastro é promessa; registro é presença. O softphone pede, a central
+  decide, e a tabela dela é o fato.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `devlab-ramal N --atender` | registra o ramal N e o deixa no ar |
+  | `devlab-ramal N` | apenas prova o registro e sai |
+  | `devlab-ramal --parar N` | derruba o ramal N |
+  | `devlab-ramal --listar` | os ramais que este lab tem no ar |
+  | `sofia status profile internal reg` | a tabela: quem está no ar, pela boca da central |
+
+  ### Sua tarefa
+
+  A recepção usa o 1004 e o suporte usa o 1005. Deixe **os dois no ar** e
+  grave em `/root/no-ar.txt` a prova — as linhas `User:` da tabela de
+  registros da central.
+
+verificar:
+  - descricao: "os ramais 1004 e 1005 estão registrados na central"
+    script: |
+      #!/bin/bash
+      REG=$(/usr/local/freeswitch/bin/fs_cli -x "sofia status profile internal reg" 2>/dev/null)
+      if [ -z "$REG" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a central nao respondeu a tabela de registros","dica_diagnostica":"o PBX esta de pe? devlab-pbx estado responde"}'
+        exit 1
+      fi
+      for N in 1004 1005; do
+        if ! printf '%s\n' "$REG" | grep -q "^User:[[:space:]]*$N@"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"o ramal $N nao esta na tabela de registros\",\"dica_diagnostica\":\"devlab-ramal $N --atender registra e deixa no ar; o terminal volta quando a central confirma\"}"
+          exit 1
+        fi
+      done
+      exit 0
+
+  - descricao: "/root/no-ar.txt traz as linhas User: dos dois ramais"
+    script: |
+      #!/bin/bash
+      ARQ=/root/no-ar.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"no-ar.txt nao existe","dica_diagnostica":"redirecione para o arquivo as linhas User: da tabela de registros"}'
+        exit 1
+      fi
+      for N in 1004 1005; do
+        if ! grep -q "$N@" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo nao traz o ramal $N\",\"dica_diagnostica\":\"grave a tabela DEPOIS de registrar os dois; a prova e a linha User: de cada um\"}"
+          exit 1
+        fi
+      done
+      exit 0
+
+solucao_referencia: |
+  devlab-ramal 1004 --atender --silencioso
+  devlab-ramal 1005 --atender --silencioso
+  fs_cli -x "sofia status profile internal reg" | grep "^User:" > /root/no-ar.txt
+
+dicas:
+  - "`devlab-ramal N --atender` registra e deixa o ramal no ar; rode uma vez para cada número."
+  - "A prova sai da central: `sofia status profile internal reg` pelo fs_cli, filtrando as linhas `User:` com grep."
+  - "devlab-ramal 1004 --atender && devlab-ramal 1005 --atender && fs_cli -x \"sofia status profile internal reg\" | grep \"^User:\" > /root/no-ar.txt"
+
+erros_comuns:
+  - match: "registro=falhou"
+    digita: "devlab-ramal 1004 --senha 1234"
+    mensagem: "--- ramal 1004 ---\nregistro=falhou"
+    causa: "a central pediu prova da senha e a prova não fechou (403); a senha do cadastro deste lab é devlab, que é a que a ferramenta usa quando você não passa --senha"
+    conserto: "registre sem --senha, ou com --senha devlab; o log completo do softphone fica em /var/lib/devlab/"
+    categoria: conceitual
+  - match: "diga o número do ramal"
+    digita: "devlab-ramal --atender"
+    mensagem: "erro: diga o número do ramal."
+    causa: "a ferramenta precisa saber QUEM registrar; --atender sozinho não diz o número"
+    conserto: "devlab-ramal 1001 --atender"
+    categoria: sintaxe
+  - match: "o FreeSWITCH não está de pé"
+    digita: "devlab-ramal 1001 --atender"
+    mensagem: "erro: o FreeSWITCH não está de pé. Rode: devlab-pbx iniciar"
+    causa: "registrar é pedir entrada na central; sem central de pé não há a quem pedir"
+    conserto: "devlab-pbx iniciar e registre em seguida"
+    categoria: conceitual
+
+cards_revisao:
+  - registro-diz-onde-o-ramal-esta
+  - tabela-de-registro-e-o-fato
+  - sem-prova-de-senha-nao-entra

@@ -1,0 +1,269 @@
+id: pbx-op-02-console
+trilha: freeswitch
+nivel: operador
+ordem: 2
+titulo: "O console: pergunte ao PBX, não adivinhe"
+capacidade: "Sei interrogar um PBX vivo pelo fs_cli e recarregar a configuração sem derrubá-lo."
+xp: 25
+prereqs: [pbx-op-01-subir]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # Aqui o PBX é infraestrutura, não objeto: sobe no setup, como manda o
+  # cabeçalho do próprio devlab-pbx.
+  setup: |
+    devlab-pbx iniciar >/dev/null
+
+ensina:
+  conceitos:
+    - id: fs-cli-e-cliente-do-pbx
+      titulo: "o fs_cli é um cliente: conversa com um PBX já de pé, e fechar o console não derruba nada"
+    - id: perfil-sip-e-porta-de-entrada
+      titulo: "cada perfil SIP é uma porta de entrada própria: internal (ramais, :5060) e external (o lado de fora, :5080)"
+    - id: reloadxml-rele-a-arvore
+      titulo: "a configuração é uma árvore de arquivos; editar o arquivo não muda o PBX vivo — reloadxml relê"
+  comandos: [fs_cli]
+
+ensino:
+  gancho: |
+    "Quantos ramais essa central tem? Em que porta ela atende? Qual a senha
+    padrão que vem configurada?"
+
+    Você herdou o PBX e as perguntas chegam antes do almoço. Há dois caminhos:
+    abrir os trinta e poucos arquivos XML da configuração e torcer para ler o
+    certo — ou **perguntar à própria central**, que carregou tudo isso e sabe a
+    resposta.
+
+    O console existe para o segundo caminho. E ele tem uma propriedade que
+    muda o seu dia: o que ele mostra é o que o PBX **está usando agora**, não o
+    que está escrito no disco. A diferença entre os dois é a causa de metade
+    dos "mudei e não mudou" da vida real.
+
+  objetivos:
+    - verbo: executar
+      texto: "mandar comandos a um PBX vivo com fs_cli -x e ler a resposta"
+    - verbo: identificar
+      texto: "identificar os dois perfis SIP da central e a porta de cada um"
+    - verbo: descrever
+      texto: "descrever o caminho arquivo → reloadxml → processo, e onde mora o 'mudei e não mudou'"
+
+  modelo_mental: |
+    Dois programas, dois papéis:
+
+    | | papel |
+    |---|---|
+    | `freeswitch` | o PBX — o processo que atende SIP e move áudio |
+    | `fs_cli` | o console — um **cliente** que conversa com esse processo |
+
+    O `fs_cli` sozinho abre um console interativo (sai-se com `/exit`). Com
+    `-x "comando"` ele manda **um** comando, imprime a resposta e devolve o
+    shell — é a forma que scripts e lições usam. Nos dois casos vale o mesmo:
+    ele conversa com um PBX **já de pé**. Fechar o console não derruba a
+    central, e console nenhum funciona com a central desligada.
+
+    ### As portas de entrada
+
+    `sofia status` lista os perfis SIP — as portas de entrada da central:
+
+    | perfil | porta | quem entra por ali |
+    |---|---|---|
+    | `internal` | 5060 | os ramais da casa: registro e chamada |
+    | `external` | 5080 | o lado de fora: troncos e operadora |
+
+    A tabela traz ainda um `alias` (um apelido do internal) e um `gateway` de
+    exemplo da config vanilla. Os ramais desta trilha vivem todos no
+    `internal` — quando a lição 3 registrar um softphone, é nele.
+
+    ### A árvore, e quando ela vira verdade
+
+    A configuração mora em `/usr/local/freeswitch/etc/freeswitch/` — uma
+    árvore de XML: `vars.xml` (variáveis globais), `sip_profiles/` (os perfis
+    de cima), `directory/` (os usuários 1000–1019, a lição 3), `dialplan/` (o
+    roteiro das chamadas). O PBX **lê essa árvore ao subir** e guarda tudo em
+    memória.
+
+    Daí a regra que evita o "mudei e não mudou": editar um arquivo muda o
+    disco, não o processo. `reloadxml` manda o PBX **reler a árvore** — sem
+    derrubar chamada nenhuma. O par `global_getvar`/`reloadxml` é o seu
+    medidor: um mostra o valor que o PBX carregou, o outro o faz recarregar.
+
+  anatomia:
+    - linha: "fs_cli -x \"global_getvar default_password\""
+      partes:
+        - trecho: "fs_cli"
+          papel: comando
+          explica: "o console — um cliente do PBX vivo"
+        - trecho: "-x"
+          papel: opcao
+          explica: "executa UM comando e devolve o shell, em vez de abrir o console interativo"
+        - trecho: "\"global_getvar default_password\""
+          papel: argumento
+          explica: "o comando do CONSOLE, entre aspas para o shell entregá-lo inteiro — sem elas só a primeira palavra chega"
+
+  demonstracao:
+    - comando: "fs_cli -x version"
+      saida: |-2
+        FreeSWITCH Version 1.10.12-release+git~20240802T210227Z~a88d069d6f~64bit (git a88d069 2024-08-02 21:02:27Z 64bit)
+      nota: "A resposta veio do processo vivo: é a versão que está atendendo agora, não a de um pacote no disco."
+    - comando: "fs_cli -x \"sofia status\""
+      saida: |-2
+                             Name	   Type	                                      Data	State
+        =================================================================================================
+                        127.0.0.1	  alias	                                  internal	ALIASED
+                         external	profile	              sip:mod_sofia@127.0.0.1:5080	RUNNING (0)
+            external::example.com	gateway	                   sip:joeuser@example.com	NOREG
+                         internal	profile	              sip:mod_sofia@127.0.0.1:5060	RUNNING (0)
+        =================================================================================================
+        2 profiles 1 alias
+      nota: "As portas de entrada: `internal` em 5060 (ramais) e `external` em 5080 (o lado de fora), as duas `RUNNING`. O `alias` é um apelido do internal, e o `gateway` de exemplo veio da config vanilla — `NOREG` porque nunca registrou em operadora nenhuma."
+    - comando: "fs_cli -x \"global_getvar default_password\""
+      saida: |-2
+        devlab
+      nota: "O valor que o PBX **carregou** para a variável `default_password` — a senha padrão dos ramais de demonstração. Ela está escrita em `vars.xml`, mas esta resposta não veio do arquivo: veio da memória do processo. Guarde essa distinção."
+    - comando: "fs_cli -x reloadxml"
+      saida: |-2
+        +OK [Success]
+      nota: "O PBX releu a árvore de configuração inteira, sem derrubar nada. `+OK` é a confirmação. Enquanto você não roda isto (ou não reinicia), o que você edita no disco é só um plano — o processo segue com o que carregou."
+
+  pratica_guiada:
+    - instrucao: "Pergunte a versão ao PBX."
+      modelo: "fs_cli -x ____"
+      resposta: "fs_cli -x version"
+    - instrucao: "Liste os perfis SIP e as portas."
+      modelo: "fs_cli -x \"____ status\""
+      resposta: "fs_cli -x \"sofia status\""
+    - instrucao: "Liste os usuários do diretório, como o PBX os enxerga (repare: a mesma pessoa aparece em mais de um grupo)."
+      modelo: "fs_cli -x ____"
+      resposta: "fs_cli -x list_users"
+    - instrucao: "Mande o PBX reler a árvore de configuração."
+      modelo: "fs_cli -x ____"
+      resposta: "fs_cli -x reloadxml"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você fecha o fs_cli no meio do expediente. O que acontece com as chamadas em andamento?"
+      resposta: |
+        Nada. O console é um **cliente**: ele observa e comanda, mas quem
+        atende as chamadas é o processo do PBX, que continua de pé.
+
+        A recíproca é que importa no plantão: se o console não conecta, o
+        problema não é o console — é que provavelmente não há PBX atendendo.
+    - tipo: diagnostico
+      pergunta: "`fs_cli -x status` responde `[ERROR] fs_cli.c:1699 main() Error Connecting []`. O que isso diz — e o que NÃO diz?"
+      resposta: |
+        Diz que **não há PBX atendendo** onde o console procurou: o cliente
+        não achou o servidor. A primeira providência é a da lição 1 —
+        `devlab-pbx estado`, e subir se estiver desligado.
+
+        Não diz que o fs_cli está quebrado, nem que a configuração tem erro.
+        A mensagem é sobre a CONEXÃO, e conexão exige as duas pontas.
+    - tipo: transferencia
+      pergunta: "Você corrige um arquivo da árvore, testa de novo, e o comportamento segue idêntico. Qual é a hipótese número um?"
+      resposta: |
+        O PBX ainda não releu a árvore: o processo segue com o que carregou
+        na subida. `reloadxml` — e conferir com `global_getvar` (ou com o
+        comando que mostra o que você mudou) se o valor novo chegou à memória.
+
+        Essa hipótese vem ANTES de "editei o arquivo errado" e muito antes de
+        "o software tem bug" — porque é a mais barata de testar e a mais
+        comum de esquecer.
+
+objetivo_md: |
+  O console pergunta ao processo vivo; a árvore no disco só vira verdade
+  depois do `reloadxml`. Quem opera um PBX transita o dia inteiro entre os
+  dois.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `fs_cli -x "comando"` | manda UM comando ao PBX e devolve o shell |
+  | `sofia status` | os perfis SIP e suas portas |
+  | `global_getvar NOME` | o valor que o PBX carregou para uma variável global |
+  | `list_users` | os usuários do diretório, como o PBX os enxerga |
+  | `reloadxml` | manda o PBX reler a árvore de configuração |
+
+  ### Sua tarefa
+
+  Duas perguntas de chefe, e a resposta tem de vir do PBX:
+
+  1. Grave em `/root/perfil-interno.txt` a linha do `sofia status` que mostra
+     **onde o perfil `internal` atende** (endereço e porta).
+  2. Grave em `/root/senha-padrao.txt` o **valor** que o PBX carregou para a
+     variável global `default_password`.
+
+verificar:
+  - descricao: "/root/perfil-interno.txt traz a linha do perfil internal, com endereço e porta"
+    script: |
+      #!/bin/bash
+      ARQ=/root/perfil-interno.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"perfil-interno.txt nao existe","dica_diagnostica":"redirecione para o arquivo a linha certa do sofia status, com >"}'
+        exit 1
+      fi
+      if ! grep -q 'sip:mod_sofia@127.0.0.1:5060' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao mostra onde o perfil internal atende","dica_diagnostica":"a linha do sofia status traz sip:mod_sofia@ENDERECO:PORTA; a do internal termina em 5060"}'
+        exit 1
+      fi
+      LINHAS=$(grep -c . "$ARQ")
+      if [ "${LINHAS:-0}" -gt 3 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo tem $LINHAS linhas; o que se pede e a LINHA do perfil, nao a tela inteira\",\"dica_diagnostica\":\"filtre a saida antes de gravar\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/senha-padrao.txt traz o valor carregado de default_password"
+    script: |
+      #!/bin/bash
+      ARQ=/root/senha-padrao.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"senha-padrao.txt nao existe","dica_diagnostica":"o console responde o valor; redirecione a resposta para o arquivo"}'
+        exit 1
+      fi
+      # O valor tem de vir sozinho ou quase: o despejo do vars.xml inteiro
+      # nao prova que o aluno perguntou ao PBX.
+      if ! grep -qx 'devlab' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao traz o valor carregado da variavel","dica_diagnostica":"pergunte ao PBX com global_getvar default_password e grave a resposta"}'
+        exit 1
+      fi
+      LINHAS=$(grep -c . "$ARQ")
+      if [ "${LINHAS:-0}" -gt 2 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo tem $LINHAS linhas; o que se pede e o VALOR da variavel\",\"dica_diagnostica\":\"a resposta do global_getvar e uma linha so\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  fs_cli -x "sofia status" | grep 'sip:mod_sofia@127.0.0.1:5060' > /root/perfil-interno.txt
+  fs_cli -x "global_getvar default_password" > /root/senha-padrao.txt
+
+dicas:
+  - "As duas respostas saem do console: uma do `sofia status`, outra do `global_getvar default_password`. Redirecione com `>`."
+  - "Para isolar a linha do internal, filtre a saída do `sofia status` com `grep` pelo trecho que só ela tem — `5060`, por exemplo."
+  - "fs_cli -x \"sofia status\" | grep 5060 > /root/perfil-interno.txt && fs_cli -x \"global_getvar default_password\" > /root/senha-padrao.txt"
+
+erros_comuns:
+  - match: "Error Connecting"
+    digita: "fs_cli -x status"
+    mensagem: "[ERROR] fs_cli.c:1699 main() Error Connecting []"
+    causa: "o console é um cliente; a mensagem diz que não há PBX atendendo do outro lado"
+    conserto: "devlab-pbx iniciar sobe a central; o fs_cli conecta em seguida"
+    categoria: conceitual
+  - match: "-ERR .+ Command not found"
+    digita: "fs_cli -x reloadxlm"
+    mensagem: "-ERR reloadxlm Command not found!"
+    causa: "o comando chegou ao PBX, mas não existe com esse nome — aqui foi um typo de reloadxml"
+    conserto: "confira a grafia; o console também aceita `help` para listar o que ele entende"
+    categoria: sintaxe
+  - match: "sofia global siptrace <on\\|off>"
+    digita: "fs_cli -x sofia status"
+    mensagem: "USAGE:\n--------------------------------------------------------------------------------\nsofia global siptrace <on|off>\nsofia        capture  <on|off>\n             watchdog <on|off>\n(…a ajuda inteira do sofia, em vez da resposta)"
+    causa: "sem aspas o shell reparte os argumentos: só `sofia` chegou ao console, e sozinho ele imprime a própria ajuda"
+    conserto: "ponha o comando do console inteiro entre aspas: fs_cli -x \"sofia status\""
+    categoria: sintaxe
+
+cards_revisao:
+  - fs-cli-e-cliente-do-pbx
+  - perfil-sip-e-porta-de-entrada
+  - reloadxml-rele-a-arvore

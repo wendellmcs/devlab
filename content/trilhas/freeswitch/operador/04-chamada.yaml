@@ -1,0 +1,269 @@
+id: pbx-op-04-chamada
+trilha: freeswitch
+nivel: operador
+ordem: 4
+titulo: "A primeira chamada — e as duas pernas no trace"
+capacidade: "Sei completar uma chamada ramal a ramal e ler no trace as duas pernas que o PBX criou."
+xp: 30
+prereqs: [pbx-op-03-registrar]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # O 1000 é quem atende nesta lição. O siptrace fica DESLIGADO no setup de
+  # propósito: ligá-lo faz parte da tarefa, e o registro do 1000 fora do trace
+  # deixa a leitura do aluno só com a chamada dele.
+  setup: |
+    devlab-pbx iniciar >/dev/null
+    devlab-ramal 1000 --atender --silencioso
+
+ensina:
+  conceitos:
+    - id: siptrace-mostra-o-sip-do-pbx
+      titulo: "o siptrace copia para o log cada mensagem SIP que o PBX recebe e envia — o trace é a chamada pela boca da central"
+    - id: chamada-no-pbx-sao-duas-pernas
+      titulo: "o PBX não repassa a sua chamada: ele a atende e cria OUTRA — duas pernas emendadas, três INVITEs no total"
+    - id: cdr-e-o-bilhete-da-chamada
+      titulo: "toda chamada termina num bilhete (CDR) com quem ligou, para quem e a causa do fim"
+  comandos: []
+
+ensino:
+  gancho: |
+    Ramal registrado, central de pé — falta o que interessa: **uma chamada**.
+
+    Ela vai completar, e "funcionou" seria o fim da história para o usuário.
+    Para você, é o começo: nesta lição você liga o **trace** e vê o que a
+    central fez para a chamada funcionar. Tem mais coisa ali do que parece —
+    inclusive uma segunda chamada que você não pediu e o PBX fez sozinho. É
+    essa leitura que separa quem opera uma central de quem só a usa: quando a
+    chamada NÃO completar, o trace é onde a conversa aconteceu.
+
+  objetivos:
+    - verbo: executar
+      texto: "completar uma chamada ramal a ramal com o trace ligado"
+    - verbo: identificar
+      texto: "identificar no trace as duas pernas que o PBX criou — e os três INVITEs de uma chamada só"
+    - verbo: explicar
+      texto: "explicar por que o PBX recusa o primeiro INVITE com 407 antes de aceitar a chamada"
+    - verbo: diagnosticar
+      texto: "diagnosticar pelo CDR como uma chamada terminou"
+
+  modelo_mental: |
+    Uma chamada SIP começa com um pedido **INVITE** e termina com um **BYE**.
+    Mas numa central o desenho tem um detalhe que muda toda leitura de trace:
+
+    **O PBX não repassa a sua chamada — ele a atende e cria outra.** Quando o
+    1001 disca para o 1000, a central recebe o INVITE do 1001 (perna A),
+    consulta a tabela de registro, e **origina ela mesma** um INVITE para o
+    endereço do 1000 (perna B). As duas pernas são emendadas, e o áudio passa
+    pela central. Por isso o trace de UMA chamada tem **três INVITEs**:
+
+    | INVITE | de quem para quem | por quê |
+    |---|---|---|
+    | 1º | 1001 → central | o pedido original |
+    | 2º | 1001 → central | o mesmo pedido, agora com a prova da senha |
+    | 3º | **central → 1000** | a perna B, que a central criou sozinha |
+
+    O 1º e o 2º são a mesma história da lição 3: a central **desafia antes de
+    servir**. No registro a recusa era 401; num INVITE ela é **407** — e o
+    softphone repete o pedido com a prova. Recusa-e-repete não é falha: é o
+    protocolo funcionando.
+
+    ### O trace e o bilhete
+
+    `sofia global siptrace on` manda o PBX copiar para o log **cada mensagem
+    SIP** que ele recebe ou envia. O log fica verboso — cada mensagem tem uma
+    dúzia de linhas — então a leitura de operador é filtrar as **primeiras
+    linhas** de cada pedido, que contam a história em uma linha cada.
+
+    E quando a chamada termina, sobra o **CDR** (bilhete da chamada): uma
+    linha por chamada em `var/log/freeswitch/cdr-csv/Master.csv`, com quem
+    ligou, para quem, quanto durou e **como terminou**. `NORMAL_CLEARING` é o
+    fim normal — alguém desligou. O bilhete é o resumo oficial; o trace é a
+    conversa inteira.
+
+  anatomia:
+    - linha: "grep -oE \"(REGISTER|INVITE|ACK|BYE) sip:[^;>]*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+      partes:
+        - trecho: "grep"
+          papel: comando
+          explica: "o filtro de texto — aqui, garimpando o log verboso"
+        - trecho: "-oE"
+          papel: opcao
+          explica: "imprime SÓ o trecho que casou (-o), com regex estendida (-E) para poder alternar padrões"
+        - trecho: "\"(REGISTER|INVITE|ACK|BYE) sip:[^;>]*\""
+          papel: argumento
+          explica: "as primeiras linhas dos PEDIDOS SIP: método seguido do destino, parando antes dos parâmetros"
+        - trecho: "/usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+          papel: argumento
+          explica: "o log do PBX — repare no var/log DENTRO do prefixo da instalação"
+
+  demonstracao:
+    - comando: "devlab-pbx cli \"sofia global siptrace on\""
+      saida: |-2
+        +OK Global siptrace on
+      nota: "A partir de agora o PBX copia para o log cada mensagem SIP que passa por ele. Em produção isso se liga na hora do diagnóstico e se desliga depois — o log cresce rápido."
+    - comando: "devlab-ramal 1001 --discar 1000 --duracao 3"
+      saida: |-2
+        ramal 1001: registrando em 127.0.0.1 (porta local 6001)...
+        --- ramal 1001 ---
+        registro=ok
+        chamada=atendida
+        motivo_do_fim=200 (OK)
+        log completo: /var/lib/devlab/ramal-1001.log
+      nota: "A primeira chamada: o 1001 registra, disca para o 1000, fica 3 segundos em linha e desliga. `chamada=atendida` e `motivo_do_fim=200 (OK)` — do ponto de vista do usuário, acabou aqui. Do seu, começa agora."
+    - comando: "grep -oE \"(REGISTER|INVITE|ACK|BYE) sip:[^;>]*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+      saida: |-2
+        REGISTER sip:127.0.0.1 SIP/2.0
+        REGISTER sip:127.0.0.1 SIP/2.0
+        INVITE sip:1000@127.0.0.1 SIP/2.0
+        ACK sip:1000@127.0.0.1 SIP/2.0
+        INVITE sip:1000@127.0.0.1 SIP/2.0
+        INVITE sip:1000@127.0.0.1:6000
+        ACK sip:1000@127.0.0.1:6000
+        ACK sip:1000@127.0.0.1:5060
+        BYE sip:1000@127.0.0.1:5060
+        BYE sip:1000@127.0.0.1:6000
+        REGISTER sip:127.0.0.1 SIP/2.0
+        REGISTER sip:127.0.0.1 SIP/2.0
+      nota: "A história em pedidos, na ordem: os dois REGISTER do 1001 chegando (desafiado, repete com a prova — lição 3). O INVITE original, o ACK que encerra a recusa 407, o INVITE repetido com a prova. Então a linha-chave: **INVITE para `1000@127.0.0.1:6000`** — a central originando a perna B para o endereço onde o 1000 se registrou. Os dois BYE no fim são a chamada desmontada perna a perna, e o par de REGISTER final é o 1001 saindo do ar."
+    - comando: "cut -d, -f1,3,10 /usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv"
+      saida: |-2
+        "1001","1000","NORMAL_CLEARING"
+      nota: "O bilhete: quem ligou, para quem, como terminou. `NORMAL_CLEARING` fecha o caso — chamada completada e desligada normalmente. (O CDR tem mais colunas: horários e duração ficam de fora aqui porque variam a cada execução.)"
+
+  pratica_guiada:
+    - instrucao: "Ligue o trace da central."
+      modelo: "devlab-pbx cli \"sofia ____ siptrace on\""
+      resposta: "devlab-pbx cli \"sofia global siptrace on\""
+    - instrucao: "Complete uma chamada do 1001 para o 1000."
+      modelo: "devlab-ramal 1001 ____ 1000"
+      resposta: "devlab-ramal 1001 --discar 1000"
+    - instrucao: "Extraia do log as primeiras linhas dos pedidos SIP."
+      modelo: "grep -oE \"(REGISTER|INVITE|ACK|BYE) sip:[^;>]*\" ____"
+      resposta: "grep -oE \"(REGISTER|INVITE|ACK|BYE) sip:[^;>]*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Quantos INVITEs aparecem no trace de UMA chamada ramal a ramal completada — e por quê?"
+      resposta: |
+        **Três.** Dois do chamador (o original, recusado com 407, e a
+        repetição com a prova da senha) e **um da própria central**, que
+        origina a perna B para o endereço onde quem atende se registrou.
+
+        Quem espera "um INVITE por chamada" lê o trace errado: acha que a
+        recusa 407 é falha e que o terceiro INVITE é outra chamada.
+    - tipo: diagnostico
+      pergunta: "Você disca para o 1010, que não está com softphone nenhum no ar — e a chamada é ATENDIDA, com 200 OK. Quem atendeu?"
+      resposta: |
+        A **caixa postal**. O roteiro da central tenta a perna B, descobre que
+        o 1010 não tem registro (não há onde entregar), e desvia para o
+        voicemail — que atende de verdade: 200 OK, CDR normal.
+
+        "Atendida" não significa "a pessoa atendeu". Quem diz se o ramal
+        estava no ar é a tabela de registro; o trace mostra o desvio. É a
+        lição 3 aparecendo dentro de uma chamada.
+    - tipo: transferencia
+      pergunta: "O cliente diz: 'liguei e caiu na hora'. O que o trace te dá que o relato não dá?"
+      resposta: |
+        A **resposta final verdadeira** e **em qual perna** ela nasceu.
+
+        "Caiu" pode ser a central recusando o chamador (perna A), o destino
+        recusando a central (perna B), ou o próprio chamador desistindo. São
+        três diagnósticos diferentes com o mesmo relato — e uma linha de
+        trace distingue os três, porque cada mensagem diz quem a mandou e a
+        quem respondia.
+
+objetivo_md: |
+  A chamada que completa é a metade visível; o trace mostra a outra metade —
+  o desafio de senha e a perna que a central criou sozinha. O CDR fecha a
+  história com o veredito oficial.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `sofia global siptrace on` | o PBX passa a copiar cada mensagem SIP para o log |
+  | `devlab-ramal N --discar M` | registra N e liga para M |
+  | `grep -oE "(REGISTER|INVITE|ACK|BYE) sip:[^;>]*" …/freeswitch.log` | a história em pedidos, uma linha cada |
+  | `cut -d, -f1,3,10 …/cdr-csv/Master.csv` | o bilhete: quem ligou, para quem, causa do fim |
+
+  ### Sua tarefa
+
+  Com o trace ligado, complete uma chamada do **1002** para o **1000** e grave
+  em `/root/pedidos.txt` a lista de pedidos SIP extraída do log — a que mostra
+  as duas pernas. A prova de que a chamada completou é o bilhete dela no CDR.
+
+verificar:
+  - descricao: "o CDR registra uma chamada 1002 → 1000 completada"
+    script: |
+      #!/bin/bash
+      CSV=/usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv
+      if [ ! -f "$CSV" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao ha CDR ainda — nenhuma chamada foi completada","dica_diagnostica":"complete a chamada com devlab-ramal 1002 --discar 1000; o bilhete nasce quando ela termina"}'
+        exit 1
+      fi
+      if ! grep '"1002","1002","1000"' "$CSV" | grep -q 'NORMAL_CLEARING'; then
+        echo 'DEVLAB_JSON:{"mensagem":"o CDR nao tem uma chamada do 1002 para o 1000 encerrada normalmente","dica_diagnostica":"o 1000 esta no ar (tabela de registro)? a chamada precisa ser ATENDIDA e desligada para fechar em NORMAL_CLEARING"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/pedidos.txt mostra as duas pernas da chamada"
+    script: |
+      #!/bin/bash
+      ARQ=/root/pedidos.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"pedidos.txt nao existe","dica_diagnostica":"extraia os pedidos do log com o grep -oE da licao e redirecione para o arquivo"}'
+        exit 1
+      fi
+      INVITES=$(grep -c '^INVITE' "$ARQ")
+      if [ "${INVITES:-0}" -lt 3 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo tem $INVITES INVITE(s); uma chamada completa pela central tem 3\",\"dica_diagnostica\":\"o trace estava ligado ANTES da chamada? sofia global siptrace on\"}"
+        exit 1
+      fi
+      if ! grep -q '^INVITE sip:1000@127.0.0.1:6000' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"falta a perna B: o INVITE que a central origina para o endereco do 1000","dica_diagnostica":"o 1000 registrado recebe na porta 6000; se essa linha nao aparece, a central nao chegou a criar a segunda perna"}'
+        exit 1
+      fi
+      BYES=$(grep -c '^BYE' "$ARQ")
+      if [ "${BYES:-0}" -lt 2 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o arquivo tem $BYES BYE(s); a chamada se desmonta perna a perna, com um BYE em cada\",\"dica_diagnostica\":\"grave o arquivo DEPOIS de a chamada terminar\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  devlab-pbx cli "sofia global siptrace on"
+  devlab-ramal 1002 --discar 1000 --duracao 3 --silencioso
+  grep -oE "(REGISTER|INVITE|ACK|BYE) sip:[^;>]*" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log > /root/pedidos.txt
+
+dicas:
+  - "Ordem importa: ligue o trace (`sofia global siptrace on`, pelo devlab-pbx cli) ANTES da chamada — o log só ganha as mensagens dali em diante."
+  - "A chamada é `devlab-ramal 1002 --discar 1000`; a projeção dos pedidos é o grep -oE da demonstração, redirecionado com > para /root/pedidos.txt."
+  - "devlab-pbx cli \"sofia global siptrace on\" && devlab-ramal 1002 --discar 1000 && grep -oE \"(REGISTER|INVITE|ACK|BYE) sip:[^;>]*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log > /root/pedidos.txt"
+
+erros_comuns:
+  - match: "sofia global siptrace <on\\|off>"
+    digita: "devlab-pbx cli \"sofia siptrace on\""
+    mensagem: "USAGE:\n--------------------------------------------------------------------------------\nsofia global siptrace <on|off>\n(…a ajuda inteira do sofia)"
+    causa: "faltou o `global`: o sofia não reconheceu o subcomando e imprimiu a própria ajuda em vez de ligar o trace"
+    conserto: "devlab-pbx cli \"sofia global siptrace on\" — e repare que a primeira linha da ajuda já mostrava a forma certa"
+    categoria: sintaxe
+  - match: "No such file or directory"
+    digita: "grep -oE \"(REGISTER|INVITE|ACK|BYE) sip:[^;>]*\" /usr/local/freeswitch/log/freeswitch.log"
+    mensagem: "grep: /usr/local/freeswitch/log/freeswitch.log: No such file or directory"
+    causa: "o log não mora em log/ direto: a instalação guarda em var/log/freeswitch/ DENTRO do prefixo"
+    conserto: "o caminho completo é /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+    categoria: flag_errada
+  - match: "chamada=nao_atendida"
+    digita: "devlab-ramal 1002 --discar 1000 --duracao 3"
+    mensagem: "--- ramal 1002 ---\nregistro=ok\nchamada=nao_atendida"
+    causa: "ninguém atendeu a tempo — o destino não estava no ar como quem ATENDE, ou a chamada esperou mais do que a duração pedida"
+    conserto: "confira a tabela de registro; quem atende precisa estar no ar com devlab-ramal 1000 --atender"
+    categoria: conceitual
+
+cards_revisao:
+  - siptrace-mostra-o-sip-do-pbx
+  - chamada-no-pbx-sao-duas-pernas
+  - cdr-e-o-bilhete-da-chamada

@@ -99,8 +99,13 @@ case "$acao" in
       n=$(basename "$p" .pid); n=${n#ramal-}
       pid=$(cat "$p")
       # 'q' pelo stdin faria o pjsua sair limpo, mas o stdin dele já foi
-      # fechado pelo subshell que o alimentou. O TERM basta: o pjsua manda o
-      # REGISTER com Expires: 0 ao receber, e o PBX vê o ramal sair.
+      # fechado pelo subshell que o alimentou. O TERM derruba o processo SEM
+      # despedida — medido em 2026-08-07: a entrada segue na tabela do PBX
+      # (`sofia status profile internal reg`) até expirar sozinha, minutos
+      # depois. É diferente da saída limpa via 'q', que manda REGISTER com
+      # Expires: 0 e some da tabela na hora. A lição 3 da trilha F ensina
+      # exatamente essa diferença (softphone travado = registro velho), então
+      # não "conserte" isto sem reescrever a lição junto.
       kill "$pid" 2>/dev/null && diga "ramal $n: desligado"
       rm -f "$p"
     done

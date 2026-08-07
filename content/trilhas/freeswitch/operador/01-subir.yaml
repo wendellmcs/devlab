@@ -1,0 +1,243 @@
+id: pbx-op-01-subir
+trilha: freeswitch
+nivel: operador
+ordem: 1
+titulo: "A central é um processo — suba e leia o que ela disse"
+capacidade: "Sei subir e parar o PBX do lab e dizer, pelo log de subida, se ele acordou saudável."
+xp: 20
+prereqs: []
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # Sem setup de propósito: SUBIR o PBX e ler o que ele disse É a tarefa.
+  # As lições seguintes da trilha sobem o PBX no setup, porque nelas ele é
+  # infraestrutura; aqui ele é o objeto de estudo.
+
+ensina:
+  conceitos:
+    - id: pbx-e-um-processo
+      titulo: "a central telefônica é um programa: sobe, escreve log, responde — e pode não estar de pé"
+    - id: log-de-subida-e-a-linha-de-base
+      titulo: "o log de subida limpo é a linha de base; erro grave ao subir é defeito de config, não ruído"
+  comandos: [devlab-pbx]
+
+ensino:
+  gancho: |
+    "A telefonia parou. Ninguém faz nem recebe chamada."
+
+    Na trilha de troubleshooting o chamado começa numa chamada que existiu e
+    deu errado. Aqui ele começa antes: **existe central atendendo?** A central
+    telefônica desta trilha — o FreeSWITCH — não é uma caixa na parede. É um
+    programa, como um banco de dados ou um servidor web: alguém sobe, ele
+    escreve um log contando como acordou, e a partir daí atende ou não atende.
+
+    A primeira habilidade de quem opera um PBX é a mais barata e a mais
+    esquecida: subir, parar, e **ler o que ele disse ao acordar** — antes de
+    culpar telefone, rede ou operadora.
+
+  objetivos:
+    - verbo: executar
+      texto: "subir e parar o PBX do lab com devlab-pbx, esperando a confirmação"
+    - verbo: identificar
+      texto: "identificar no log de subida se o PBX acordou saudável ou gritando"
+    - verbo: explicar
+      texto: "explicar por que a subida limpa é a linha de base de todo diagnóstico futuro"
+
+  modelo_mental: |
+    O FreeSWITCH deste lab vive em `/usr/local/freeswitch`. Três lugares dele
+    importam desde já:
+
+    | | o que é |
+    |---|---|
+    | `bin/` | os programas: o PBX e o console |
+    | `etc/freeswitch/` | a árvore de configuração (a lição 2 entra nela) |
+    | `var/log/freeswitch/` | o que ele conta sobre si — a partir do log de subida |
+
+    A ferramenta do lab é o `devlab-pbx`, e ela existe por causa de uma
+    corrida: o comando que sobe o FreeSWITCH volta na hora, mas o PBX leva
+    alguns segundos para começar a atender. `devlab-pbx iniciar` **só devolve o
+    terminal quando o PBX responde** — assim o que vem depois dele já encontra
+    a central de pé. Rodar `iniciar` de novo com o PBX de pé não sobe um
+    segundo: ele avisa que já está no ar.
+
+    | subcomando | o que faz |
+    |---|---|
+    | `iniciar` | sobe e espera o PBX responder |
+    | `parar` | desliga |
+    | `estado` | fotografia: de pé?, perfis, ramais, chamadas, erros graves |
+    | `log [n]` | as últimas n linhas do log |
+    | `erros` | só as linhas `[ERR]` e `[CRIT]`, sem repetição |
+
+    ### O log de subida é um exame de admissão
+
+    Ao acordar, o PBX carrega dezenas de módulos e abre seus perfis de rede —
+    e escreve uma linha por passo. Cada linha tem uma gravidade: `[INFO]` e
+    `[NOTICE]` são narração, `[WARNING]` é ressalva, e `[ERR]`/`[CRIT]` são o
+    que interessa aqui: algo que ele tentou carregar **e não conseguiu**.
+
+    Neste lab, a subida normal tem **zero** `[ERR]` e **zero** `[CRIT]`. Isso
+    não é sorte, é decisão: um operador que se acostuma a ignorar dez erros
+    "normais" de subida ignora também o décimo primeiro, que é real. Guarde a
+    régua: **subida limpa é o normal; qualquer `[ERR]`/`[CRIT]` ao subir é
+    defeito de configuração e tem de ter dono.**
+
+  anatomia:
+    - linha: "devlab-pbx iniciar"
+      partes:
+        - trecho: "devlab-pbx"
+          papel: comando
+          explica: "a ferramenta do lab que sobe, para e interroga o PBX"
+        - trecho: "iniciar"
+          papel: argumento
+          explica: "sobe o FreeSWITCH e SÓ volta quando ele responde — sem isso o próximo comando chegaria antes da central"
+
+  demonstracao:
+    - comando: "devlab-pbx iniciar"
+      saida: |-2
+        FreeSWITCH de pé.
+         Name Type Data State
+         external profile sip:mod_sofia@127.0.0.1:5080 RUNNING (0)
+         internal profile sip:mod_sofia@127.0.0.1:5060 RUNNING (0)
+        2 profiles 1 alias
+      nota: "Alguns segundos de espera e a confirmação. As duas linhas de perfil são as portas de entrada da central: `internal` (onde os ramais vivem) e `external` (o lado de fora). A lição 2 volta nelas — por ora, `RUNNING` duas vezes é o que se quer ver."
+    - comando: "devlab-pbx erros"
+      saida: ""
+      nota: "**Não imprimir nada é a resposta certa.** Zero linhas de `[ERR]` ou `[CRIT]`: a subida foi limpa, e essa é a linha de base deste PBX. No dia em que aparecer uma linha aqui, ela é assunto — não ruído. (O log completo, com a narração toda da subida, fica a um `devlab-pbx log 20` de distância — você vai lê-lo na prática.)"
+    - comando: "devlab-pbx estado"
+      saida: |-2
+        FreeSWITCH: DE PÉ
+        perfis SIP:  2
+        ramais registrados: 0
+        chamadas agora: 0
+        erros graves no log: 0
+      nota: "A fotografia de agora: de pé, dois perfis SIP, nenhum ramal registrado ainda (isso é a lição 3), nenhuma chamada, nenhum erro grave. É o primeiro comando de qualquer chamado de telefonia."
+    - comando: "devlab-pbx parar"
+      saida: |-2
+        FreeSWITCH desligado.
+      nota: "Desligar também é operação sua: o PBX encerra as chamadas, fecha os perfis e sai."
+    - comando: "devlab-pbx estado"
+      saida: |-2
+        FreeSWITCH: DESLIGADO
+      nota: "A mesma pergunta, com a central desligada. Repare que o comando não quebra nem inventa: ele diz DESLIGADO. 'A telefonia parou' começa exatamente aqui — antes de qualquer telefone, a pergunta é se existe central atendendo."
+
+  pratica_guiada:
+    - instrucao: "Suba o PBX e espere a confirmação."
+      modelo: "devlab-pbx ____"
+      resposta: "devlab-pbx iniciar"
+    - instrucao: "Tire a fotografia do estado."
+      modelo: "devlab-pbx ____"
+      resposta: "devlab-pbx estado"
+    - instrucao: "Leia o fim do log de subida — as últimas 20 linhas, como o PBX as escreveu."
+      modelo: "devlab-pbx ____ 20"
+      resposta: "devlab-pbx log 20"
+    - instrucao: "Agora só o que importa para a régua: as linhas graves."
+      modelo: "devlab-pbx ____"
+      resposta: "devlab-pbx erros"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "`devlab-pbx estado` mostra `erros graves no log: 3`. Qual é o próximo comando, e o que você espera dele?"
+      resposta: |
+        `devlab-pbx erros` — ele mostra exatamente essas linhas, sem repetição.
+
+        O contador diz que algo gritou; as linhas dizem **o quê**. Neste lab a
+        subida normal é limpa, então três linhas graves significam que alguma
+        coisa mudou na configuração e não carregou. A investigação começa por
+        ler o que o próprio PBX escreveu — não por reiniciar até passar.
+    - tipo: predicao
+      pergunta: "Você roda `devlab-pbx parar` e, em seguida, `devlab-pbx estado`. O que aparece?"
+      resposta: |
+        `FreeSWITCH: DESLIGADO` — e só.
+
+        Não é erro do comando: é a resposta verdadeira à pergunta "como está a
+        central?". Perfis, ramais e chamadas nem são consultados, porque não
+        há processo para responder por eles.
+    - tipo: transferencia
+      pergunta: "Chamado num servidor de verdade: 'a telefonia parou'. Quais são as duas primeiras perguntas, na ordem?"
+      resposta: |
+        1. **O processo do PBX está de pé?** Se não está, nada do resto
+           importa ainda.
+        2. **O que o log diz da última subida?** Se ele subiu gritando, a
+           causa provavelmente está ali, escrita — antes de qualquer captura,
+           telefone ou operadora.
+
+        É barato, é rápido, e elimina metade das hipóteses antes de abrir
+        qualquer ferramenta sofisticada.
+
+objetivo_md: |
+  O PBX é um programa: sobe, conta como acordou, responde pelo próprio estado.
+  A subida limpa é a linha de base — e conferi-la custa dois comandos.
+
+  | Peça | Para que serve |
+  |---|---|
+  | `devlab-pbx iniciar` | sobe e espera a central responder |
+  | `devlab-pbx estado` | de pé?, perfis, ramais, chamadas, erros graves |
+  | `devlab-pbx erros` | só as linhas `[ERR]`/`[CRIT]`, sem repetição |
+  | `devlab-pbx log 20` | as últimas linhas do log, como ele as escreveu |
+  | `devlab-pbx parar` | desliga a central |
+
+  ### Sua tarefa
+
+  Deixe a central **de pé e com a subida limpa**: o PBX respondendo e o log de
+  subida sem nenhuma linha `[ERR]` ou `[CRIT]`.
+
+verificar:
+  - descricao: "o FreeSWITCH está de pé e respondendo"
+    script: |
+      #!/bin/bash
+      if ! /usr/local/freeswitch/bin/fs_cli -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o FreeSWITCH nao esta respondendo","dica_diagnostica":"suba com devlab-pbx iniciar e espere ele confirmar que esta de pe"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o log de subida está limpo: zero [ERR] e zero [CRIT]"
+    script: |
+      #!/bin/bash
+      LOG=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      if [ ! -f "$LOG" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o log nao existe — o PBX nunca chegou a subir","dica_diagnostica":"devlab-pbx iniciar sobe a central e cria o log de subida"}'
+        exit 1
+      fi
+      GRAVES=$(grep -cE '\[ERR\]|\[CRIT\]' "$LOG")
+      if [ "${GRAVES:-0}" != 0 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o log tem $GRAVES linha(s) grave(s)\",\"dica_diagnostica\":\"leia com devlab-pbx erros; neste lab a subida normal e limpa\"}"
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  devlab-pbx iniciar
+  devlab-pbx estado
+
+dicas:
+  - "A ferramenta do lab é o `devlab-pbx`, e o subcomando que sobe a central espera ela responder antes de devolver o terminal."
+  - "Depois de subir, confira a régua com `devlab-pbx estado`: a linha `erros graves no log` tem de estar em 0."
+  - "devlab-pbx iniciar"
+
+erros_comuns:
+  - match: "comando desconhecido 'status'"
+    digita: "devlab-pbx status"
+    mensagem: "erro: comando desconhecido 'status'."
+    causa: "os subcomandos do devlab-pbx são em português — a fotografia do estado chama-se `estado`, não `status`"
+    conserto: "devlab-pbx estado (e `devlab-pbx` sozinho lista todos os subcomandos)"
+    categoria: sintaxe
+  - match: "log ainda não existe"
+    digita: "devlab-pbx log"
+    mensagem: "erro: log ainda não existe."
+    causa: "o log de subida é escrito PELO PBX ao acordar; antes do primeiro iniciar não há o que ler"
+    conserto: "suba a central com devlab-pbx iniciar e leia em seguida"
+    categoria: conceitual
+  - match: "o FreeSWITCH não está de pé"
+    digita: "devlab-pbx cli \"sofia status\""
+    mensagem: "erro: o FreeSWITCH não está de pé. Rode: devlab-pbx iniciar"
+    causa: "interrogar a central exige a central: o console conversa com um processo vivo"
+    conserto: "devlab-pbx iniciar primeiro; depois pergunte o que quiser"
+    categoria: conceitual
+
+cards_revisao:
+  - pbx-e-um-processo
+  - log-de-subida-e-a-linha-de-base
