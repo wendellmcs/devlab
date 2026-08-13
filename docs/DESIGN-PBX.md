@@ -572,6 +572,37 @@ ramo de fora de hora). Mas um check que exigisse "caiu no ramo comercial"
 **reprovaria o aluno que estudasse de madrugada** — e o relógio do container é o
 do host, então não há como fixá-lo sem mentir sobre o ambiente.
 
+**Correção do que esta decisão dizia antes.** "O relógio do container é o do
+host" é verdade sobre o *instante* e falsa sobre a *leitura*, e a diferença é
+grande o bastante para confundir um aluno. Medido no mesmo minuto:
+
+| | |
+|---|---|
+| host | `2026-08-12 22:39 -03` (`America/Sao_Paulo`) |
+| container do lab | `2026-08-13 01:39 UTC` (`Etc/UTC`) |
+| diferença de epoch | **1 s** — só a latência de subir o container |
+
+Mesmo instante, **três horas e um dia** de diferença na leitura. Isso não
+quebra o check, porque check e dialplan leem o mesmo relógio (o do container) —
+mas quebra o aluno, que confere pelo relógio de pulso. Um aluno em Brasília às
+6h da manhã está às 9h para a central: **dentro** do horário comercial,
+contrariando o pulso dele.
+
+A saída não foi alinhar o fuso — seria mentir sobre o ambiente, e um PBX cujo
+fuso não é o de quem o opera é um defeito de campo, não uma esquisitice de lab.
+A lição passou a **dizer** que o lab roda em UTC, a ensinar
+`devlab-pbx cli "strftime %H:%M %Z"` como o jeito de perguntar, e as mensagens
+dos checks passaram a dizer "são NNh **na central**". O buraco virou o
+conteúdo que a própria lição já prometia: *pergunte a hora a quem vai decidir*.
+
+**Nota de ambiente, não do produto:** nesta máquina o relógio do WSL2 **pulou
+cinco dias** no meio de uma sessão (containers mostravam 7 de agosto enquanto o
+host já estava em 12), e depois os dois voltaram a concordar. É deriva conhecida
+de WSL2 depois de o Windows suspender, e corrige sozinha na sincronização
+seguinte. Não afeta os checks — eles leem o relógio e cobram o ramo daquele
+mesmo instante —, mas se um dia um veredito de horário parecer impossível,
+confira o relógio antes de culpar o dialplan.
+
 A saída: o check lê a hora corrente e cobra o ramo que ELA implica. O aluno é
 avaliado por ter escrito a condição certa, não por estudar no horário
 comercial. Vale a decisão 27 pelo avesso: quando a saída não pode ser fixa, o

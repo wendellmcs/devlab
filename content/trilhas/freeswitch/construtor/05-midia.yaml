@@ -154,9 +154,23 @@ ensino:
     Date/TimeMatch (PASS) [atendimento] break=on-false
     ```
 
-    E o relógio é o **da central**. Um PBX cujo fuso está errado roteia como
-    se fosse outra hora, e o sintoma que chega ao suporte é "a URA noturna
-    entrou às três da tarde".
+    E o relógio é o **da central** — não o seu. A distinção parece pedante até
+    a primeira vez que ela te morde, e neste lab ela morde já:
+
+    ```
+    devlab-pbx cli "strftime %Y-%m-%d %H:%M %Z"
+    ```
+
+    **O lab roda em UTC.** Se você está no horário de Brasília, a central está
+    **três horas à frente** de você — e depois das 21h ela já está no dia
+    seguinte. Estudando às 6h da manhã, o seu relógio diz madrugada e o da
+    central diz 9h: **dentro** do horário comercial. A condição vai casar, e
+    quem confiar no pulso vai achar que escreveu errado.
+
+    Não conserte isso: é o comportamento real. Um PBX cujo fuso não é o de quem
+    o opera roteia como se fosse outra hora, e o sintoma que chega ao suporte é
+    "a URA noturna entrou às três da tarde". A defesa, aqui e em produção, é a
+    mesma: **pergunte a hora a quem vai decidir**, nunca ao seu relógio.
 
     ### `anti-action`: o senão
 
@@ -280,6 +294,9 @@ ensino:
     - instrucao: "Ligue para a pergunta e tecle 42, encerrando com a tecla de cerquilha."
       modelo: "devlab-ramal 1050 --discar 7400 ____ \"42#\" --duracao 3"
       resposta: "devlab-ramal 1050 --discar 7400 --digitos \"42#\" --duracao 3"
+    - instrucao: "Pergunte à central que horas ela acha que são — não olhe o seu relógio."
+      modelo: "devlab-pbx cli \"____ %H:%M %Z\""
+      resposta: "devlab-pbx cli \"strftime %H:%M %Z\""
     - instrucao: "Depois de escrever a sua extensão, aplique a mudança."
       modelo: "devlab-pbx cli \"____\""
       resposta: "devlab-pbx cli \"reloadxml\""
@@ -351,6 +368,11 @@ objetivo_md: |
   qual ramo rodou — e lembre que isso depende da hora em que você estiver
   fazendo a lição.
 
+  > **Antes de decidir se está certo, pergunte a hora à central:**
+  > `devlab-pbx cli "strftime %H:%M %Z"`. O lab roda em **UTC**, então o
+  > relógio dela quase nunca é o seu. Quem confere pelo pulso conclui que a
+  > condição está errada quando ela está certa.
+
 verificar:
   - descricao: "o dialplan foi completado e é XML bem formado"
     script: |
@@ -405,12 +427,12 @@ verificar:
       fi
       if [ "$HORA" -ge 8 ] && [ "$HORA" -le 17 ]; then
         if ! grep -qE 'Action bridge\(user/1000@' "$L"; then
-          echo "DEVLAB_JSON:{\"mensagem\":\"sao ${HORA}h, dentro do horario, e a chamada nao foi conectada ao ramal 1000\",\"dica_diagnostica\":\"a acao do ramo que CASA e o bridge para user/1000@\\\${domain_name}\"}"
+          echo "DEVLAB_JSON:{\"mensagem\":\"sao ${HORA}h NA CENTRAL (o lab roda em UTC, nao no seu fuso) — dentro do horario, e a chamada nao foi conectada ao ramal 1000\",\"dica_diagnostica\":\"a acao do ramo que CASA e o bridge para user/1000@\\\${domain_name}\"}"
           exit 1
         fi
       else
         if ! grep -qE 'ANTI-Action transfer\(7300\)' "$L"; then
-          echo "DEVLAB_JSON:{\"mensagem\":\"sao ${HORA}h, fora do horario, e a chamada nao foi transferida para o 7300\",\"dica_diagnostica\":\"o ramo do senao e uma <anti-action> com application=transfer e data=7300\"}"
+          echo "DEVLAB_JSON:{\"mensagem\":\"sao ${HORA}h NA CENTRAL (o lab roda em UTC, nao no seu fuso) — fora do horario, e a chamada nao foi transferida para o 7300\",\"dica_diagnostica\":\"o ramo do senao e uma <anti-action> com application=transfer e data=7300\"}"
           exit 1
         fi
         if [ ! -s /root/recados/1050.wav ]; then
