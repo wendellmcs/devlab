@@ -57,7 +57,7 @@ não é o caminho recomendado.
 Dentro do **Ubuntu do WSL2** (ou de qualquer Linux), um comando:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wendellmax/devlab/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/wendellmcs/devlab/main/install.sh | bash
 ```
 
 Ele clona o repositório em `~/devlab` e chama `scripts/setup.sh`, que cuida do
@@ -71,7 +71,7 @@ idempotente — rodar de novo só conserta o que faltar.
 > pede `sudo`; desconfiar é o comportamento certo, e não custa nada:
 >
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/wendellmax/devlab/main/install.sh | less
+> curl -fsSL https://raw.githubusercontent.com/wendellmcs/devlab/main/install.sh | less
 > ```
 >
 > São ~100 linhas. O que ele faz: garante o `git`, clona este repositório e
@@ -582,7 +582,7 @@ Se você bifurcar o projeto, troque o caminho do repositório em
 README:
 
 ```bash
-sed -i 's|wendellmax/devlab|<voce>/<repo>|g' install.sh README.md
+sed -i 's|wendellmcs/devlab|<voce>/<repo>|g' install.sh README.md
 ```
 
 ### Licença

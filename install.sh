@@ -2,7 +2,7 @@
 #
 # DevLab — instalação em um comando.
 #
-#   curl -fsSL https://raw.githubusercontent.com/wendellmax/devlab/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/wendellmcs/devlab/main/install.sh | bash
 #
 # O que este script faz: garante o git, clona (ou atualiza) o repositório e
 # entrega o resto para scripts/setup.sh, que cuida de Node, Docker, Ollama,
@@ -15,7 +15,7 @@
 #   DEVLAB_ARGS   opções repassadas ao setup  (ex.: "-y --sem-ia")
 set -euo pipefail
 
-REPO="${DEVLAB_REPO:-https://github.com/wendellmax/devlab.git}"
+REPO="${DEVLAB_REPO:-https://github.com/wendellmcs/devlab.git}"
 DESTINO="${DEVLAB_DIR:-$HOME/devlab}"
 REF="${DEVLAB_REF:-main}"
 
