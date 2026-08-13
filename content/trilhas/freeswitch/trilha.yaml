@@ -6,11 +6,12 @@ resumo: >-
 ordem: 5
 icone: "☎"
 fase: 3
-# Operador e construtor estão escritos e exercitados; o engenheiro vem a
-# seguir. A capacidade declarada por nível abaixo continua sendo o rótulo
-# honesto do que cada um entrega.
+# Os três níveis estão escritos e exercitados. A capacidade declarada por nível
+# abaixo é o rótulo honesto do que cada um entrega — o engenheiro não promete
+# URA com menus aninhados nem conferência, que ficaram de fora (o construtor
+# entrega URA de um nível).
 situacao: disponivel
 capacidades:
   operador: "Sei operar o fs_cli, registrar ramal e ler o trace de uma chamada."
   construtor: "Sei criar usuário no directory e escrever dialplan com contextos, condições, ações e mídia."
-  engenheiro: "Sei projetar roteamento, troncos, failover e endurecer o PBX contra fraude."
+  engenheiro: "Sei entregar caixa postal, grupos de toque, troncos com DID e failover; sei medir capacidade e provar como uma fraude entrou."

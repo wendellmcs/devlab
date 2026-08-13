@@ -697,6 +697,182 @@ validação esconde metade do código. A lição passou a aceitar `Date/Time ?Ma
 e a ENSINAR a discrepância, que é o tipo de coisa que quem filtra log de PBX vai
 encontrar sozinho, no pior momento.
 
+---
+
+# As decisões que as seis lições do Engenheiro custaram (2026-08-13)
+
+As seis abaixo saíram de escrever o nível, e três delas **corrigem o que este
+documento e a intuição diziam antes**.
+
+## 59. Um `bridge` que falha nem sempre encerra a chamada: depende da causa
+
+A crença — inclusive a que a primeira versão da lição 1 ensinava — era que um
+`bridge` sem `continue_on_fail` derruba a chamada. **Não derruba.** Medido nos
+três estados em que um ramal chamado pode estar, com o mesmo dialplan:
+
+| estado do ramal | causa | sem `continue_on_fail` | o chamador recebe |
+|---|---|---|---|
+| registrado, toca, ninguém pega | `NO_ANSWER` (19) | o roteiro **continua** | é atendido pela caixa |
+| softphone morto, registro ainda na tabela | `NORMAL_TEMPORARY_FAILURE` (41) | o roteiro **para** | `503` |
+| registro já fora da tabela | `USER_NOT_REGISTERED` (806) | o roteiro **para** | `480` |
+
+O estado do meio é o mais provável logo depois de alguém desligar um telefone
+(o registro dura minutos), e é o mesmo "aparece registrado e não toca" da lição
+3 do operador.
+
+Consequência de conteúdo: a lição não pode ensinar "sem `continue_on_fail` a
+caixa postal não atende" — porque atende, no caso em que quase todo mundo
+testa. O que ela ensina é que o comportamento padrão **muda com a causa**, e
+que declarar é mais barato do que decorar a lista.
+
+Isto também obrigou a criar `devlab-ramal --nao-atender`: sem um ramal
+registrado que TOCA e não atende, não há como produzir `NO_ANSWER`, e as duas
+primeiras lições do nível ficariam sem o estado que interessa.
+
+## 60. `call_timeout` é da caçada; `leg_timeout` é do membro — e vai na string
+
+Num grupo de toque sequencial (`|`), `set call_timeout=5` **não** dá cinco
+segundos a cada telefone: dá cinco segundos à caçada inteira. Medido: o log
+mostra um único `New Channel`, `NO_ANSWER`, e o segundo membro nunca é tentado.
+
+O relógio por membro se escreve **dentro** da string de discagem, e as duas
+formas funcionam:
+
+```
+{leg_timeout=4}user/1071@…|user/1073@…      ← vale para todos os destinos
+[leg_timeout=4]user/1071@…|[leg_timeout=4]user/1073@…   ← por destino
+```
+
+Com ele, cada membro morre com `ALLOTTED_TIMEOUT` e o seguinte nasce. Sem ele,
+o grupo sequencial é um grupo de um membro só, e o defeito passa em qualquer
+teste em que o primeiro telefone atenda.
+
+As duas assinaturas que separam as estratégias no log, e que são os oráculos
+dos checks (nada de cronômetro — decisão 27):
+
+| estratégia | evidência |
+|---|---|
+| simultâneo (`,`) | os canais nascem **todos antes** de qualquer morte, e os perdedores morrem com `LOSE_RACE` |
+| sequencial (`\|`) | cada `New Channel` vem **depois** do `ALLOTTED_TIMEOUT` do anterior, e não há `LOSE_RACE` |
+
+## 61. O tronco do lab é o próprio perfil externo, e a perna B é quem sabe disso
+
+Um gateway apontando para `127.0.0.1:5080` faz a chamada sair pelo perfil
+externo e voltar por ele, caindo no contexto `public` — o mesmo percurso, os
+mesmos dois contextos e os mesmos contadores de um tronco real. Medido ponta a
+ponta: ramal → `bridge sofia/gateway/operadora/…` → `sofia/external/…` →
+`public` → `transfer` → ramal de destino, com `CallsOUT` do gateway indo de 0
+a 1. É o que torna troncos, DID e failover ensináveis com `--network none`.
+
+O failover é a mesma lista da decisão 60 aplicada a gateways: um tronco morto
+(porta fechada) recusa **na hora**, com `NORMAL_TEMPORARY_FAILURE`, e a lista
+segue para o seguinte. Os contadores são o oráculo, e são complementares:
+`FailedCallsOUT` sobe no reserva, `CallsOUT` sobe no principal.
+
+E o bilhete: **`${sip_gateway_name}` é variável da perna B**. Com o
+`legs="a"` de fábrica a coluna do tronco existe e vem sempre vazia — o pior dos
+mundos, porque parece que a central não tem o dado. Com `legs="ab"` uma chamada
+que passou por failover deixa duas linhas, uma por tronco tentado, cada uma com
+a própria causa.
+
+## 62. `reloadxml` mente mais duas vezes, e a segunda é silenciosa
+
+A decisão 50 listou três mentiras. Faltavam duas, as duas medidas aqui:
+
+**4. Ele não instancia gateway novo.** O arquivo está no disco, o XML está
+certo, o `reloadxml` responde `+OK`, e `sofia status gateway <nome>` responde
+`Invalid Gateway!`. Quem instancia é `sofia profile external rescan`.
+
+**5. Um `<include>` numa linha só é ignorado sem aviso nenhum.** Isto custou
+uma investigação inteira. O pré-processador do FreeSWITCH remove o invólucro
+`<include>` por LINHA; um arquivo escrito assim:
+
+```xml
+<include><user id="1089"><params>…</params></user></include>
+```
+
+é XML perfeitamente válido, passa em `xml.etree`, o `reloadxml` responde
+`+OK [Success]` — e `user_exists id 1089` responde **`false`**. O usuário
+simplesmente não existe. O mesmo vale para gateway em `sip_profiles/external/`.
+A tag de abertura e a de fechamento precisam estar em linhas próprias.
+
+Corolário que já valia e agora vale mais: **o oráculo de "a minha config
+entrou" é sempre a central viva** — `user_exists`, `user_data`,
+`sofia status gateway` — e nunca o arquivo nem a resposta do `reloadxml`.
+
+## 63. O primeiro teto de capacidade é de config, e o sintoma é recusa, não lentidão
+
+A trilha G deixou carga e capacidade para cá (decisão 37), e o que a F encontra
+primeiro não é a máquina:
+
+```
+[CRIT] switch_time.c:1243 Over Session Rate of 30!
+[CRIT] switch_core_session.c:2422 Throttle Error! 47
+```
+
+`sessions-per-second` nasce em **30**. Medido nos limites padrão de um lab
+(1 CPU, 512 MB, 256 pids), com `sipp -sn uac` contra a porta 5080:
+
+| teto | 120 chamadas a 60/s | 120 chamadas a 40/s | avisos no log |
+|---|---|---|---|
+| 30 (fábrica) | ~52 a 58 recusadas | ~22 a 30 recusadas | `Over Session Rate of 30!` |
+| 120 | **0 recusadas** | **0 recusadas** | nenhum |
+
+A lição cobra a taxa de **40/s**, e não a de 60: as duas passam do teto de
+fábrica com folga, e a de 40 deixa margem para a máquina que roda o teste estar
+ocupada com outra coisa — que é o caso toda vez que o `npm run valida` roda a
+suíte inteira.
+
+O que o gerador recebe é `SIP/2.0 503 Maximum Calls In Progress`, **na hora** —
+descarte de excesso, não degradação. As chamadas que entraram não são afetadas,
+e o sintoma em campo é "algumas ligações não completam no pico, mas as que
+completam ficam perfeitas". Quem lê isso como lentidão vai investigar codec,
+rede e disco e não vai achar nada.
+
+Dois números **não** entram em saída de demonstração (decisão 27): quantas
+completaram e quantas falharam sob excesso. Foram medidos 52, 57 e 58 falhas em
+execuções do mesmo comando. O que é estável, e por isso é o que as lições
+mostram, é a **resposta SIP** e a **linha do log** — as duas idênticas em toda
+execução.
+
+E o parâmetro tem dois lugares, com efeitos diferentes: `fsctl sps <n>` vale
+agora e morre no restart; `sessions-per-second` no `switch.conf.xml` vale a
+partir do próximo restart. **`reloadxml` não aplica nenhum dos dois** — este é
+lido pelo núcleo na subida. Quem muda em produção muda os dois.
+
+Um segundo teto existe e não foi encontrado neste hardware: `max-sessions`
+nasce em 1000, e o `pids.current` do container ficou em 149 dos 256 no pico da
+carga. O muro do hardware está acima do que estes testes exercitaram, e a lição
+diz isso em vez de prometer um número.
+
+## 64. `devlab-pbx parar` voltava antes de o processo morrer
+
+Defeito real da ferramenta, encontrado ao escrever a lição de carga e
+consertado. O `parar` esperava o `fs_cli` deixar de responder — o que acontece
+uns 3 s depois do `shutdown` — e declarava vitória. Mas o processo continua
+vivo por **mais de 10 s** depois disso, e um `devlab-pbx iniciar` nessa janela
+falha CALADO: a instância nova encontra a antiga ainda de pé, desiste sem
+escrever no log, e o `iniciar` fica 60 s esperando um PBX que nunca vai subir.
+
+O `parar` passou a esperar o estado do processo em `/proc`. Ele espera até `Z`,
+e não até o processo sumir, porque o PID 1 deste container é um `sleep`, que
+não recolhe zumbi nenhum — esperar o desaparecimento travaria para sempre.
+Medido depois: três ciclos `parar`/`iniciar` seguidos, todos limpos, com o
+`parar` levando ~5 s em vez de ~3 s.
+
+## O que o nível Engenheiro NÃO cobre, e por quê
+
+O PRD §7 F.8 pede **URA com menus aninhados**, e F.10 cita **`mod_conference`**.
+Nenhum dos dois virou lição, e a razão é a mesma: o capstone do nível
+Construtor já entrega URA de um nível com `play_and_get_digits` e `transfer`, e
+aninhar menus é repetir aquele mecanismo mais fundo — custo alto de lição,
+capacidade nova baixa. `mod_conference` está compilado e disponível, e ficou
+fora porque as seis lições escolhidas cobrem F.7, F.9 e F.10 com defeitos de
+campo, que é o critério da trilha. A capacidade declarada em `trilha.yaml` foi
+escrita para não prometer nenhum dos dois.
+
+---
+
 ## O que ainda não foi decidido
 
 - **Multi-container ou um só.** O PRD §4.2 prevê `compose.yaml` para labs de

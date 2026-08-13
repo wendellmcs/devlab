@@ -1,0 +1,438 @@
+id: pbx-eng-06-capstone
+trilha: freeswitch
+nivel: engenheiro
+ordem: 6
+titulo: "Chamado 9902: quatro mil minutos para o exterior num sábado"
+capacidade: "Sei provar como uma fraude entrou numa central, fechar cada porta e demonstrar que o serviço legítimo continuou de pé."
+xp: 120
+capstone: true
+prereqs: [pbx-eng-05-carga]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # O setup é a central inteira que a trilha construiu: tronco com DID, rota de
+  # saída, contexto da empresa, ramais e o bilhete que diz por qual tronco cada
+  # chamada saiu. Nada aqui está errado — é a linha de base contra a qual o
+  # aluno vai medir o que o `break` fez.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    rm -f "$C/directory/default/example.com.xml"
+    cat > "$C/sip_profiles/external/operadora.xml" <<'XML'
+    <include>
+      <gateway name="operadora">
+        <param name="proxy" value="127.0.0.1:5080"/>
+        <param name="register" value="false"/>
+      </gateway>
+    </include>
+    XML
+    cat > "$C/dialplan/public/50_carrier.xml" <<'XML'
+    <include>
+      <!-- O LADO DA OPERADORA: o que ela faz com o que sai pelo tronco. -->
+      <extension name="carrier-completa">
+        <condition field="destination_number" expression="^55\d+$">
+          <action application="answer"/>
+          <action application="playback" data="ivr/ivr-hello.wav"/>
+          <action application="sleep" data="20000"/>
+          <action application="hangup"/>
+        </condition>
+      </extension>
+    </include>
+    XML
+    cat > "$C/dialplan/public/60_did.xml" <<'XML'
+    <include>
+      <extension name="did-escritorio">
+        <condition field="destination_number" expression="^1140028922$">
+          <action application="transfer" data="1080 XML escritorio"/>
+        </condition>
+      </extension>
+    </include>
+    XML
+    cat > "$C/dialplan/escritorio.xml" <<'XML'
+    <include>
+      <context name="escritorio">
+
+        <extension name="ramais">
+          <condition field="destination_number" expression="^(108\d)$">
+            <action application="bridge" data="user/$1@${domain_name}"/>
+          </condition>
+        </extension>
+
+        <extension name="saida">
+          <condition field="destination_number" expression="^0(\d+)$">
+            <action application="bridge" data="sofia/gateway/operadora/$1"/>
+          </condition>
+        </extension>
+
+      </context>
+    </include>
+    XML
+    for n in 1080 1081; do
+      cat > "$C/directory/default/$n.xml" <<XML
+    <include>
+      <user id="$n">
+        <params>
+          <param name="password" value="devlab"/>
+        </params>
+        <variables>
+          <variable name="user_context" value="escritorio"/>
+          <variable name="effective_caller_id_number" value="$n"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    done
+    python3 - <<'PY'
+    import pathlib
+    arquivo = pathlib.Path(
+        '/usr/local/freeswitch/etc/freeswitch/autoload_configs/cdr_csv.conf.xml')
+    texto = arquivo.read_text()
+    texto = texto.replace(
+        '<param name="default-template" value="example"/>',
+        '<param name="default-template" value="devlab"/>')
+    texto = texto.replace(
+        '<param name="legs" value="a"/>',
+        '<param name="legs" value="ab"/>\n'
+        '    <param name="master-file-only" value="true"/>')
+    texto = texto.replace(
+        '  </templates>',
+        '    <template name="devlab">'
+        '"${caller_id_number}","${destination_number}",'
+        '"${sip_gateway_name}","${hangup_cause}","${billsec}"</template>\n'
+        '  </templates>')
+    arquivo.write_text(texto)
+    PY
+  # As DUAS portas, e as duas são de campo. Nenhuma delas é um erro de digitação:
+  # cada uma é uma decisão que alguém tomou e que parecia razoável na hora.
+  #
+  # 1. o `99_fallback.xml` manda para o contexto DA EMPRESA tudo o que chega de
+  #    fora e não casa com o DID. É o atalho clássico de quem estava com pressa
+  #    para fazer um segundo DID funcionar — e o contexto da empresa tem a rota
+  #    de saída. Quem chega pelo perfil externo NÃO se autentica: o convite
+  #    entra, casa com a rota de saída e sai pelo tronco;
+  # 2. o ramal 1089 ficou com a senha `1234`, do dia em que foi criado para um
+  #    teste. Um registro adivinhado dá acesso ao contexto inteiro da empresa.
+  #
+  # Fechar UMA delas e declarar vitória é o erro que este capstone mede.
+  break: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    cat > "$C/dialplan/public/99_fallback.xml" <<'XML'
+    <include>
+      <extension name="fallback">
+        <condition>
+          <action application="transfer" data="${destination_number} XML escritorio"/>
+        </condition>
+      </extension>
+    </include>
+    XML
+    cat > "$C/directory/default/1089.xml" <<'XML'
+    <include>
+      <user id="1089">
+        <params>
+          <param name="password" value="1234"/>
+        </params>
+        <variables>
+          <variable name="user_context" value="escritorio"/>
+          <variable name="effective_caller_id_number" value="1089"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    devlab-pbx iniciar >/dev/null
+    devlab-ramal 1080 --atender --silencioso
+
+ensina:
+  conceitos: []
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 9902, aberto às 7h de uma segunda-feira pelo gerente financeiro:
+
+    > "A operadora ligou. **Quatro mil minutos para o exterior** entre a
+    > madrugada de sábado e a de domingo, todos faturados na nossa conta. Eles
+    > querem saber se foi fraude antes de discutir o valor.
+    >
+    > Preciso de três coisas até o meio-dia: **como entraram**, **a porta
+    > fechada**, e a garantia de que o cliente **não vai ficar sem telefone**
+    > por causa do conserto."
+
+    Três coisas, nessa ordem, e a ordem importa: uma vez fechada a porta, o
+    ataque não reproduz — e você fica sem a prova que a operadora está pedindo.
+
+    Você tem tudo o que precisa das cinco lições. Ninguém vai dizer por onde
+    começar.
+
+  objetivos:
+    - verbo: diagnosticar
+      texto: "reproduzir a fraude e provar, pelo bilhete, por qual tronco ela saiu e quem a originou"
+    - verbo: construir
+      texto: "fechar cada caminho de entrada sem desligar o serviço legítimo"
+    - verbo: executar
+      texto: "demonstrar, depois do conserto, que o ataque falha e que o DID e a saída continuam funcionando"
+
+  modelo_mental: |
+    Nada de novo aqui — o capstone é integrar o que as cinco lições deram:
+
+    1. **Quem chega de fora não se autentica e não escolhe o contexto.** É o
+       perfil SIP que decide onde a chamada entra, e o que estiver alcançável a
+       partir dali está aberto ao mundo (lição 3).
+    2. **A rota de saída é a coisa mais cara da central.** Todo caminho que
+       chegue até ela é uma decisão de segurança, mesmo quando foi escrito como
+       decisão de roteamento (lição 3).
+    3. **O bilhete é a prova, se ele tiver os campos certos.** Quem ligou, para
+       onde, por qual tronco e por quanto tempo — é isso que se manda para a
+       operadora (lição 4).
+    4. **Uma conta é tão forte quanto a senha dela.** Um registro adivinhado
+       entrega o contexto inteiro do usuário, e o contexto tem a rota de saída
+       (lições 1 a 3, e o nível construtor).
+    5. **Consertar é uma mudança como outra qualquer:** confirme pelo
+       comportamento, nunca relendo o arquivo, e lembre que o `reloadxml` não
+       instancia gateway e nem sempre é o que precisa ser recarregado
+       (lições 3 e 5).
+
+  anatomia: []
+
+  demonstracao:
+    - comando: "devlab-pbx cli \"sofia status gateway operadora\" | grep -E \"^(Proxy|Status|CallsOUT)\""
+      saida: |-2
+        Proxy   	sip:127.0.0.1:5080
+        Status  	UP
+        CallsOUT	0
+      nota: "O tronco por onde a conta foi feita. É por ele que qualquer chamada paga sai — e é o alvo de quem entrou."
+    - comando: "grep -rn \"XML escritorio\" /usr/local/freeswitch/etc/freeswitch/dialplan/public/ | sed \"s|.*/public/||\" | sort"
+      saida: |-2
+        60_did.xml:4:      <action application="transfer" data="1080 XML escritorio"/>
+        99_fallback.xml:4:      <action application="transfer" data="${destination_number} XML escritorio"/>
+      nota: "Todo caminho que, vindo de FORA, leva para dentro da empresa. Leia cada um perguntando duas coisas: **quem** pode chegar até aqui, e **o que ele alcança** depois de chegar. Uma das duas linhas responde a primeira pergunta com \"qualquer um\"."
+    - comando: "devlab-pbx cli \"sofia status profile internal reg\" | grep \"^User:\" | sort"
+      saida: |-2
+        User:       	1080@127.0.0.1
+      nota: "Quem está registrado agora. A recepção (1080) está no ar; o resto da fraude não deixou nada aqui — registro é presença, e quem entrou no sábado já foi embora."
+
+  pratica_guiada: []
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "A operadora pergunta se as chamadas saíram \"de dentro\". Como o bilhete responde isso, e o que ele NÃO responde?"
+      resposta: |
+        O bilhete responde **por qual tronco** cada chamada saiu, **quem ela
+        dizia ser**, para onde foi e por quanto tempo. É o suficiente para a
+        conversa com a operadora: são chamadas da sua central, pelo seu tronco,
+        e o tempo faturado bate.
+
+        O que ele **não** responde é se quem originou tinha direito. O campo de
+        quem ligou é o que o convite SIP afirmou — e num convite que ninguém
+        autenticou, esse nome é o que o atacante quis escrever. Um bilhete com
+        um nome estranho é indício; um bilhete com um ramal legítimo não é
+        inocência.
+
+        A resposta completa vem de cruzar o bilhete com o caminho: qual
+        contexto roteou, e se aquela chamada passou por autenticação em algum
+        momento.
+    - tipo: predicao
+      pergunta: "Você fecha a porta de fora e testa o DID: ele continua funcionando. O gerente pergunta se acabou. O que você verifica antes de responder?"
+      resposta: |
+        Se **o outro caminho** ainda está aberto.
+
+        Uma central tem mais de uma porta, e a que você achou primeiro é a mais
+        visível, não necessariamente a que foi usada. Uma conta com senha fraca
+        entrega o contexto inteiro do usuário — inclusive a rota de saída — e
+        não deixa nenhum rastro na configuração de roteamento, porque o
+        roteamento dela está correto.
+
+        O teste que responde é o mesmo dos dois lados: tente entrar e veja se
+        sai chamada. Fechar uma porta e declarar vitória é como consertar a
+        primeira causa que se encontra sem verificar se ela explica todo o
+        volume — e quatro mil minutos são muito volume.
+    - tipo: transferencia
+      pergunta: "Depois deste incidente, que mudança você proporia para que a próxima porta aberta não custe quatro mil minutos?"
+      resposta: |
+        Um limite e um alarme, porque nenhum dos dois depende de acertar a
+        próxima vulnerabilidade.
+
+        **Limite:** a rota de saída não precisa aceitar qualquer destino, em
+        qualquer horário, em qualquer volume. Restringir prefixos
+        internacionais, ou exigir uma autorização por conta, transforma um
+        incidente de quatro mil minutos num de quarenta.
+
+        **Alarme:** os eventos ao vivo já dizem, no instante do fato, quem saiu
+        por qual tronco. Uma regra simples — volume incomum de saída fora do
+        horário comercial — teria avisado no sábado de madrugada, e não na
+        segunda de manhã pela boca da operadora.
+
+        Fechar a porta que você achou é o conserto. As duas coisas acima são o
+        que muda o custo da porta que você ainda não achou.
+
+objetivo_md: |
+  A central está no ar como a trilha a construiu: tronco **`operadora`**, DID
+  **1140028922** caindo na recepção (**1080**), rota de saída pelo **`0`**, e o
+  bilhete registrando por qual tronco cada chamada saiu.
+
+  Alguém fez quatro mil minutos por esse tronco no fim de semana.
+
+  ### Sua entrega
+
+  **1. A prova, antes do conserto.** Reproduza a fraude e grave em
+  **`/root/prova-da-fraude.txt`** os **bilhetes** das chamadas fraudulentas —
+  os que mostram o tronco por onde elas saíram e quem as originou.
+
+  > Colete agora. Depois de fechada a porta, o ataque não reproduz, e a
+  > operadora vai pedir a prova.
+
+  Há **mais de um** caminho de entrada. Um deles não exige credencial nenhuma;
+  o outro exige uma que se adivinha.
+
+  **2. As portas fechadas.** Nenhum dos caminhos pode continuar levando à rota
+  de saída.
+
+  **3. O serviço de pé.** Depois do conserto:
+
+  - o **DID 1140028922** continua caindo na recepção;
+  - o ramal **1081** continua conseguindo ligar para fora;
+  - o ramal **1089**, que é da recepcionista, **continua existindo** — ele não
+    pode simplesmente sumir da central.
+
+  Não há dicas nesta lição. Tudo o que ela cobra já foi ensinado.
+
+verificar:
+  - descricao: "quem chega de fora sem credencial não alcança mais o tronco"
+    script: |
+      #!/bin/bash
+      CSV=/usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      # Nada de apagar o Master.csv: o mod_cdr_csv o mantem aberto, e um `rm`
+      # so desliga o caminho do inode. Marcamos onde ele esta e lemos o resto.
+      ANTES=$(grep -c '' "$CSV" 2>/dev/null || echo 0)
+      cd /tmp || exit 1
+      timeout 60 sipp -sn uac 127.0.0.1:5080 -s 0551199998888 -m 1 -r 1 -d 4000 \
+        -nostdin -fd 5 >/dev/null 2>&1
+      sleep 1
+      NOVAS=$(sed -n "$((ANTES + 1)),\$p" "$CSV" 2>/dev/null)
+      if printf '%s\n' "$NOVAS" | grep -q '"551199998888","operadora"'; then
+        echo 'DEVLAB_JSON:{"mensagem":"um convite sem credencial nenhuma continua saindo pelo tronco","dica_diagnostica":"quem chega pelo perfil externo cai no contexto que o PERFIL declara. Olhe tudo o que, a partir dele, leva ao contexto que tem a rota de saida"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o ramal 1089 continua existindo e não registra mais com a senha adivinhada"
+    script: |
+      #!/bin/bash
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if [ "$($CLI -x 'user_exists id 1089 127.0.0.1' 2>/dev/null | tr -d '\r')" != "true" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o ramal 1089 nao existe mais na central","dica_diagnostica":"ele e da recepcionista e precisa continuar funcionando: o conserto de uma senha fraca e uma senha forte, nao apagar a conta"}'
+        exit 1
+      fi
+      devlab-ramal --parar 1089 >/dev/null 2>&1
+      sleep 1
+      if devlab-ramal 1089 --senha 1234 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o 1089 ainda registra com a senha 1234","dica_diagnostica":"uma conta adivinhada entrega o contexto inteiro do usuario, e esse contexto tem a rota de saida — o roteamento dela esta correto, e e por isso que essa porta nao aparece lendo dialplan"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o DID continua caindo na recepção e o 1081 continua ligando para fora"
+    script: |
+      #!/bin/bash
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      CSV=/usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv
+      : > "$L"
+      if ! devlab-ramal 1081 --discar 01140028922 --duracao 6 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"ligar para o proprio DID parou de funcionar","dica_diagnostica":"o conserto nao pode fechar a porta da frente junto com a dos fundos: a chamada sai pelo tronco e volta pelo perfil externo, e o DID precisa continuar sendo atendido la"}'
+        exit 1
+      fi
+      if ! grep -qE 'EXECUTE .*bridge\(user/1080@' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada do DID nao chegou mais a recepcao","dica_diagnostica":"o DID e uma regra explicita: ela transfere um numero conhecido para dentro, e continua valendo depois de qualquer coisa generica ter sido removida"}'
+        exit 1
+      fi
+      ANTES=$(grep -c '' "$CSV" 2>/dev/null || echo 0)
+      if ! devlab-ramal 1081 --discar 0552112345678 --duracao 5 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o ramal 1081 parou de conseguir ligar para fora","dica_diagnostica":"a rota de saida e legitima para quem se autenticou: o que precisa desaparecer e o caminho que leva ate ela sem autenticacao"}'
+        exit 1
+      fi
+      sleep 1
+      if ! sed -n "$((ANTES + 1)),\$p" "$CSV" 2>/dev/null | grep -q '"operadora"'; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada do 1081 completou sem sair pelo tronco","dica_diagnostica":"o bilhete tem de mostrar o tronco na chamada de um ramal legitimo; se a coluna esta vazia, a chamada nao passou pelo gateway"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/prova-da-fraude.txt traz os bilhetes das chamadas fraudulentas"
+    script: |
+      #!/bin/bash
+      ARQ=/root/prova-da-fraude.txt
+      if [ ! -s "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"prova-da-fraude.txt nao existe ou esta vazio","dica_diagnostica":"a prova e o bilhete: reproduza cada caminho de entrada ANTES de fecha-lo e guarde as linhas que mostram o tronco"}'
+        exit 1
+      fi
+      if ! grep -q '"551199998888","operadora"' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a prova nao mostra nenhuma chamada saindo pelo tronco para o numero fraudado","dica_diagnostica":"o bilhete que interessa e o da perna que saiu: ele traz o destino sem o codigo de saida e o nome do tronco"}'
+        exit 1
+      fi
+      if ! grep -qE '^"sipp"|^"[^"]*","551199998888","operadora"' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a prova nao identifica quem originou as chamadas","dica_diagnostica":"o primeiro campo do bilhete e quem a chamada dizia ser; guarde a linha inteira, e nao so o destino"}'
+        exit 1
+      fi
+      if ! grep -q '"1089"' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a prova cobre so um dos caminhos de entrada","dica_diagnostica":"ha mais de uma porta, e cada uma deixa um bilhete com um originador diferente. A operadora vai perguntar se o volume todo se explica"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  C=/usr/local/freeswitch/etc/freeswitch
+  CSV=/usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv
+
+  # 1. A prova, ANTES do conserto: reproduzir os dois caminhos de entrada.
+  antes=$(grep -c '' "$CSV" 2>/dev/null); antes=${antes:-0}
+  timeout 60 sipp -sn uac 127.0.0.1:5080 -s 0551199998888 -m 1 -r 1 -d 4000 -nostdin -fd 5 >/dev/null 2>&1
+  sleep 1
+  devlab-ramal 1089 --senha 1234 --discar 0551199998888 --duracao 5 --silencioso
+  sleep 1
+  sed -n "$((antes + 1)),\$p" "$CSV" | grep '"operadora"' > /root/prova-da-fraude.txt
+
+  # 2. Fechar as duas portas.
+  #    a) o que chega de fora e nao e o DID deixa de ter caminho para dentro;
+  find "$C/dialplan/public" -maxdepth 1 -name '99_fallback.xml' -delete
+  #    b) a conta de teste ganha uma senha que nao se adivinha.
+  tee "$C/directory/default/1089.xml" > /dev/null <<'XML'
+  <include>
+    <user id="1089">
+      <params>
+        <param name="password" value="k7Rp2xQm9Tzv"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="escritorio"/>
+        <variable name="effective_caller_id_number" value="1089"/>
+      </variables>
+    </user>
+  </include>
+  XML
+  devlab-pbx cli "reloadxml"
+
+dicas: []
+
+erros_comuns:
+  - match: "\"sipp\",\"551199998888\",\"operadora\""
+    digita: "sipp -sn uac 127.0.0.1:5080 -s 0551199998888 -m 1 -r 1 -d 4000 -nostdin"
+    mensagem: "\"sipp\",\"551199998888\",\"operadora\",\"NORMAL_CLEARING\",\"4\""
+    causa: "um convite que ninguém autenticou saiu pelo tronco pago — o nome no primeiro campo é o que o atacante escreveu, e o tempo no último é o que a operadora vai faturar"
+    conserto: "guarde esta linha como prova antes de fechar o caminho; ela é o que responde à operadora por qual tronco a chamada saiu e por quanto tempo"
+    categoria: conceitual
+  - match: "motivo_do_fim=404"
+    digita: "devlab-ramal 1081 --discar 01140028922 --duracao 6"
+    mensagem: "--- ramal 1081 ---\nregistro=ok\nchamada=nao_atendida\nmotivo_do_fim=404 (Not Found)"
+    causa: "o conserto fechou também o caminho legítimo: a chamada saiu pelo tronco, voltou pelo perfil externo e não encontrou mais o DID"
+    conserto: "o que precisa desaparecer é o caminho GENÉRICO que leva de fora para dentro; a regra explícita do DID continua sendo necessária e não é o problema"
+    categoria: conceitual
+
+cards_revisao:
+  - quem-escolhe-o-contexto-de-entrada-e-o-perfil
+  - tronco-e-um-destino-nomeado
+  - cdr-e-um-modelo-que-voce-escreve

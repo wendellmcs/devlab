@@ -1,0 +1,465 @@
+id: pbx-eng-01-voicemail
+trilha: freeswitch
+nivel: engenheiro
+ordem: 1
+titulo: "A caixa postal que gravava tudo na caixa errada"
+capacidade: "Sei entregar caixa postal que grava na caixa certa em qualquer das causas de falha, e sei provar que o aviso chegou ao telefone."
+xp: 60
+prereqs: [pbx-con-06-capstone]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # O contexto `suporte` nasce com a caixa postal JÁ CONFIGURADA, e com dois
+  # defeitos de campo — nenhum dos dois visível relendo o arquivo:
+  #
+  # 1. o número da caixa está FIXO em 1080, resquício de quem testou com o
+  #    próprio ramal e copiou a linha. O recado de TODO ramal cai na caixa do
+  #    1080, e o sintoma para o cliente é "deixei recado e ninguém retornou";
+  # 2. falta `continue_on_fail`. Isso NÃO impede a caixa de atender quando
+  #    ninguém pega o telefone (medido: com NO_ANSWER o roteiro continua
+  #    sozinho — decisão 59), mas impede quando o ramal está fora do ar: aí o
+  #    chamador recebe 503 e não há recado nenhum.
+  #
+  # O 1081 sobe REGISTRADO E TOCANDO, sem atender. É esse estado que produz
+  # NO_ANSWER (causa 19) em vez de USER_NOT_REGISTERED (causa 806), e a
+  # diferença é o coração da lição: as duas falham o `bridge`, e o roteiro
+  # continua numa e para na outra.
+  #
+  # O tempo de toque fica FIXO em 8 s. Ele não é o assunto desta lição (é o da
+  # seguinte), e um valor grande aqui só faria o aluno esperar.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    cat > "$C/dialplan/suporte.xml" <<'XML'
+    <include>
+      <context name="suporte">
+
+        <extension name="ramais">
+          <condition field="destination_number" expression="^(108\d)$">
+            <action application="set" data="call_timeout=8"/>
+            <action application="bridge" data="user/$1@${domain_name}"/>
+            <action application="answer"/>
+            <action application="voicemail" data="default ${domain_name} 1080"/>
+          </condition>
+        </extension>
+
+      </context>
+    </include>
+    XML
+    for n in 1080 1081; do
+      cat > "$C/directory/default/$n.xml" <<XML
+    <include>
+      <user id="$n">
+        <params><param name="password" value="devlab"/></params>
+        <variables>
+          <variable name="user_context" value="suporte"/>
+          <variable name="effective_caller_id_number" value="$n"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    done
+    devlab-pbx iniciar >/dev/null
+    devlab-ramal 1081 --nao-atender --silencioso
+
+ensina:
+  conceitos:
+    - id: falha-do-bridge-depende-da-causa
+      titulo: "um `bridge` que falha nem sempre encerra a chamada: com NO_ANSWER o roteiro continua sozinho e com as causas de telefone inalcançável ele para — quem não quer decorar a lista declara `continue_on_fail`"
+    - id: caixa-postal-e-uma-caixa-nomeada
+      titulo: "a caixa postal não pertence ao ramal: ela é identificada por perfil, domínio e número, e um número escrito fixo manda o recado de todos para a mesma pessoa"
+    - id: mwi-e-assinatura-nao-consulta
+      titulo: "a lâmpada de recado não é consulta do telefone: ele ASSINA um evento no registro e a central empurra um aviso quando a caixa muda"
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 5210, aberto pela recepção:
+
+    > "Os clientes ligam para o suporte, o telefone toca, ninguém pega — eles
+    > **deixam recado e ninguém retorna**. Isso já custou dois clientes."
+
+    Você abre a config esperando encontrar caixa postal faltando. Ela está lá:
+    `answer`, `voicemail`, perfil e domínio certos. Você liga para testar, ouve
+    a saudação, deixa um recado — funciona.
+
+    Então pergunta à central quantos recados há na caixa do ramal, e a resposta
+    é: **nenhum**.
+
+    Os recados existem. Estão todos em outro lugar, e há semanas.
+
+  objetivos:
+    - verbo: diagnosticar
+      texto: "descobrir em qual caixa um recado foi de fato gravado, perguntando à central"
+    - verbo: explicar
+      texto: "explicar por que a mesma config grava recado quando ninguém atende e não grava quando o ramal está fora do ar"
+    - verbo: construir
+      texto: "fazer a caixa seguir o ramal chamado, em qualquer das duas causas de falha"
+    - verbo: executar
+      texto: "provar que o aviso de mensagem chegou ao telefone que assinou o evento"
+
+  modelo_mental: |
+    ### A caixa é nomeada, e o nome não vem do ramal
+
+    `voicemail` recebe três coisas: o **perfil** (`default`, o conjunto de
+    regras da caixa), o **domínio** e o **número da caixa**.
+
+    ```xml
+    <action application="voicemail" data="default ${domain_name} 1080"/>
+    ```
+
+    Nada nessa linha diz "a caixa de quem foi chamado". Ela diz **1080**, e vai
+    dizer 1080 para toda chamada que passar por ali — do 1081, do 1082, de
+    quem for. A condição da extensão já capturou o número discado; se você não
+    usar a captura aqui, ninguém usa por você.
+
+    E o sintoma é o pior possível: **nada falha**. O cliente ouve a saudação,
+    fala, desliga satisfeito. O recado é gravado de verdade. Só que na caixa de
+    outra pessoa, que nunca pediu para recebê-lo.
+
+    ### O `bridge` que falha nem sempre encerra a chamada
+
+    Este é o ponto em que a intuição erra, e ele foi medido nos três estados
+    em que um ramal pode estar:
+
+    | estado do ramal chamado | causa da falha | sem `continue_on_fail` |
+    |---|---|---|
+    | registrado, toca, ninguém pega | `NO_ANSWER` (19) | o roteiro **continua**: a caixa atende |
+    | telefone desligado, registro ainda na tabela | `NORMAL_TEMPORARY_FAILURE` (41) | o roteiro **para**; o chamador recebe `503` |
+    | registro já expirado | `USER_NOT_REGISTERED` (806) | o roteiro **para**; o chamador recebe `480` |
+
+    Ou seja: a mesma config atende a caixa postal num caso e derruba a chamada
+    nos outros dois, sem que nada no arquivo denuncie a diferença. Quem testou
+    com o telefone na mesa (tocando, sem atender) viu funcionar; quem liga
+    quando o telefone está desligado não deixa recado nenhum.
+
+    E repare no estado do meio — é o mesmo "aparece registrado e não toca" do
+    nível operador. O registro dura minutos depois de o aparelho morrer, então
+    esse é o estado mais provável logo depois de alguém desligar um telefone,
+    e não o terceiro.
+
+    A saída não é decorar quais causas continuam. É **declarar**:
+
+    ```xml
+    <action application="set" data="continue_on_fail=true"/>
+    ```
+
+    E o parente dele, para o caso de sucesso:
+
+    ```xml
+    <action application="set" data="hangup_after_bridge=true"/>
+    ```
+
+    Sem o segundo, uma conversa que termina normalmente devolve o chamador ao
+    roteiro — e ele cai na caixa postal **depois de já ter sido atendido**.
+
+    ### O log narra duas coisas diferentes
+
+    ```
+    Dialplan: ... Action voicemail(default ${domain_name} 1080)
+    EXECUTE [depth=0] ... voicemail(default 127.0.0.1 1080)
+    ```
+
+    A primeira é o **plano**: o que a central montou, com as variáveis por
+    expandir. Ela imprime todas, inclusive as que não vai executar. A segunda é
+    a **execução**: o que rodou de fato, com as variáveis já resolvidas.
+
+    Ler as duas lado a lado responde duas perguntas de uma vez: **até onde a
+    chamada foi** (a execução é mais curta que o plano quando algo a
+    interrompeu) e **com que valores** — que é onde um número escrito fixo
+    finalmente aparece.
+
+    ### A lâmpada é assinada, não consultada
+
+    O aviso de mensagem em espera (MWI) não é o telefone perguntando de tempos
+    em tempos. No registro, o aparelho **assina** o evento `message-summary`, e
+    a central passa a lhe empurrar um aviso sempre que a caixa muda. A lâmpada
+    segue a **caixa** — por isso ela continua apagada enquanto os recados
+    estiverem caindo na caixa de outro.
+
+  anatomia:
+    - linha: "devlab-pbx cli \"vm_list 1081@127.0.0.1\" | cut -d: -f3,4,5,9"
+      partes:
+        - trecho: "devlab-pbx cli"
+          papel: comando
+          explica: "pergunta à central viva; a caixa é dela, não do disco"
+        - trecho: "vm_list 1081@127.0.0.1"
+          papel: argumento
+          explica: "lista as mensagens da caixa `1081` no domínio `127.0.0.1`"
+        - trecho: "cut -d: -f3,4,5,9"
+          papel: argumento
+          explica: "projeta só os campos ESTÁVEIS: caixa, domínio, pasta e quem ligou"
+
+  demonstracao:
+    - comando: "devlab-ramal 1080 --discar 1081 --duracao 30"
+      saida: |-2
+        ramal 1080: registrando em 127.0.0.1 (porta local 6080)...
+        --- ramal 1080 ---
+        registro=ok
+        chamada=atendida
+        motivo_do_fim=200 (OK)
+        log completo: /var/lib/devlab/ramal-1080.log
+      nota: "O teste que enganou todo mundo: o 1081 está registrado e tocando, ninguém pega — e a chamada é **atendida**, com `200 (OK)`. Quem atendeu foi a caixa postal. Do lado de quem liga, funcionou."
+    - comando: "devlab-pbx cli \"vm_list 1081@127.0.0.1\""
+      saida: |-2
+        -ERR no reply
+      nota: "A caixa do 1081, logo depois de um recado ter sido deixado para ele. `-ERR no reply` é como o console responde a uma lista vazia — não é erro, é ausência."
+    - comando: "devlab-pbx cli \"vm_list 1080@127.0.0.1\" | cut -d: -f3,4,5,9"
+      saida: |-2
+        1080:127.0.0.1:inbox:1080
+      nota: "O recado está aqui: caixa **1080**, pasta `inbox`, deixado por **1080** — que é quem ligou. Ligaram para o 1081 e o recado foi para a caixa do 1080."
+    - comando: "grep -oE \"Action [a-z_]+\\(.*\\)\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+      saida: |-2
+        Action set(call_timeout=8)
+        Action bridge(user/1081@${domain_name})
+        Action answer()
+        Action voicemail(default ${domain_name} 1080)
+      nota: "O **plano**, na ordem, com as variáveis por expandir. Quatro ações — e todas rodaram, apesar de o `bridge` ter falhado."
+    - comando: "grep -oE \"EXECUTE \\[depth=[0-9]+\\] [^ ]+ .*\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log | sed -E \"s/^EXECUTE \\[depth=[0-9]+\\] [^ ]+ //\""
+      saida: |-2
+        set(call_timeout=8)
+        bridge(user/1081@127.0.0.1)
+        answer()
+        voicemail(default 127.0.0.1 1080)
+      nota: "A **execução**, com os valores resolvidos. É nesta linha que o defeito fica visível: `voicemail(default 127.0.0.1 1080)`, numa chamada que era para o 1081."
+    - comando: "devlab-ramal --parar 1081 && devlab-ramal 1080 --discar 1081 --duracao 20"
+      saida: |-2
+        ramal 1081: desligado
+        ramal 1080: registrando em 127.0.0.1 (porta local 6080)...
+        --- ramal 1080 ---
+        registro=ok
+        chamada=nao_atendida
+        motivo_do_fim=503 (Service Unavailable)
+        log completo: /var/lib/devlab/ramal-1080.log
+      nota: "O mesmo roteiro, agora com o telefone do 1081 **desligado**. `503`, chamada não atendida, nenhum recado: o `bridge` falhou com `NORMAL_TEMPORARY_FAILURE` em vez de `NO_ANSWER`, e desta vez o roteiro parou nele. Mesma config, dois comportamentos."
+
+  pratica_guiada: []
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você conserta a caixa, testa com o ramal tocando e funciona. No dia seguinte o cliente reclama de novo: ligou de manhã cedo e a ligação caiu sem caixa postal. O que aconteceu?"
+      resposta: |
+        De manhã cedo o telefone ainda estava desligado — **inalcançável**, e
+        não apenas sem ninguém para atender.
+
+        O `bridge` falhou com `NORMAL_TEMPORARY_FAILURE` (ou, se o registro já
+        tivesse expirado, com `USER_NOT_REGISTERED`), e essas causas **param**
+        o roteiro: o chamador recebeu a recusa e as ações seguintes não
+        rodaram. É o mesmo arquivo, com comportamento diferente porque a causa
+        foi outra.
+
+        Testar com o telefone na mesa cobre exatamente o caso que dá certo. A
+        defesa é declarar `continue_on_fail` em vez de depender do padrão, e
+        testar o telefone desligado de propósito — que é o estado do cliente
+        às sete da manhã.
+    - tipo: predicao
+      pergunta: "Com tudo consertado, a chamada é atendida pela pessoa, vocês conversam, e ela desliga primeiro. O que o chamador ouve?"
+      resposta: |
+        A saudação da caixa postal — convidando-o a deixar um recado para quem
+        ele acabou de falar.
+
+        Quando a outra ponta desliga, o `bridge` termina **com sucesso**, e o
+        roteiro continua de onde parou: `answer` e `voicemail`. É o defeito
+        irmão deste, e o conserto é `hangup_after_bridge=true`.
+
+        Repare no padrão: as duas variáveis decidem o que acontece DEPOIS do
+        `bridge` — uma para o caso de falha, outra para o de sucesso. Escrever
+        só uma resolve metade do problema, e a metade que sobra costuma
+        aparecer semanas depois.
+    - tipo: transferencia
+      pergunta: "Um cliente quer que os recados do comercial caiam todos numa caixa só, atendida por três pessoas. O que muda no que você escreveu?"
+      resposta: |
+        Só o terceiro argumento do `voicemail`: `default ${domain_name} 2000`
+        grava na caixa `2000`, exista ou não um ramal com esse número.
+
+        E isso é exatamente o defeito desta lição, usado de propósito — a
+        diferença entre uma caixa compartilhada e um recado perdido é alguém
+        ter **decidido** o número em vez de tê-lo copiado.
+
+        O que essa mudança expõe é que a lâmpada segue a caixa, não o ramal: os
+        três telefones que quiserem o aviso precisam assinar o evento
+        `message-summary` **daquela caixa**, e não da própria.
+
+objetivo_md: |
+  O contexto **`suporte`** roteia os ramais **1080** e **1081**, e o **1081**
+  está registrado e tocando sem que ninguém atenda — o estado do chamado.
+
+  O arquivo é `/usr/local/freeswitch/etc/freeswitch/dialplan/suporte.xml`.
+  O tempo de toque (8 segundos) já está lá e **fica como está**.
+
+  ### Sua entrega
+
+  1. O recado deixado para um ramal tem de cair na **caixa daquele ramal** — e
+     o mesmo roteiro vale para toda a faixa, sem uma linha por ramal.
+  2. O recado tem de ser gravado **também quando o ramal está fora do ar**, e
+     não só quando ele toca sem ser atendido.
+  3. Prove que a mensagem entrou: grave em **`/root/caixa.txt`** a linha que a
+     central devolve sobre a caixa do 1081.
+  4. Prove que o **aviso chegou ao telefone**: com o 1081 assinando o evento de
+     mensagem em espera, o softphone tem de relatar que há recado.
+
+  Ninguém vai dizer a ordem dos passos, e a central responde a todas as
+  perguntas que você precisa fazer.
+
+verificar:
+  - descricao: "o número da caixa não está escrito fixo no roteiro"
+    script: |
+      #!/bin/bash
+      ARQ=/usr/local/freeswitch/etc/freeswitch/dialplan/suporte.xml
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo suporte.xml sumiu","dica_diagnostica":"ele nasce com a licao em dialplan/suporte.xml; se voce o apagou, resete a licao"}'
+        exit 1
+      fi
+      if ! python3 -c 'import sys,xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$ARQ" 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao e um XML bem formado","dica_diagnostica":"alguma tag nao fechou, e a central NAO avisa: o reloadxml responde +OK e segue com a arvore anterior"}'
+        exit 1
+      fi
+      if grep -qE 'application="voicemail" +data="[^"]*(1080|1081)"' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o numero da caixa continua escrito fixo no roteiro","dica_diagnostica":"uma caixa fixa manda o recado de TODOS os ramais para a mesma pessoa; a condicao ja capturou o numero discado, e o bridge logo acima usa essa captura"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "quem liga para um ramal que toca e não é atendido deixa recado na caixa DAQUELE ramal"
+    script: |
+      #!/bin/bash
+      # Oraculo: a caixa e um fato da central (`vm_list`), nunca o arquivo .wav
+      # no disco — nem o tamanho dele, que nao e deterministico (decisao 27).
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      $CLI -x "vm_delete 1081@127.0.0.1" >/dev/null 2>&1
+      # O check monta o proprio cenario, para o veredito nao depender do que o
+      # aluno deixou de pe: o 1081 registrado e TOCANDO, sem atender.
+      devlab-ramal --parar 1081 >/dev/null 2>&1
+      sleep 1
+      if ! devlab-ramal 1081 --nao-atender --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o softphone do 1081 nao subiu para o teste","dica_diagnostica":"veja se ainda ha um ramal 1081 preso: devlab-ramal --listar"}'
+        exit 1
+      fi
+      devlab-ramal 1080 --discar 1081 --duracao 30 --silencioso >/dev/null 2>&1
+      LINHA=$($CLI -x "vm_list 1081@127.0.0.1" 2>/dev/null | tr -d '\r')
+      case "$LINHA" in
+        *:1081:127.0.0.1:inbox:*) ;;
+        *)
+          echo 'DEVLAB_JSON:{"mensagem":"a caixa do 1081 continua vazia depois de um recado deixado para ele","dica_diagnostica":"o recado esta sendo gravado em algum lugar: pergunte pela caixa do 1080 tambem, e leia a linha EXECUTE do voicemail no log com os valores ja resolvidos"}'
+          exit 1 ;;
+      esac
+      DE=$(printf %s "$LINHA" | cut -d: -f9)
+      if [ "$DE" != "1080" ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"ha recado na caixa do 1081, mas de '$DE' e nao do 1080\",\"dica_diagnostica\":\"a mensagem tem de vir da chamada que o 1080 fez; se voce testou de outro ramal, refaca o teste do 1080\"}"
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "quem liga para um ramal FORA DO AR também deixa recado"
+    script: |
+      #!/bin/bash
+      # A segunda causa de falha do bridge, e a que o padrao NAO deixa passar:
+      # sem `continue_on_fail`, USER_NOT_REGISTERED derruba a chamada com 503.
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      $CLI -x "vm_delete 1081@127.0.0.1" >/dev/null 2>&1
+      devlab-ramal --parar 1081 >/dev/null 2>&1
+      sleep 1
+      if $CLI -x "sofia status profile internal reg" 2>/dev/null | grep -q "^User:[[:space:]]*1081@"; then
+        # O TERM nao desregistra (a entrada expira sozinha). Enquanto ela
+        # estiver la, o bridge acha um contato e o cenario nao e o desejado.
+        $CLI -x "sofia profile internal flush_inbound_reg 1081@127.0.0.1" >/dev/null 2>&1
+        sleep 1
+      fi
+      devlab-ramal 1080 --discar 1081 --duracao 20 --silencioso >/dev/null 2>&1
+      LINHA=$($CLI -x "vm_list 1081@127.0.0.1" 2>/dev/null | tr -d '\r')
+      case "$LINHA" in
+        *:1081:127.0.0.1:inbox:*) exit 0 ;;
+      esac
+      echo 'DEVLAB_JSON:{"mensagem":"com o 1081 fora do ar, a chamada nao deixou recado","dica_diagnostica":"a falha do bridge por USER_NOT_REGISTERED PARA o roteiro, ao contrario da falha por NO_ANSWER. Declare que ele pode continuar em vez de depender do padrao"}'
+      exit 1
+
+  - descricao: "/root/caixa.txt traz a linha da caixa do 1081, com quem ligou"
+    script: |
+      #!/bin/bash
+      ARQ=/root/caixa.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"caixa.txt nao existe","dica_diagnostica":"pergunte a central com vm_list e redirecione a resposta para o arquivo"}'
+        exit 1
+      fi
+      if ! grep -q ':1081:127.0.0.1:inbox:' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"caixa.txt nao mostra uma mensagem na caixa 1081","dica_diagnostica":"a linha do vm_list traz, separados por dois-pontos: epoch, lida, CAIXA, DOMINIO, PASTA, arquivo, uuid, nome, de, duracao"}'
+        exit 1
+      fi
+      if ! grep -q ':1080:' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a linha gravada nao diz que quem ligou foi o 1080","dica_diagnostica":"grave a linha DEPOIS de uma chamada do 1080 que caiu na caixa do 1081"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o aviso de mensagem em espera chega ao 1081"
+    script: |
+      #!/bin/bash
+      # A lampada e o unico veredito que NAO se pergunta a central: ela e o que
+      # o TELEFONE recebeu. Por isso o oraculo aqui e o softphone, e o valor vem
+      # do NOTIFY que ele imprimiu.
+      devlab-ramal --parar 1081 >/dev/null 2>&1
+      sleep 1
+      devlab-ramal 1081 --mwi --silencioso >/dev/null 2>&1
+      EST=/var/lib/devlab/ramal-1081.estado
+      if ! grep -q 'aviso_de_mensagem=sim' "$EST" 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"o telefone do 1081 nao recebeu aviso de mensagem em espera","dica_diagnostica":"a lampada segue a CAIXA: so acende se houver mensagem na caixa 1081 do dominio da central. Confirme com vm_list antes de culpar o aviso"}'
+        exit 1
+      fi
+      if ! grep -qE 'mensagens_novas_e_salvas=[1-9][0-9]*/' "$EST" 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"o aviso chegou, mas sem nenhuma mensagem nova","dica_diagnostica":"o formato e novas/salvas; uma caixa com recado nao ouvido tem de trazer pelo menos 1 na primeira posicao"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import pathlib
+  arquivo = pathlib.Path(
+      '/usr/local/freeswitch/etc/freeswitch/dialplan/suporte.xml')
+  texto = arquivo.read_text()
+  texto = texto.replace(
+      '        <action application="bridge" data="user/$1@${domain_name}"/>',
+      '        <action application="set" data="continue_on_fail=true"/>\n'
+      '        <action application="set" data="hangup_after_bridge=true"/>\n'
+      '        <action application="bridge" data="user/$1@${domain_name}"/>')
+  texto = texto.replace(
+      '<action application="voicemail" data="default ${domain_name} 1080"/>',
+      '<action application="voicemail" data="default ${domain_name} $1"/>')
+  arquivo.write_text(texto)
+  PY
+  devlab-pbx cli "reloadxml"
+  devlab-ramal 1080 --discar 1081 --duracao 30 --silencioso
+  devlab-pbx cli "vm_list 1081@127.0.0.1" > /root/caixa.txt
+  devlab-ramal --parar 1081
+  sleep 1
+  devlab-ramal 1081 --mwi --silencioso
+
+dicas:
+  - "Antes de mexer no arquivo, descubra ONDE o recado está caindo. A central responde por caixa, e você pode perguntar pela caixa de qualquer ramal — inclusive a de quem ligou."
+  - "Leia a linha `EXECUTE` do `voicemail` no log: ela mostra os argumentos com as variáveis já resolvidas, e é ali que um número escrito fixo aparece. O `bridge`, logo acima, já faz certo o que o `voicemail` faz errado."
+  - "Troque o número fixo do `voicemail` pela captura da condição (`$1`), e acrescente `set continue_on_fail=true` e `set hangup_after_bridge=true` antes do `bridge`. Depois: `devlab-pbx cli \"reloadxml\"`."
+
+erros_comuns:
+  - match: "-ERR no reply"
+    digita: "devlab-pbx cli \"vm_list 1081@127.0.0.1\""
+    mensagem: "-ERR no reply"
+    causa: "a caixa está vazia — a central responde assim a uma lista sem itens, e não a um erro; uma caixa vazia depois de um recado deixado significa que ele foi gravado em OUTRA caixa"
+    conserto: "pergunte pela caixa de outros ramais até achar onde o recado caiu, e confira o terceiro argumento do `voicemail` na linha `EXECUTE` do log"
+    categoria: conceitual
+  - match: "motivo_do_fim=503"
+    digita: "devlab-ramal 1080 --discar 1081 --duracao 20"
+    mensagem: "--- ramal 1080 ---\nregistro=ok\nchamada=nao_atendida\nmotivo_do_fim=503 (Service Unavailable)"
+    causa: "o telefone do ramal chamado está desligado, mas o registro dele ainda não expirou: a central tenta o endereço que tem, ninguém responde, e a falha vira `NORMAL_TEMPORARY_FAILURE` — uma causa que PARA o roteiro, ao contrário da falha por não atender"
+    conserto: "declare que o roteiro continua depois de um `bridge` que falhou, em vez de depender do comportamento padrão, que muda com a causa"
+    categoria: conceitual
+
+cards_revisao:
+  - falha-do-bridge-depende-da-causa
+  - caixa-postal-e-uma-caixa-nomeada
+  - mwi-e-assinatura-nao-consulta

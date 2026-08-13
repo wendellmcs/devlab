@@ -1,0 +1,541 @@
+id: pbx-eng-04-esl-cdr
+trilha: freeswitch
+nivel: engenheiro
+ordem: 4
+titulo: "O que a central conta: o bilhete depois e o evento na hora"
+capacidade: "Sei escrever o bilhete que a operação precisa ler e escutar os eventos da central ao vivo, sem biblioteca nenhuma."
+xp: 70
+prereqs: [pbx-eng-03-troncos]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # O lab herda o tronco da lição anterior, já roteado: sem chamada SAINDO por
+  # um gateway não há o que o bilhete padrão deixe de contar, e a lição perde
+  # o objeto. O `operadora-reserva` continua morto de propósito — é ele que
+  # produz a linha de falha que o bilhete novo tem de saber mostrar.
+  #
+  # O `event_socket.conf.xml` da imagem já escuta em 127.0.0.1:8021 (a correção
+  # do `::` está no Dockerfile), com a senha `ClueCon` de fábrica. Essa senha
+  # NÃO é consertada aqui de propósito: ela é material do capstone de fraude.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    rm -f "$C/directory/default/example.com.xml"
+    cat > "$C/sip_profiles/external/operadora.xml" <<'XML'
+    <include>
+      <gateway name="operadora">
+        <param name="proxy" value="127.0.0.1:5080"/>
+        <param name="register" value="false"/>
+      </gateway>
+    </include>
+    XML
+    cat > "$C/sip_profiles/external/operadora-reserva.xml" <<'XML'
+    <include>
+      <gateway name="operadora-reserva">
+        <param name="proxy" value="127.0.0.1:5099"/>
+        <param name="register" value="false"/>
+      </gateway>
+    </include>
+    XML
+    cat > "$C/dialplan/public/50_carrier.xml" <<'XML'
+    <include>
+      <extension name="carrier-completa">
+        <condition field="destination_number" expression="^55\d+$">
+          <action application="answer"/>
+          <action application="playback" data="ivr/ivr-hello.wav"/>
+          <action application="sleep" data="20000"/>
+          <action application="hangup"/>
+        </condition>
+      </extension>
+    </include>
+    XML
+    cat > "$C/dialplan/escritorio.xml" <<'XML'
+    <include>
+      <context name="escritorio">
+
+        <extension name="ramais">
+          <condition field="destination_number" expression="^(108\d)$">
+            <action application="bridge" data="user/$1@${domain_name}"/>
+          </condition>
+        </extension>
+
+        <extension name="saida">
+          <condition field="destination_number" expression="^0(\d+)$">
+            <action application="bridge" data="sofia/gateway/operadora-reserva/$1|sofia/gateway/operadora/$1"/>
+          </condition>
+        </extension>
+
+      </context>
+    </include>
+    XML
+    for n in 1080 1081; do
+      cat > "$C/directory/default/$n.xml" <<XML
+    <include>
+      <user id="$n">
+        <params><param name="password" value="devlab"/></params>
+        <variables>
+          <variable name="user_context" value="escritorio"/>
+          <variable name="effective_caller_id_number" value="$n"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    done
+    devlab-pbx iniciar >/dev/null
+    devlab-ramal 1080 --atender --silencioso
+
+ensina:
+  conceitos:
+    - id: cdr-e-um-modelo-que-voce-escreve
+      titulo: "o bilhete não é um formato fixo da central: é um **modelo** de variáveis de canal que você escreve — e o que não está nele não existe para quem for investigar depois"
+    - id: bilhete-de-quem-saiu-e-a-perna-b
+      titulo: "quem sai por um tronco é a perna B da chamada, e a central grava só a perna A por padrão: sem mudar isso, o bilhete nunca diz por qual operadora a chamada saiu"
+    - id: esl-e-protocolo-de-linhas-sobre-tcp
+      titulo: "o event socket não exige biblioteca: é texto sobre TCP, com cabeçalhos e `Content-Length` — e o `fs_cli` é só mais um cliente dele"
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 8830, do coordenador da operação:
+
+    > "Um cliente reclamou de uma ligação que caiu ontem às 15h20. Eu tenho o
+    > bilhete dela na mão e ele **não responde nem por qual operadora ela
+    > saiu, nem por que caiu**. E quando o tronco principal falha, eu só
+    > descubro no dia seguinte, contando reclamação."
+
+    São duas perguntas, e elas se respondem em dois tempos diferentes.
+
+    O bilhete é o **depois**: ele fica, e serve para auditar e faturar. O
+    evento é o **agora**: ele passa uma vez e some, e é o que alimenta alarme.
+    A central produz os dois, e os dois vêm com o padrão de fábrica errado
+    para esta operação.
+
+  objetivos:
+    - verbo: construir
+      texto: "escrever um modelo de bilhete com os campos que a operação precisa ler"
+    - verbo: explicar
+      texto: "explicar por que o tronco usado não aparece no bilhete padrão"
+    - verbo: construir
+      texto: "escrever um cliente do event socket que relata cada chamada encerrada, sem biblioteca"
+    - verbo: comparar
+      texto: "comparar o que o bilhete responde e o que só o evento ao vivo responde"
+
+  modelo_mental: |
+    ### O bilhete é um modelo, e ele está em `cdr_csv.conf.xml`
+
+    O CSV que você lê desde o nível operador não é o formato da central: é um
+    **modelo**, escrito por extenso na config, com variáveis de canal.
+
+    ```xml
+    <settings>
+      <param name="default-template" value="example"/>
+      <param name="legs" value="a"/>
+    </settings>
+    <templates>
+      <template name="example">"${caller_id_number}","${destination_number}",…</template>
+    </templates>
+    ```
+
+    Trocar o `default-template` troca o bilhete de todas as chamadas. E como
+    são variáveis de canal, **qualquer coisa que a chamada saiba pode virar
+    coluna** — inclusive `${sip_gateway_name}`, que é o nome do tronco por onde
+    ela saiu.
+
+    Depois de mexer, são dois passos: `reloadxml` relê a árvore, e
+    `reload mod_cdr_csv` faz o módulo pegar o modelo novo.
+
+    ### `legs` é a razão de o tronco não aparecer
+
+    Uma chamada para fora tem duas pernas: a **A**, que é o ramal ligando para
+    a central, e a **B**, que é a central ligando para a operadora. O nome do
+    tronco é uma variável da **perna B** — e o padrão é gravar só a A.
+
+    ```xml
+    <param name="legs" value="ab"/>
+    <param name="master-file-only" value="true"/>
+    ```
+
+    Sem `ab`, a coluna do tronco existe e vem sempre vazia — que é o pior dos
+    mundos, porque parece que a informação não existe. Com `ab`, uma chamada
+    que passou por failover deixa um rastro completo:
+
+    ```
+    "1083","552112345678","operadora-reserva","NORMAL_TEMPORARY_FAILURE"
+    "1083","552112345678","operadora","NORMAL_CLEARING"
+    ```
+
+    Duas linhas, duas operadoras, duas causas. É a resposta inteira ao chamado,
+    e ela não exigiu abrir log nenhum.
+
+    (`master-file-only` evita que a central escreva também um arquivo por
+    ramal; sem ele o diretório de bilhetes cresce um CSV por conta.)
+
+    ### O event socket é texto sobre TCP
+
+    O `mod_event_socket` escuta em `127.0.0.1:8021`. Não há formato binário
+    nem biblioteca obrigatória: é uma conversa de blocos de texto, cada bloco
+    com cabeçalhos, uma linha em branco e — quando há corpo — um
+    `Content-Length` dizendo quantos bytes ler.
+
+    ```
+    →  (a central fala primeiro)
+       Content-Type: auth/request
+
+    ←  auth ClueCon
+
+    →  Content-Type: command/reply
+       Reply-Text: +OK accepted
+
+    ←  event plain CHANNEL_HANGUP_COMPLETE
+
+    →  Content-Type: command/reply
+       Reply-Text: +OK event listener enabled plain
+    ```
+
+    Depois disso, a central passa a empurrar blocos com
+    `Content-Type: text/event-plain`, e o corpo é `Chave: valor`, uma por
+    linha, com os valores **percent-encoded** (o `%20` de um espaço). Os campos
+    que respondem o chamado são `Caller-Caller-ID-Number`,
+    `Caller-Destination-Number` e `Hangup-Cause`.
+
+    O `fs_cli` que você usa desde o nível operador é exatamente isto: um
+    cliente deste socket. Nada do que ele faz é privilégio dele.
+
+    ### Um dura, o outro passa
+
+    | | bilhete (CDR) | evento (ESL) |
+    |---|---|---|
+    | quando | depois que a chamada terminou | no instante do fato |
+    | onde fica | em disco, para sempre | em lugar nenhum: se ninguém escutava, passou |
+    | para que serve | auditoria, faturamento, o cliente de ontem | alarme, painel, automação |
+
+    Nenhum dos dois substitui o outro, e a pergunta do coordenador tem metade
+    em cada um.
+
+  anatomia:
+    - linha: "grep -E \"^(NORMAL_TEMPORARY_FAILURE|.*operadora)\" /usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv | cut -d, -f2,3,4"
+      partes:
+        - trecho: "grep -E"
+          papel: comando
+          explica: "seleciona as linhas de bilhete que passaram por um tronco"
+        - trecho: "/usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv"
+          papel: argumento
+          explica: "onde o `mod_cdr_csv` escreve os bilhetes de todas as chamadas"
+        - trecho: "cut -d, -f2,3,4"
+          papel: argumento
+          explica: "projeta destino, tronco e causa — os três campos que respondem o chamado, sem os campos de tempo, que mudam a cada chamada"
+
+  demonstracao:
+    - comando: "grep -E \"default-template|name=.legs.\" /usr/local/freeswitch/etc/freeswitch/autoload_configs/cdr_csv.conf.xml"
+      saida: |-2
+            <param name="default-template" value="example"/>
+            <param name="legs" value="a"/>
+      nota: "As duas decisões de fábrica, lado a lado: qual modelo de bilhete vale e quais pernas são gravadas. As duas estão erradas para esta operação, e nenhuma delas é evidente."
+    - comando: "devlab-ramal 1081 --discar 0552112345678 --duracao 4"
+      saida: |-2
+        ramal 1081: registrando em 127.0.0.1 (porta local 6081)...
+        --- ramal 1081 ---
+        registro=ok
+        chamada=atendida
+        motivo_do_fim=200 (OK)
+        log completo: /var/lib/devlab/ramal-1081.log
+      nota: "Uma chamada para fora que passou pelo failover: o tronco reserva recusou e o principal completou. Do lado de quem ligou, nada disso aparece."
+    - comando: "cut -d, -f2,3,4,10 /usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv"
+      saida: |-2
+        "1081","0552112345678","escritorio","NORMAL_CLEARING"
+        "1081","552112345678","public","NORMAL_CLEARING"
+      nota: "O bilhete de fábrica dessa mesma chamada: quem ligou, para onde, o contexto e a causa. Duas linhas — a do ramal discando e a que chegou do outro lado do tronco — e **nenhuma menção a tronco em nenhuma delas**. O coordenador não tem como responder por onde a chamada saiu, e nem que ela passou por dois troncos."
+    - comando: "devlab-pbx cli \"sofia status gateway operadora-reserva\" | grep -E \"^(CallsOUT|FailedCallsOUT)\""
+      saida: |-2
+        CallsOUT	1
+        FailedCallsOUT	1
+      nota: "A informação existe — o tronco reserva contou a própria falha. Ela só não está onde quem investiga vai procurar, e um contador não diz de QUAL chamada foi."
+    - comando: "grep -E \"listen-ip|listen-port|password\" /usr/local/freeswitch/etc/freeswitch/autoload_configs/event_socket.conf.xml"
+      saida: |-2
+            <param name="listen-ip" value="127.0.0.1"/>
+            <param name="listen-port" value="8021"/>
+            <param name="password" value="ClueCon"/>
+      nota: "O outro lado da lição: o event socket, onde ele escuta e com que senha. É a mesma porta e a mesma senha que o `fs_cli` usa — ele é só um cliente deste socket, e o seu script vai ser outro."
+
+  pratica_guiada: []
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você acrescenta a coluna do tronco ao modelo, recarrega, faz uma chamada para fora — e a coluna vem vazia. O modelo está certo. O que falta?"
+      resposta: |
+        Gravar a perna **B**.
+
+        `${sip_gateway_name}` é uma variável do canal que saiu pela operadora, e
+        esse canal é a perna B. Com `legs="a"` a central grava só a perna do
+        ramal que originou a chamada — que nunca soube por qual tronco ela
+        saiu.
+
+        Este é um sintoma que engana duas vezes: a coluna existe (então o
+        modelo "está certo") e vem vazia (então "a central não tem esse dado").
+        As duas leituras são falsas, e a segunda é a que faz alguém desistir.
+    - tipo: predicao
+      pergunta: "Seu script fica escutando o event socket e o serviço é reiniciado por 30 segundos durante a madrugada. O que acontece com as chamadas encerradas nesse intervalo?"
+      resposta: |
+        Elas somem do seu script, e **não** somem do bilhete.
+
+        Evento é entrega ao vivo: quem não estava conectado no instante do fato
+        não recebe depois. Não há fila nem histórico — é essa a diferença entre
+        as duas metades desta lição.
+
+        Na prática isso decide a arquitetura: alarme pode viver só de evento,
+        porque um alarme perdido custa um atraso. Faturamento e auditoria não
+        podem, porque uma chamada perdida ali é dinheiro ou é um cliente sem
+        resposta. Quando o dado precisa sobreviver a uma reconexão, ele tem de
+        estar no bilhete também.
+    - tipo: transferencia
+      pergunta: "Você quer um alarme quando o tronco principal começar a recusar chamadas. Que evento você escutaria, e o que faria com ele?"
+      resposta: |
+        O mesmo `CHANNEL_HANGUP_COMPLETE`, olhando dois campos: o nome do
+        tronco e a causa. Uma sequência de encerramentos com
+        `NORMAL_TEMPORARY_FAILURE` no mesmo gateway é a assinatura de um tronco
+        que caiu.
+
+        E repare no que isso exige do seu script que a lição já mostrou: o
+        nome do tronco só existe no evento da perna **B**, do mesmo jeito que
+        só existe no bilhete da perna B. O evento não é um resumo da chamada —
+        é o fim de **um canal**, e você precisa saber qual.
+
+        A regra de alarme em si é decisão de operação: uma falha isolada é
+        normal, e o que importa é a taxa. O evento entrega o fato; a política é
+        sua.
+
+objetivo_md: |
+  O tronco da lição anterior está no ar, com o **`operadora-reserva`** na frente
+  e morto, e o **`operadora`** completando as chamadas. O ramal **1080**
+  atende; ligue do **1081**.
+
+  ### Sua entrega
+
+  **1. O bilhete que responde o chamado.** Em
+  `/usr/local/freeswitch/etc/freeswitch/autoload_configs/cdr_csv.conf.xml`,
+  crie um modelo chamado **`devlab`** com exatamente estes quatro campos, nesta
+  ordem, cada um entre aspas e separados por vírgula:
+
+  | campo | variável |
+  |---|---|
+  | quem ligou | `caller_id_number` |
+  | para onde | `destination_number` |
+  | por qual tronco | `sip_gateway_name` |
+  | por que terminou | `hangup_cause` |
+
+  Faça dele o modelo padrão, e faça a central gravar **as duas pernas** da
+  chamada — sem isso a coluna do tronco vem sempre vazia. Depois de mexer,
+  o módulo precisa recarregar.
+
+  **2. O ouvinte ao vivo.** Escreva **`/root/escuta.py`**, um cliente do event
+  socket que:
+
+  - conecta em `127.0.0.1:8021` e se autentica com a senha de fábrica;
+  - assina o evento **`CHANNEL_HANGUP_COMPLETE`**;
+  - imprime **uma linha por evento**, no formato exato
+    `<quem ligou> -> <para onde> : <causa>`;
+  - **termina sozinho depois de dois eventos** — uma chamada entre dois canais
+    encerra os dois, e cada um gera o seu.
+
+  Nenhuma biblioteca de ESL está instalada, e nenhuma é necessária.
+
+  **3. As provas.** Grave em **`/root/bilhetes.txt`** os bilhetes de uma
+  chamada de saída que tenha passado pelo failover, e em **`/root/ao-vivo.txt`**
+  a saída do seu ouvinte durante uma chamada.
+
+verificar:
+  - descricao: "o modelo de bilhete traz o tronco e a causa, e as duas pernas são gravadas"
+    script: |
+      #!/bin/bash
+      CSV=/usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      # Oraculo de comportamento: o que vale e o bilhete que a central ESCREVE
+      # agora, e nao o que esta no arquivo de config — o modulo pode nao ter
+      # recarregado.
+      #
+      # Nada de apagar o Master.csv antes: o mod_cdr_csv mantem o arquivo
+      # ABERTO, entao um `rm` desliga o caminho do inode e o modulo segue
+      # escrevendo no arquivo que ninguem mais enxerga. A saida e marcar quantas
+      # linhas ja havia e olhar so as novas.
+      ANTES=$(grep -c '' "$CSV" 2>/dev/null || echo 0)
+      devlab-ramal 1081 --discar 0552112345678 --duracao 4 --silencioso >/dev/null 2>&1
+      sleep 1
+      NOVAS=$(sed -n "$((ANTES + 1)),\$p" "$CSV" 2>/dev/null)
+      if [ -z "$NOVAS" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada de saida nao gerou bilhete nenhum","dica_diagnostica":"a chamada completou? ligue do 1081 para 0552112345678 e confira antes de olhar o modelo"}'
+        exit 1
+      fi
+      if ! printf '%s\n' "$NOVAS" | grep -q '"operadora","NORMAL_CLEARING"'; then
+        if printf '%s\n' "$NOVAS" | grep -qE '^"[0-9]*","[0-9]*","","' || printf '%s\n' "$NOVAS" | grep -q ',"escritorio",'; then
+          echo 'DEVLAB_JSON:{"mensagem":"o bilhete nao diz por qual tronco a chamada saiu","dica_diagnostica":"se a coluna existe e vem VAZIA, o modelo esta certo e falta gravar a perna B: o nome do tronco e variavel do canal que saiu pela operadora, nao do canal do ramal"}'
+          exit 1
+        fi
+        echo 'DEVLAB_JSON:{"mensagem":"nenhum bilhete traz o tronco operadora seguido da causa","dica_diagnostica":"os quatro campos vao nesta ordem, cada um entre aspas: quem ligou, para onde, o tronco e a causa. Depois de mexer na config, o modulo precisa recarregar"}'
+        exit 1
+      fi
+      if ! printf '%s\n' "$NOVAS" | grep -q '"operadora-reserva","NORMAL_TEMPORARY_FAILURE"'; then
+        echo 'DEVLAB_JSON:{"mensagem":"o bilhete nao registra a tentativa recusada pelo tronco reserva","dica_diagnostica":"cada tronco tentado deixa a propria linha, e todas sao pernas B: sem gravar as duas pernas, a tentativa que falhou desaparece"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o ouvinte do event socket relata uma chamada encerrada, com a causa"
+    script: |
+      #!/bin/bash
+      if [ ! -s /root/escuta.py ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"/root/escuta.py nao existe ou esta vazio","dica_diagnostica":"o cliente do event socket e um socket TCP e texto: conecte, autentique, assine o evento e leia os blocos"}'
+        exit 1
+      fi
+      SAIDA=/tmp/devlab-escuta.$$
+      timeout 45 python3 /root/escuta.py > "$SAIDA" 2>&1 &
+      OUVINTE=$!
+      sleep 3
+      devlab-ramal 1081 --discar 1080 --duracao 3 --silencioso >/dev/null 2>&1
+      wait "$OUVINTE" 2>/dev/null
+      if [ ! -s "$SAIDA" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o ouvinte nao imprimiu nada durante uma chamada","dica_diagnostica":"a central fala primeiro (auth/request); a senha de fabrica esta em event_socket.conf.xml, e cada bloco termina numa linha em branco — quando ha corpo, o Content-Length diz quantos bytes ler"}'
+        rm -f "$SAIDA"
+        exit 1
+      fi
+      if ! grep -qE '^1081 -> 1080 : NORMAL_CLEARING$' "$SAIDA"; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"o ouvinte imprimiu algo fora do formato pedido\",\"dica_diagnostica\":\"o formato exato e '<quem ligou> -> <para onde> : <causa>', um por linha. Os campos sao Caller-Caller-ID-Number, Caller-Destination-Number e Hangup-Cause, e os valores vem percent-encoded\"}"
+        rm -f "$SAIDA"
+        exit 1
+      fi
+      # Duas pernas, dois eventos: o ouvinte tem de relatar os dois e sair.
+      if [ "$(grep -c ' -> ' "$SAIDA")" -lt 2 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o ouvinte relatou menos de dois eventos","dica_diagnostica":"uma chamada entre dois canais encerra os dois, e cada um gera um CHANNEL_HANGUP_COMPLETE. Conte os eventos e termine no segundo"}'
+        rm -f "$SAIDA"
+        exit 1
+      fi
+      rm -f "$SAIDA"
+      exit 0
+
+  - descricao: "os dois arquivos de prova trazem o que o chamado pediu"
+    script: |
+      #!/bin/bash
+      if ! grep -q '"operadora","NORMAL_CLEARING"' /root/bilhetes.txt 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"bilhetes.txt nao mostra a chamada que saiu pelo tronco principal","dica_diagnostica":"grave o arquivo DEPOIS de uma chamada de saida, a partir do Master.csv"}'
+        exit 1
+      fi
+      if ! grep -q '"operadora-reserva"' /root/bilhetes.txt 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"bilhetes.txt nao mostra a tentativa pelo tronco reserva","dica_diagnostica":"as duas linhas juntas sao a resposta ao chamado: por onde tentou, por onde saiu, e por que cada uma terminou"}'
+        exit 1
+      fi
+      if ! grep -qE ' -> .* : [A-Z_]+' /root/ao-vivo.txt 2>/dev/null; then
+        echo 'DEVLAB_JSON:{"mensagem":"ao-vivo.txt nao traz nenhuma linha no formato do ouvinte","dica_diagnostica":"rode o escuta.py redirecionando a saida para o arquivo e faca uma chamada enquanto ele esta de pe"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import pathlib
+  arquivo = pathlib.Path(
+      '/usr/local/freeswitch/etc/freeswitch/autoload_configs/cdr_csv.conf.xml')
+  texto = arquivo.read_text()
+  texto = texto.replace(
+      '<param name="default-template" value="example"/>',
+      '<param name="default-template" value="devlab"/>')
+  texto = texto.replace(
+      '<param name="legs" value="a"/>',
+      '<param name="legs" value="ab"/>\n'
+      '    <param name="master-file-only" value="true"/>')
+  texto = texto.replace(
+      '  </templates>',
+      '    <template name="devlab">'
+      '"${caller_id_number}","${destination_number}",'
+      '"${sip_gateway_name}","${hangup_cause}"</template>\n  </templates>')
+  arquivo.write_text(texto)
+  PY
+  devlab-pbx cli "reloadxml"
+  devlab-pbx cli "reload mod_cdr_csv"
+
+  tee /root/escuta.py > /dev/null <<'PY'
+  """Cliente do event socket: relata cada canal encerrado e sai no segundo."""
+  import socket
+  import urllib.parse
+
+  ligacao = socket.create_connection(("127.0.0.1", 8021), timeout=60)
+  canal = ligacao.makefile("rwb")
+
+
+  def bloco():
+      """Lê um bloco: cabeçalhos até a linha em branco, e o corpo se houver."""
+      cabecalhos = {}
+      while True:
+          linha = canal.readline()
+          if not linha:
+              return None, ""
+          linha = linha.decode().strip()
+          if not linha:
+              break
+          chave, _, valor = linha.partition(": ")
+          cabecalhos[chave] = valor
+      tamanho = int(cabecalhos.get("Content-Length", 0))
+      return cabecalhos, canal.read(tamanho).decode() if tamanho else ""
+
+
+  bloco()                                            # auth/request
+  canal.write(b"auth ClueCon\n\n"); canal.flush(); bloco()
+  canal.write(b"event plain CHANNEL_HANGUP_COMPLETE\n\n"); canal.flush(); bloco()
+
+  vistos = 0
+  while vistos < 2:
+      cabecalhos, corpo = bloco()
+      if cabecalhos is None:
+          break
+      if cabecalhos.get("Content-Type") != "text/event-plain":
+          continue
+      evento = {}
+      for linha in corpo.splitlines():
+          chave, _, valor = linha.partition(": ")
+          evento[chave] = urllib.parse.unquote(valor)
+      print("{} -> {} : {}".format(
+          evento.get("Caller-Caller-ID-Number"),
+          evento.get("Caller-Destination-Number"),
+          evento.get("Hangup-Cause")), flush=True)
+      vistos += 1
+  PY
+
+  CSV=/usr/local/freeswitch/var/log/freeswitch/cdr-csv/Master.csv
+  antes=$(grep -c '' "$CSV" 2>/dev/null); antes=${antes:-0}
+  devlab-ramal 1081 --discar 0552112345678 --duracao 4 --silencioso
+  sleep 1
+  sed -n "$((antes + 1)),\$p" "$CSV" > /root/bilhetes.txt
+
+  timeout 45 python3 /root/escuta.py > /root/ao-vivo.txt 2>&1 &
+  ouvinte=$!
+  sleep 3
+  devlab-ramal 1081 --discar 1080 --duracao 3 --silencioso
+  wait "$ouvinte"
+
+dicas:
+  - "O bilhete que você lê desde o nível operador é um `<template>` escrito por extenso em `cdr_csv.conf.xml`, e a chave `legs` decide quais pernas da chamada viram linha. Do lado do ESL, comece só conectando e imprimindo o primeiro bloco que a central manda — ela fala antes de você."
+  - "Se a coluna do tronco existe e vem vazia, o modelo está certo: falta gravar a perna B. E cada bloco do event socket termina numa linha em branco; quando o cabeçalho traz `Content-Length`, o corpo tem exatamente aquele número de bytes, e os valores dele vêm percent-encoded."
+  - "Modelo: `<template name=\"devlab\">\"${caller_id_number}\",\"${destination_number}\",\"${sip_gateway_name}\",\"${hangup_cause}\"</template>`, com `default-template` apontando para ele e `legs` em `ab`. Aplique com `devlab-pbx cli \"reloadxml\"` e `devlab-pbx cli \"reload mod_cdr_csv\"`. No ouvinte, a sequência é `auth ClueCon`, depois `event plain CHANNEL_HANGUP_COMPLETE`, cada comando terminado por duas quebras de linha."
+
+erros_comuns:
+  - match: "-ERR invalid"
+    digita: "devlab-pbx cli \"reload mod_cdr_csv\""
+    mensagem: "-ERR invalid"
+    causa: "o módulo não recarregou — quase sempre porque o `reloadxml` não foi rodado antes, e o módulo releu a mesma árvore que já tinha"
+    conserto: "rode `devlab-pbx cli \"reloadxml\"` primeiro e só então recarregue o módulo; confirme pelo bilhete de uma chamada nova, nunca pelo arquivo de config"
+    categoria: config_nao_recarregada
+  - match: "ConnectionRefusedError"
+    digita: "python3 /root/escuta.py"
+    mensagem: "ConnectionRefusedError: [Errno 111] Connection refused"
+    causa: "não há ninguém escutando em 127.0.0.1:8021 — ou o PBX está fora do ar, ou o endereço e a porta do script não são os que o `event_socket.conf.xml` declara"
+    conserto: "confira se a central responde e leia `listen-ip` e `listen-port` na config do event socket antes de mexer no script"
+    categoria: conceitual
+
+cards_revisao:
+  - cdr-e-um-modelo-que-voce-escreve
+  - bilhete-de-quem-saiu-e-a-perna-b
+  - esl-e-protocolo-de-linhas-sobre-tcp

@@ -1,0 +1,434 @@
+id: pbx-eng-02-grupos
+trilha: freeswitch
+nivel: engenheiro
+ordem: 2
+titulo: "Toca em todos, ou toca em ordem"
+capacidade: "Sei montar grupo de toque simultâneo e sequencial, e sei qual relógio limita a caçada inteira e qual limita cada telefone."
+xp: 65
+prereqs: [pbx-eng-01-voicemail]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # Três telefones e um observador, e cada um existe para produzir uma
+  # evidência diferente no log:
+  #
+  #   1080, 1081  registrados e TOCANDO, sem nunca atender. São eles que
+  #               consomem o relógio de cada membro num grupo sequencial, e que
+  #               recebem LOSE_RACE num grupo simultâneo.
+  #   1082        atende. É o vencedor dos dois grupos, e sem ele nenhuma
+  #               chamada completaria.
+  #   1083        quem liga. Fora dos grupos de propósito: um membro que
+  #               também é o chamador embaralharia a leitura do log.
+  #
+  # O contexto nasce só com o roteamento ramal a ramal. Os dois grupos são a
+  # tarefa, e nenhum molde é dado — é nível engenheiro.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    cat > "$C/dialplan/suporte.xml" <<'XML'
+    <include>
+      <context name="suporte">
+
+        <extension name="ramais">
+          <condition field="destination_number" expression="^(108\d)$">
+            <action application="set" data="call_timeout=8"/>
+            <action application="bridge" data="user/$1@${domain_name}"/>
+          </condition>
+        </extension>
+
+      </context>
+    </include>
+    XML
+    for n in 1080 1081 1082 1083; do
+      cat > "$C/directory/default/$n.xml" <<XML
+    <include>
+      <user id="$n">
+        <params><param name="password" value="devlab"/></params>
+        <variables>
+          <variable name="user_context" value="suporte"/>
+          <variable name="effective_caller_id_number" value="$n"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    done
+    devlab-pbx iniciar >/dev/null
+    devlab-ramal 1080 --nao-atender --silencioso
+    devlab-ramal 1081 --nao-atender --silencioso
+    devlab-ramal 1082 --atender --silencioso
+
+ensina:
+  conceitos:
+    - id: grupo-simultaneo-tem-um-vencedor
+      titulo: "a vírgula chama todos ao mesmo tempo e o primeiro que atende ganha: os outros são cancelados com `LOSE_RACE`, que é sucesso do grupo e não falha do telefone"
+    - id: grupo-sequencial-soma-os-tempos
+      titulo: "a barra tenta um destino por vez, e o tempo que o cliente espera é a SOMA dos tempos de quem não atendeu"
+    - id: relogio-do-grupo-nao-e-relogio-do-membro
+      titulo: "`call_timeout` limita a caçada INTEIRA; quem limita cada telefone é `leg_timeout`, e ele vai dentro da string de discagem — trocar um pelo outro faz o segundo membro nunca tocar"
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 6402, do gerente de suporte:
+
+    > "Somos três no time e temos um número. Hoje **só toca no telefone da
+    > Ana**. Quando ela está em atendimento, o cliente escuta chamada até
+    > desistir — e ninguém mais sabe que alguém ligou.
+    >
+    > Quero duas coisas: um número que **toque em todo mundo de uma vez**, e um
+    > que **toque em ordem** — Ana, depois o João, depois o plantão — dando a
+    > cada um uns cinco segundos antes de passar adiante."
+
+    Os dois são uma linha de dialplan. E o segundo tem uma armadilha que
+    aprova em todo teste feito às pressas: você escreve o tempo de espera no
+    lugar que parece óbvio, o primeiro telefone toca cinco segundos, a chamada
+    cai — e o segundo nunca chega a tocar.
+
+  objetivos:
+    - verbo: construir
+      texto: "escrever um grupo de toque simultâneo e um sequencial na mesma extensão de sempre"
+    - verbo: diagnosticar
+      texto: "distinguir os dois pelo log, sem cronômetro: pela ordem em que os canais nascem e pela causa com que morrem"
+    - verbo: explicar
+      texto: "explicar por que um relógio limita a caçada inteira e o outro limita cada telefone"
+    - verbo: escolher
+      texto: "escolher entre simultâneo e sequencial pelo que cada um faz com o tempo do cliente"
+
+  modelo_mental: |
+    ### Um separador muda tudo
+
+    O destino do `bridge` aceita uma **lista**, e o separador decide a
+    estratégia:
+
+    ```xml
+    <!-- simultâneo: toca nos três ao mesmo tempo -->
+    <action application="bridge" data="user/1080@${domain_name},user/1081@${domain_name}"/>
+
+    <!-- sequencial: tenta um, depois o outro -->
+    <action application="bridge" data="user/1080@${domain_name}|user/1081@${domain_name}"/>
+    ```
+
+    | | vírgula | barra |
+    |---|---|---|
+    | quem toca | **todos de uma vez** | **um por vez, na ordem escrita** |
+    | quanto o cliente espera | o tempo de UM telefone | a **soma** de quem não atendeu |
+    | quem atende | o primeiro que pegar | o primeiro da fila que pegar |
+    | o que acontece com os outros | são **cancelados** | nem chegam a tocar |
+
+    ### O log distingue os dois sem cronômetro
+
+    No **simultâneo**, os canais nascem juntos e quem perdeu morre com uma
+    causa que só existe aqui:
+
+    ```
+    New Channel sofia/internal/1080@127.0.0.1:6080
+    New Channel sofia/internal/1081@127.0.0.1:6081
+    New Channel sofia/internal/1082@127.0.0.1:6082
+    Hangup sofia/internal/1080@... [LOSE_RACE]
+    Hangup sofia/internal/1081@... [LOSE_RACE]
+    ```
+
+    `LOSE_RACE` não é defeito: é o grupo funcionando. Alguém atendeu antes, e
+    a central cancelou o resto.
+
+    No **sequencial**, cada canal só nasce depois de o anterior desistir:
+
+    ```
+    New Channel sofia/internal/1080@...
+    Hangup sofia/internal/1080@... [ALLOTTED_TIMEOUT]
+    New Channel sofia/internal/1081@...
+    ```
+
+    Ler o log responde "qual estratégia está no ar?" com mais certeza do que um
+    cronômetro — e sem depender de alguém atender no momento certo.
+
+    ### Os dois relógios, e o que os separa
+
+    Esta é a armadilha do chamado, e ela é grande:
+
+    | relógio | onde se escreve | o que limita |
+    |---|---|---|
+    | `call_timeout` | `set`, antes do `bridge` | a **caçada inteira** |
+    | `leg_timeout` | **dentro da string de discagem** | **cada destino**, um a um |
+
+    Num grupo simultâneo os dois dão quase no mesmo, porque a caçada é uma
+    tentativa só. Num grupo sequencial eles são opostos: com
+    `call_timeout=5` a **caçada** morre aos cinco segundos, ou seja, no
+    primeiro telefone — e o segundo nunca toca. Medido: o log mostra um único
+    canal criado, `NO_ANSWER`, e nada depois.
+
+    O que faz cada destino ter o próprio relógio é escrevê-lo junto do destino:
+
+    ```
+    [leg_timeout=5]user/1080@${domain_name}|[leg_timeout=5]user/1081@${domain_name}
+    ```
+
+    Os colchetes valem para **aquele destino**; as chaves `{}` no começo da
+    string valeriam para todos.
+
+  anatomia:
+    - linha: "grep -oE \"New Channel sofia/internal/108[0-9][^ ]*|Hangup sofia/internal/108[0-9][^ ]* \\[[A-Z_]+\\] \\[[A-Z_]+\\]\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+      partes:
+        - trecho: "grep"
+          papel: comando
+          explica: "garimpa o log; aqui interessam só o nascimento e a morte de cada canal"
+        - trecho: "-oE"
+          papel: opcao
+          explica: "imprime só o trecho que casou (-o), com regex estendida (-E)"
+        - trecho: "New Channel sofia/internal/108[0-9][^ ]*"
+          papel: argumento
+          explica: "o nascimento de um canal para um dos telefones do grupo — a ORDEM destas linhas é a estratégia"
+        - trecho: "|"
+          papel: operador
+          explica: "dentro da regex, separa as duas alternativas que interessam"
+        - trecho: "Hangup ... \\[[A-Z_]+\\] \\[[A-Z_]+\\]"
+          papel: argumento
+          explica: "a morte, com o estado e a CAUSA — `LOSE_RACE` e `ALLOTTED_TIMEOUT` são as duas assinaturas que separam os grupos"
+
+  demonstracao:
+    - comando: "devlab-ramal --listar | sed \"s/ (pid [0-9]*)//\""
+      saida: |-2
+        ramal 1080: no ar
+        ramal 1081: no ar
+        ramal 1082: no ar
+      nota: "O time no ar. O 1080 e o 1081 tocam e nunca atendem — é o telefone de quem saiu para almoçar; o 1082 atende. É esse arranjo que faz a evidência do log aparecer sempre igual. (O número do processo é cortado de propósito: ele muda a cada execução.)"
+    - comando: "devlab-ramal 1083 --discar 1080 --duracao 12"
+      saida: |-2
+        ramal 1083: registrando em 127.0.0.1 (porta local 6083)...
+        --- ramal 1083 ---
+        registro=ok
+        chamada=nao_atendida
+        motivo_do_fim=480 (Temporarily Unavailable)
+        log completo: /var/lib/devlab/ramal-1083.log
+      nota: "O chamado de hoje, reproduzido: um número, um telefone. Ninguém atende, e ninguém mais fica sabendo. `480` é o que o cliente recebe depois de esperar os 8 segundos."
+    - comando: "grep -oE \"New Channel sofia/internal/108[0-9][^ ]*|Hangup sofia/internal/108[0-9][^ ]* \\[[A-Z_]+\\] \\[[A-Z_]+\\]\" /usr/local/freeswitch/var/log/freeswitch/freeswitch.log"
+      saida: |-2
+        New Channel sofia/internal/1083@127.0.0.1
+        New Channel sofia/internal/1080@127.0.0.1:6080
+        Hangup sofia/internal/1080@127.0.0.1:6080 [CS_CONSUME_MEDIA] [NO_ANSWER]
+        Hangup sofia/internal/1083@127.0.0.1 [CS_EXECUTE] [NORMAL_CLEARING]
+      nota: "O instrumento da lição, aplicado à chamada de um destino só: um canal nasce, um canal morre. Quando houver grupo, é a ORDEM e a CAUSA destas linhas que vão dizer qual estratégia está no ar."
+
+  pratica_guiada: []
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você monta o grupo simultâneo e testa. No log aparecem dois `LOSE_RACE`. O gerente pergunta se dois telefones falharam. O que você responde?"
+      resposta: |
+        Que os dois funcionaram — `LOSE_RACE` é a assinatura do grupo dando
+        certo.
+
+        A central chamou os três ao mesmo tempo, um atendeu, e ela **cancelou**
+        os outros dois com um `CANCEL`. A causa descreve o que aconteceu do
+        ponto de vista daquele canal: ele perdeu a corrida.
+
+        O que seria falha é `USER_NOT_REGISTERED` (o telefone não está lá) ou
+        `NO_ANSWER` em **todos** eles, que é ninguém ter atendido.
+    - tipo: diagnostico
+      pergunta: "No grupo sequencial, o cliente diz que a chamada cai antes de chegar ao plantão. Você confere: só o primeiro telefone toca, por cinco segundos. Onde está o erro?"
+      resposta: |
+        No relógio errado. `call_timeout` limita a **caçada inteira**, não cada
+        destino: aos cinco segundos ela acabou, e o segundo membro nunca chegou
+        a ser tentado.
+
+        A prova está no log e é direta: aparece **um único** `New Channel`, com
+        `NO_ANSWER`, e nada depois dele. Num grupo sequencial saudável haveria
+        um `New Channel` por membro tentado, cada um precedido pelo
+        `ALLOTTED_TIMEOUT` do anterior.
+
+        O conserto é mover o relógio para dentro da string de discagem, junto
+        de cada destino — `leg_timeout`. Aí `call_timeout` volta a ter o papel
+        dele: o teto do tempo TOTAL que o cliente vai esperar, que num grupo
+        sequencial longo é o número que importa para o cliente.
+    - tipo: transferencia
+      pergunta: "Um cliente pede: toca na recepção por 10 segundos; se ninguém pegar, toca nas três salas ao mesmo tempo. Como isso se escreve?"
+      resposta: |
+        Misturando os dois separadores numa string só. A barra separa as
+        **etapas**; a vírgula agrupa quem toca junto **dentro** de uma etapa:
+
+        ```
+        [leg_timeout=10]user/2000@${domain_name}|user/2001@${domain_name},user/2002@${domain_name},user/2003@${domain_name}
+        ```
+
+        Primeiro a recepção, sozinha, com dez segundos só dela. Se ela não
+        atender, as três salas tocam juntas na etapa seguinte.
+
+        É a estrutura de quase todo atendimento de verdade — e repare que o
+        relógio de cada etapa continua sendo uma decisão sua, porque o tempo
+        que o cliente espera é a soma das etapas.
+
+objetivo_md: |
+  O contexto **`suporte`** roteia os ramais **1080** a **1083**. No ar:
+
+  | ramal | estado |
+  |---|---|
+  | 1080, 1081 | registrados, **tocam e nunca atendem** |
+  | 1082 | registrado, **atende** |
+  | 1083 | é de onde você liga |
+
+  O arquivo é `/usr/local/freeswitch/etc/freeswitch/dialplan/suporte.xml`.
+
+  ### Sua entrega
+
+  Duas extensões novas no contexto `suporte`:
+
+  1. **7100** — toca em **1080, 1081 e 1082 ao mesmo tempo**.
+  2. **7200** — toca em **1080, depois 1081, depois 1082**, dando a cada um no
+     máximo **5 segundos** antes de passar adiante.
+
+  Depois, prove a diferença: grave em **`/root/simultaneo.txt`** e em
+  **`/root/sequencial.txt`** as linhas de nascimento e morte dos canais de cada
+  uma das duas chamadas, como na demonstração.
+
+  Uma chamada para o 7200 tem de ser **atendida** — o cliente não pode desistir
+  no meio da fila.
+
+verificar:
+  - descricao: "o 7100 toca nos três telefones ao mesmo tempo"
+    script: |
+      #!/bin/bash
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      : > "$L"
+      if ! devlab-ramal 1083 --discar 7100 --duracao 6 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada para 7100 nao completou","dica_diagnostica":"num grupo simultaneo o 1082 atende quase na hora; se deu 404, a extensao nao existe para a central viva — leia a resposta INTEIRA do reloadxml"}'
+        exit 1
+      fi
+      # A evidencia e a ORDEM: num grupo simultaneo os tres canais nascem antes
+      # de qualquer um morrer. Comparar numeros de linha e mais confiavel do que
+      # cronometrar, e nao depende de quem atendeu primeiro.
+      ULTIMO_NASC=$(grep -n 'New Channel sofia/internal/108[012]@' "$L" | cut -d: -f1 | sed -n '$p')
+      QUANTOS=$(grep -c 'New Channel sofia/internal/108[012]@' "$L")
+      PRIMEIRA_MORTE=$(grep -n 'Hangup sofia/internal/108[012]@' "$L" | cut -d: -f1 | sed -n '1p')
+      if [ "${QUANTOS:-0}" -lt 3 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a chamada para 7100 criou $QUANTOS canal(is) de telefone, e o grupo tem tres\",\"dica_diagnostica\":\"o destino do bridge aceita uma lista; confira se os tres ramais estao la e qual separador voce usou entre eles\"}"
+        exit 1
+      fi
+      if [ -z "$PRIMEIRA_MORTE" ] || [ "$ULTIMO_NASC" -gt "$PRIMEIRA_MORTE" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"os tres telefones nao tocaram ao mesmo tempo: um canal so nasceu depois de outro morrer","dica_diagnostica":"isso e a assinatura do grupo SEQUENCIAL. O separador que chama todos de uma vez e outro"}'
+        exit 1
+      fi
+      if ! grep -q 'LOSE_RACE' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"nenhum canal foi cancelado por perder a corrida","dica_diagnostica":"num grupo simultaneo quem nao atendeu primeiro morre com LOSE_RACE; se nao ha nenhum, os telefones nao estavam disputando a mesma chamada"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o 7200 toca em ordem, e cada telefone tem o próprio tempo"
+    script: |
+      #!/bin/bash
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      : > "$L"
+      # 20 s de chamador: cabem os 5 s do 1080, os 5 s do 1081 e a conversa com
+      # o 1082. Se o relogio for o da CACADA (call_timeout), a chamada morre no
+      # primeiro telefone e este check reprova — que e o ponto da licao.
+      if ! devlab-ramal 1083 --discar 7200 --duracao 20 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada para 7200 nao foi atendida","dica_diagnostica":"se so o primeiro telefone tocou e a chamada caiu, o relogio que voce escreveu limita a CACADA inteira. O que limita cada destino se escreve dentro da string de discagem"}'
+        exit 1
+      fi
+      NASC=$(grep -c 'New Channel sofia/internal/108[012]@' "$L")
+      if [ "${NASC:-0}" -lt 3 ]; then
+        echo "DEVLAB_JSON:{\"mensagem\":\"a caçada tentou $NASC telefone(s) antes de ser atendida, e o grupo tem tres\",\"dica_diagnostica\":\"o 1080 e o 1081 nunca atendem: os tres precisam ser tentados, na ordem, para a chamada chegar ao 1082\"}"
+        exit 1
+      fi
+      if grep -q 'LOSE_RACE' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"houve LOSE_RACE nesta chamada: os telefones tocaram ao mesmo tempo","dica_diagnostica":"esta e a assinatura do grupo SIMULTANEO. Para tocar em ordem o separador e outro"}'
+        exit 1
+      fi
+      # Cada membro consumiu o PROPRIO relogio: o canal seguinte so nasce depois
+      # de o anterior estourar o tempo dele.
+      PRIMEIRO_FIM=$(grep -n 'Hangup sofia/internal/1080@.*ALLOTTED_TIMEOUT' "$L" | cut -d: -f1 | sed -n '1p')
+      SEGUNDO_NASC=$(grep -n 'New Channel sofia/internal/1081@' "$L" | cut -d: -f1 | sed -n '1p')
+      if [ -z "$PRIMEIRO_FIM" ] || [ -z "$SEGUNDO_NASC" ] || [ "$PRIMEIRO_FIM" -gt "$SEGUNDO_NASC" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o segundo telefone nao foi chamado depois de o primeiro estourar o proprio tempo","dica_diagnostica":"a causa ALLOTTED_TIMEOUT no primeiro canal e a prova de que ele tinha um relogio so dele; sem ela, o tempo que voce escreveu e o da cacada inteira"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "os dois arquivos guardam a evidência de cada estratégia"
+    script: |
+      #!/bin/bash
+      A=/root/simultaneo.txt
+      B=/root/sequencial.txt
+      for ARQ in "$A" "$B"; do
+        if [ ! -s "$ARQ" ]; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"$ARQ nao existe ou esta vazio\",\"dica_diagnostica\":\"grave as linhas de New Channel e Hangup do log DEPOIS de cada uma das duas chamadas, com o grep da demonstracao\"}"
+          exit 1
+        fi
+      done
+      if ! grep -q 'LOSE_RACE' "$A"; then
+        echo 'DEVLAB_JSON:{"mensagem":"simultaneo.txt nao mostra nenhum canal perdendo a corrida","dica_diagnostica":"grave o arquivo logo depois de uma chamada para o 7100, com o log limpo antes dela"}'
+        exit 1
+      fi
+      if grep -q 'LOSE_RACE' "$B"; then
+        echo 'DEVLAB_JSON:{"mensagem":"sequencial.txt tem LOSE_RACE, que e assinatura do grupo simultaneo","dica_diagnostica":"limpe o log antes de cada chamada; senao o arquivo do 7200 carrega as linhas do teste anterior"}'
+        exit 1
+      fi
+      if ! grep -q 'ALLOTTED_TIMEOUT' "$B"; then
+        echo 'DEVLAB_JSON:{"mensagem":"sequencial.txt nao mostra nenhum telefone estourando o proprio tempo","dica_diagnostica":"ALLOTTED_TIMEOUT e a marca de um membro com relogio proprio; se aparece NO_ANSWER e nada depois, o relogio era o da cacada"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import pathlib
+  arquivo = pathlib.Path(
+      '/usr/local/freeswitch/etc/freeswitch/dialplan/suporte.xml')
+  d = '${domain_name}'
+  extensoes = f'''
+        <extension name="todos">
+          <condition field="destination_number" expression="^7100$">
+            <action application="bridge" data="user/1080@{d},user/1081@{d},user/1082@{d}"/>
+          </condition>
+        </extension>
+
+        <extension name="em-ordem">
+          <condition field="destination_number" expression="^7200$">
+            <action application="bridge" data="[leg_timeout=5]user/1080@{d}|[leg_timeout=5]user/1081@{d}|[leg_timeout=5]user/1082@{d}"/>
+          </condition>
+        </extension>
+
+    '''
+  texto = arquivo.read_text()
+  arquivo.write_text(texto.replace('  </context>', extensoes + '  </context>'))
+  PY
+  devlab-pbx cli "reloadxml"
+  L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+  EVIDENCIA='New Channel sofia/internal/108[0-9][^ ]*|Hangup sofia/internal/108[0-9][^ ]* \[[A-Z_]+\] \[[A-Z_]+\]'
+  : > "$L"
+  devlab-ramal 1083 --discar 7100 --duracao 6 --silencioso
+  grep -oE "$EVIDENCIA" "$L" > /root/simultaneo.txt
+  : > "$L"
+  devlab-ramal 1083 --discar 7200 --duracao 20 --silencioso
+  grep -oE "$EVIDENCIA" "$L" > /root/sequencial.txt
+
+dicas:
+  - "O destino do `bridge` aceita uma lista de destinos. Existem dois separadores, e a diferença entre eles é a lição inteira — teste os dois e leia o log de cada um."
+  - "Se o segundo telefone do grupo em ordem nunca toca, o relógio que você escreveu limita a caçada inteira. O que limita cada destino se escreve **junto do destino**, entre colchetes, dentro da string de discagem."
+  - "Simultâneo: `user/1080@${domain_name},user/1081@${domain_name},user/1082@${domain_name}`. Em ordem: os mesmos três separados por `|`, cada um precedido de `[leg_timeout=5]`. Depois: `devlab-pbx cli \"reloadxml\"`."
+
+erros_comuns:
+  - match: "LOSE_RACE"
+    digita: "devlab-ramal 1083 --discar 7100 --duracao 6"
+    mensagem: "Hangup sofia/internal/1080@127.0.0.1:6080 [CS_CONSUME_MEDIA] [LOSE_RACE]"
+    causa: "num grupo simultâneo, quem não atendeu primeiro é cancelado pela central — a causa descreve o canal, não um defeito"
+    conserto: "nada a consertar: `LOSE_RACE` é a assinatura de um grupo simultâneo que funcionou. O que seria defeito é ver a mesma causa em TODOS os canais, ou nenhum canal nascendo"
+    categoria: conceitual
+  - match: "ALLOTTED_TIMEOUT"
+    digita: "devlab-ramal 1083 --discar 7200 --duracao 20"
+    mensagem: "Hangup sofia/internal/1080@127.0.0.1:6080 [CS_CONSUME_MEDIA] [ALLOTTED_TIMEOUT]"
+    causa: "o telefone consumiu o tempo que era só dele e a caçada passou ao seguinte — é o grupo sequencial andando"
+    conserto: "nada a consertar. A ausência dessa causa é que seria o problema: aí o tempo escrito era o da caçada inteira, e o membro seguinte não chegou a ser tentado"
+    categoria: conceitual
+
+cards_revisao:
+  - grupo-simultaneo-tem-um-vencedor
+  - grupo-sequencial-soma-os-tempos
+  - relogio-do-grupo-nao-e-relogio-do-membro

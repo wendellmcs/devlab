@@ -44,6 +44,7 @@ uso: devlab-ramal <numero> [opções]
   --digitos <seq>      digita estes dígitos (DTMF) depois de a chamada ser atendida
   --senha <senha>      senha do ramal (padrão: devlab)
   --atender            fica registrado e atende o que chegar
+  --nao-atender        fica registrado e TOCA sem atender (ninguém na mesa)
   --mwi                assina o aviso de mensagem em espera e imprime o que chegar
   --silencioso         não imprime o andamento
 
@@ -59,6 +60,13 @@ digitos=""
 mwi=0
 senha=$SENHA_PADRAO
 atender=0
+# Registrado e TOCANDO, sem nunca atender — o telefone que ninguém pegou. Ele
+# fica de pé como o `--atender`, e a única diferença é não mandar o
+# `--auto-answer 200`. Sem isto não há como exercitar o que o nível Engenheiro
+# cobra: caixa postal por NÃO ATENDER (cause 19, NO_ANSWER) em vez de por ramal
+# desligado (cause 806, USER_NOT_REGISTERED), e grupo de toque SEQUENCIAL, em
+# que cada membro precisa consumir o próprio `call_timeout` antes do seguinte.
+fica_tocando=0
 silencioso=0
 acao=registrar
 
@@ -69,6 +77,7 @@ while [ $# -gt 0 ]; do
     --digitos)    digitos="${2:-}"; shift 2 ;;
     --senha)      senha="${2:-}"; shift 2 ;;
     --atender)    atender=1; shift ;;
+    --nao-atender) fica_tocando=1; shift ;;
     --mwi)        mwi=1; shift ;;
     --silencioso) silencioso=1; shift ;;
     --listar)     acao=listar; shift ;;
@@ -215,9 +224,10 @@ roteiro() {
     echo "h"
     sleep 1
     echo "q"
-  elif [ "$atender" = 1 ]; then
+  elif [ "$fica_de_pe" = 1 ]; then
     # Fica de pé até alguém mandar parar. Sem isto o pjsua sairia na hora e o
-    # ramal que deveria ATENDER não estaria lá quando a chamada chegasse.
+    # ramal que deveria ATENDER (ou tocar) não estaria lá quando a chamada
+    # chegasse.
     while :; do sleep 3600; done
   else
     sleep 2
@@ -260,6 +270,13 @@ extras=()
 [ "$mwi" = 1 ]     && extras+=(--mwi)
 [ "$atender" = 1 ] && extras+=(--auto-answer 200)
 
+# `--atender` e `--nao-atender` deixam o ramal DE PÉ do mesmo jeito; o que os
+# separa é só o `--auto-answer` acima. Um telefone registrado que toca e não é
+# atendido é um estado normalíssimo em campo — e é o único que produz
+# NO_ANSWER, a causa que manda a chamada para a caixa postal.
+fica_de_pe=0
+if [ "$atender" = 1 ] || [ "$fica_tocando" = 1 ]; then fica_de_pe=1; fi
+
 roteiro | stdbuf -oL pjsua \
   --null-audio --no-vad --no-tcp \
   --id "sip:$numero@$PBX" \
@@ -272,12 +289,16 @@ roteiro | stdbuf -oL pjsua \
 pjpid=$!
 echo "$pjpid" >"$PID"
 
-if [ "$atender" = 1 ] && [ -z "$destino" ]; then
+if [ "$fica_de_pe" = 1 ] && [ -z "$destino" ]; then
   # Devolve o terminal ao aluno com o ramal no ar por trás — e só depois que o
   # PBX confirma o registro, senão a próxima linha da lição chamaria um ramal
   # que ainda não existe para ele.
   if esperar_registro; then
-    diga "ramal $numero: registrado e atendendo. Para desligar: devlab-ramal --parar $numero"
+    if [ "$atender" = 1 ]; then
+      diga "ramal $numero: registrado e atendendo. Para desligar: devlab-ramal --parar $numero"
+    else
+      diga "ramal $numero: registrado e tocando sem atender. Para desligar: devlab-ramal --parar $numero"
+    fi
     exit 0
   fi
   diga "ramal $numero: NÃO registrou. Veja $LOG"

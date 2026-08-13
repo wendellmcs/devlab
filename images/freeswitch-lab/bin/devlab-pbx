@@ -64,12 +64,32 @@ case "${1:-}" in
       echo "o FreeSWITCH não está de pé."
       exit 0
     fi
+    pid=$(cat "$FS/var/run/freeswitch/freeswitch.pid" 2>/dev/null)
     $CLI -x "shutdown" >/dev/null 2>&1
     for _ in $(seq 1 20); do
       esta_de_pe || break
       sleep 1
     done
     esta_de_pe && { echo "erro: o FreeSWITCH não desligou." >&2; exit 1; }
+
+    # O fs_cli para de responder ANTES de o processo morrer — medido: cerca de
+    # 3 s para o console cair e mais de 10 s até o processo sair de vez. Um
+    # `iniciar` nessa janela falha CALADO: a instância nova encontra a antiga
+    # ainda viva, desiste sem escrever no log, e o `iniciar` fica 60 s esperando
+    # um PBX que nunca vai subir. Custou uma sessão inteira de investigação.
+    #
+    # O estado do processo em /proc é o que fecha a janela. `Z` (zumbi) já é
+    # seguro: nesse ponto ele soltou tudo o que segurava, e neste container o
+    # PID 1 é um `sleep`, que não recolhe zumbi nenhum — esperar o processo
+    # SUMIR travaria para sempre. O campo 3 do `stat` vem depois do `)` que
+    # fecha o nome do processo, que é onde nomes com espaço estragam um `awk`.
+    if [ -n "$pid" ]; then
+      for _ in $(seq 1 30); do
+        estado=$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null | cut -d' ' -f1)
+        if [ -z "$estado" ] || [ "$estado" = Z ]; then break; fi
+        sleep 1
+      done
+    fi
     echo "FreeSWITCH desligado."
     ;;
 

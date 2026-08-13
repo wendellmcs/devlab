@@ -1,0 +1,513 @@
+id: pbx-eng-03-troncos
+trilha: freeswitch
+nivel: engenheiro
+ordem: 3
+titulo: "O caminho de fora: tronco, DID e o que fazer quando a operadora cai"
+capacidade: "Sei rotear a saída por um tronco, receber um DID no contexto certo e cair para a operadora reserva quando a principal recusa."
+xp: 70
+prereqs: [pbx-eng-02-grupos]
+
+lab:
+  imagem: devlab/freeswitch-lab:1.0.0
+  usuario: root
+  workdir: /root
+  rede: nenhuma
+  # A OPERADORA DESTE LAB É A PRÓPRIA CENTRAL, e isso é dito ao aluno em vez de
+  # escondido. O gateway `operadora` aponta para 127.0.0.1:5080, que é o perfil
+  # EXTERNO deste mesmo FreeSWITCH: a chamada sai por uma porta e volta pela
+  # outra, exatamente como voltaria de uma operadora de verdade — inclusive
+  # caindo no contexto `public`, que é onde chamada de fora cai.
+  #
+  # Isso é o que torna a lição possível com `--network none` e um container só,
+  # e não é encenação: o percurso, os contextos, os contadores do gateway e o
+  # bilhete são os mesmos que um tronco real produziria.
+  #
+  # `50_carrier.xml` é o LADO DE LÁ: ele atende os números que saem pelo tronco
+  # (qualquer coisa começando em 55) e toca um áudio. Sem ele a chamada sairia
+  # e morreria sem destino, e o aluno leria isso como defeito do tronco.
+  #
+  # O `example.xml` que vem na config vanilla é removido: ele aponta para
+  # example.com, que não existe neste lab, e polui o `sofia status` do aluno
+  # com um gateway em estado de falha permanente.
+  setup: |
+    C=/usr/local/freeswitch/etc/freeswitch
+    rm -f "$C/directory/default/example.com.xml"
+    cat > "$C/sip_profiles/external/operadora.xml" <<'XML'
+    <include>
+      <gateway name="operadora">
+        <param name="proxy" value="127.0.0.1:5080"/>
+        <param name="register" value="false"/>
+      </gateway>
+    </include>
+    XML
+    cat > "$C/dialplan/public/50_carrier.xml" <<'XML'
+    <include>
+      <!-- O LADO DA OPERADORA: o que ela faz com o que sai pelo tronco. -->
+      <extension name="carrier-completa">
+        <condition field="destination_number" expression="^55\d+$">
+          <action application="answer"/>
+          <action application="playback" data="ivr/ivr-hello.wav"/>
+          <action application="sleep" data="20000"/>
+          <action application="hangup"/>
+        </condition>
+      </extension>
+    </include>
+    XML
+    cat > "$C/dialplan/escritorio.xml" <<'XML'
+    <include>
+      <context name="escritorio">
+
+        <extension name="ramais">
+          <condition field="destination_number" expression="^(108\d)$">
+            <action application="bridge" data="user/$1@${domain_name}"/>
+          </condition>
+        </extension>
+
+      </context>
+    </include>
+    XML
+    for n in 1080 1081; do
+      cat > "$C/directory/default/$n.xml" <<XML
+    <include>
+      <user id="$n">
+        <params><param name="password" value="devlab"/></params>
+        <variables>
+          <variable name="user_context" value="escritorio"/>
+          <variable name="effective_caller_id_number" value="$n"/>
+        </variables>
+      </user>
+    </include>
+    XML
+    done
+    devlab-pbx iniciar >/dev/null
+    devlab-ramal 1080 --atender --silencioso
+
+ensina:
+  conceitos:
+    - id: tronco-e-um-destino-nomeado
+      titulo: "tronco não é conta que registra: é um **gateway**, um destino nomeado do `bridge` — `sofia/gateway/<nome>/<número>` — e ele vive no perfil externo, não no dialplan"
+    - id: quem-escolhe-o-contexto-de-entrada-e-o-perfil
+      titulo: "o contexto em que uma chamada ENTRA é decidido pelo perfil SIP que a recebeu, não pelo dialplan: por isso o DID mora no `public`, e é de lá que ele transfere para dentro da empresa"
+    - id: rescan-carrega-gateway-reloadxml-nao
+      titulo: "`reloadxml` relê a árvore mas NÃO instancia gateway novo: até um `rescan` do perfil, a central responde `Invalid Gateway!` para um tronco que está no disco"
+  comandos: []
+
+ensino:
+  gancho: |
+    Chamado 7050, do dono da empresa:
+
+    > "Ninguém consegue **ligar para fora**, e o número que anunciamos no site
+    > **não cai em lugar nenhum**. E o comercial da operadora avisou que vai
+    > haver manutenção no link principal na semana que vem — quero que as
+    > chamadas continuem saindo pelo link reserva quando isso acontecer."
+
+    Três coisas, e as três são roteamento: a saída, a entrada e o plano B.
+
+    A parte que engana é a entrada. Você vai escrever a regra do DID no
+    contexto da empresa, recarregar, ligar para o número — e ele não vai cair
+    em lugar nenhum, exatamente como o dono disse. Não porque a regra esteja
+    errada: porque **quem chega de fora não entra por aquele contexto**.
+
+  objetivos:
+    - verbo: construir
+      texto: "escrever a rota de saída que entrega uma chamada ao tronco da operadora"
+    - verbo: construir
+      texto: "receber um DID no contexto em que chamada externa cai e levá-lo ao ramal certo"
+    - verbo: explicar
+      texto: "explicar por que o contexto de entrada não é escolhido pelo dialplan"
+    - verbo: adaptar
+      texto: "transformar uma rota de saída de tronco único em rota com operadora reserva"
+    - verbo: diagnosticar
+      texto: "provar por qual tronco cada chamada saiu, e qual deles recusou"
+
+  modelo_mental: |
+    ### A operadora deste lab é a própria central, e isso não é encenação
+
+    O tronco `operadora` aponta para `127.0.0.1:5080` — o **perfil externo**
+    deste mesmo FreeSWITCH. A chamada sai por uma porta e volta pela outra.
+
+    ```
+    ramal ──> perfil interno (5060) ──> contexto escritorio
+                                            │  bridge sofia/gateway/operadora/…
+                                            ▼
+                                    perfil externo (5080)  ← a "operadora"
+                                            │
+                                            ▼
+                                      contexto public
+    ```
+
+    É o mesmo percurso de um tronco de verdade: os mesmos dois perfis, os
+    mesmos dois contextos, os mesmos contadores no gateway e os mesmos
+    bilhetes. O que muda é o endereço do outro lado.
+
+    ### Tronco é um gateway, e ele não mora no dialplan
+
+    Um gateway é um destino nomeado, definido em
+    `sip_profiles/external/<nome>.xml`:
+
+    ```xml
+    <gateway name="operadora">
+      <param name="proxy" value="127.0.0.1:5080"/>
+      <param name="register" value="false"/>
+    </gateway>
+    ```
+
+    `register=false` porque nem todo tronco se registra: quando a operadora
+    identifica você pelo **endereço IP** — o caso mais comum em link dedicado —
+    não há REGISTER nenhum, e o gateway existe só para dizer para onde mandar.
+
+    Usar é como usar qualquer outro destino de `bridge`:
+
+    ```xml
+    <action application="bridge" data="sofia/gateway/operadora/${destination_number}"/>
+    ```
+
+    E como é um destino igual aos outros, **a lista da lição anterior vale
+    aqui**: `|` entre dois troncos é failover, com a mesma semântica de
+    "tenta o seguinte quando este recusa".
+
+    ### `reloadxml` não carrega tronco novo
+
+    Você já sabe que o `reloadxml` responde `+OK` mesmo quando recusa o XML.
+    Aqui ele mente de um jeito novo: **aceita o arquivo e não instancia o
+    gateway**.
+
+    ```
+    devlab-pbx cli "sofia status gateway operadora-reserva"
+    Invalid Gateway!
+    ```
+
+    O arquivo está no disco, o XML está certo, e o tronco não existe. Quem o
+    instancia é o perfil:
+
+    ```
+    devlab-pbx cli "sofia profile external rescan"
+    ```
+
+    ### Quem chega de fora não escolhe o contexto
+
+    Esta é a parte que derruba quase todo mundo na primeira vez.
+
+    Para uma chamada **interna**, o contexto vem do usuário: é o
+    `user_context` do directory. Para uma chamada que **chega de fora**, não há
+    usuário nenhum — quem chega não se autenticou. O contexto então é o que o
+    **perfil SIP** declara:
+
+    ```xml
+    <!-- sip_profiles/external.xml -->
+    <param name="context" value="public"/>
+    ```
+
+    Por isso o DID mora no `public`, e por isso ele não pode simplesmente
+    atender: ele **transfere** para o contexto de dentro.
+
+    ```xml
+    <action application="transfer" data="1080 XML escritorio"/>
+    ```
+
+    Os três argumentos são o destino, o tipo de dialplan e **o contexto**. Esse
+    terceiro argumento é a fronteira entre o mundo de fora e o de dentro — e é
+    o lugar exato onde a fraude entra, quando alguém o deixa apontando para um
+    contexto que tem rota de saída.
+
+    ### Como se prova por onde a chamada saiu
+
+    O gateway conta as próprias chamadas:
+
+    ```
+    devlab-pbx cli "sofia status gateway operadora"
+    CallsOUT        2
+    FailedCallsOUT  0
+    ```
+
+    Num failover, os dois contadores contam histórias complementares: o tronco
+    reserva soma uma **falha**, o principal soma uma **chamada**. É a prova de
+    que o plano B funcionou, e ela não depende de ninguém ter olhado o log na
+    hora certa.
+
+  anatomia:
+    - linha: "devlab-pbx cli \"sofia status gateway operadora\" | grep -E \"^(Proxy|Status|CallsOUT|FailedCallsOUT)\""
+      partes:
+        - trecho: "devlab-pbx cli"
+          papel: comando
+          explica: "pergunta à central viva — o estado do tronco é dela, não do arquivo"
+        - trecho: "sofia status gateway operadora"
+          papel: argumento
+          explica: "o estado e os contadores de um tronco; `Invalid Gateway!` significa que ele não foi instanciado"
+        - trecho: "grep -E"
+          papel: comando
+          explica: "reduz as ~25 linhas do relatório às quatro que respondem a pergunta"
+        - trecho: "\"^(Proxy|Status|CallsOUT|FailedCallsOUT)\""
+          papel: argumento
+          explica: "para onde ele aponta, se está de pé, quantas saíram e quantas falharam"
+
+  demonstracao:
+    - comando: "devlab-pbx cli \"sofia status\" | grep gateway"
+      saida: |-2
+              external::operadora	gateway	             sip:FreeSWITCH@127.0.0.1:5080	NOREG
+      nota: "O tronco já existe: a operadora entregou o endereço e ele está instanciado. `NOREG` não é defeito — é um tronco que não se registra, identificado pelo endereço IP."
+    - comando: "devlab-pbx cli \"sofia status gateway operadora\" | grep -E \"^(Proxy|Status|CallsOUT|FailedCallsOUT)\""
+      saida: |-2
+        Proxy   	sip:127.0.0.1:5080
+        Status  	UP
+        CallsOUT	0
+        FailedCallsOUT	0
+      nota: "Para onde ele aponta e o que já passou por ele: **zero** chamadas. Este é o ponto de partida, e é contra ele que você vai provar a saída no fim."
+    - comando: "grep -E \"context|sip-port\" /usr/local/freeswitch/etc/freeswitch/sip_profiles/external.xml | grep param"
+      saida: |-2
+            <param name="sip-port" value="$${external_sip_port}"/>
+            <param name="context" value="public"/>
+            <param name="tls-sip-port" value="$${external_tls_port}"/>
+      nota: "O perfil externo, escancarado: ele escuta na 5080 e joga o que chega no contexto **`public`**. Nenhuma linha de dialplan muda isso — é aqui que a decisão foi tomada."
+    - comando: "devlab-ramal 1081 --discar 0552112345678 --duracao 4"
+      saida: |-2
+        ramal 1081: registrando em 127.0.0.1 (porta local 6081)...
+        --- ramal 1081 ---
+        registro=ok
+        chamada=nao_atendida
+        motivo_do_fim=404 (Not Found)
+        log completo: /var/lib/devlab/ramal-1081.log
+      nota: "Uma tentativa de ligar para fora, antes de existir rota: `404`. A central não inventa destino, e um número de operadora não é diferente de um ramal inexistente."
+
+  pratica_guiada: []
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você escreve a regra do DID no contexto `escritorio`, recarrega e liga para o número. Continua não caindo em lugar nenhum. O arquivo está certo. O que aconteceu?"
+      resposta: |
+        A chamada nunca passou pelo contexto `escritorio`.
+
+        Quem chega de fora entra pelo perfil **externo**, e é ele que declara o
+        contexto — `public`. A regra que você escreveu está num roteiro que
+        essa chamada não percorre; para ela, o seu DID não existe.
+
+        O jeito de ver isso sem adivinhar é o percurso no log: as linhas
+        `parsing [...]` dizem o nome do contexto que está sendo percorrido, e
+        ele vai estar escrito lá, diferente do que você esperava. Depois disso,
+        a regra vai para o `public` e **transfere** para dentro.
+    - tipo: predicao
+      pergunta: "Você põe o tronco reserva na frente do principal, por engano. As chamadas continuam saindo? E o que os contadores mostram?"
+      resposta: |
+        Continuam saindo, e é por isso que o engano pode durar meses.
+
+        O tronco reserva recusa na hora (`NORMAL_TEMPORARY_FAILURE`), a lista
+        cai para o principal e a chamada completa. Ninguém reclama.
+
+        Os contadores contam a verdade: o reserva acumula `FailedCallsOUT` a
+        cada chamada, e o principal acumula `CallsOUT`. Uma taxa de falha de
+        100% num tronco que "está funcionando" é exatamente o tipo de coisa
+        que só aparece para quem olha os contadores — e é o alarme que impede
+        de descobrir a inversão no dia em que o principal cai de verdade.
+    - tipo: transferencia
+      pergunta: "A operadora avisa que a autenticação vai passar a ser por usuário e senha em vez de por endereço IP. O que muda?"
+      resposta: |
+        O gateway passa a se registrar: `register` vira `true`, e entram
+        `username`, `password` e `realm` na definição.
+
+        O que muda no diagnóstico é maior do que a config. Um tronco que
+        registra tem **estado**: `sofia status gateway` deixa de mostrar
+        `NOREG` e passa a mostrar `REGED` — ou uma falha de registro, que é uma
+        causa nova de "não sai chamada" que antes não existia.
+
+        E o dialplan não muda nem uma linha: o `bridge` continua apontando para
+        o nome do gateway. É essa separação que faz trocar de operadora ser
+        mexer num arquivo, e não reescrever o roteamento.
+
+objetivo_md: |
+  O tronco **`operadora`** já está instanciado e apontando para o endereço que
+  a operadora entregou. O ramal **1080** está no ar, atendendo. O contexto da
+  empresa é o **`escritorio`**, em
+  `/usr/local/freeswitch/etc/freeswitch/dialplan/escritorio.xml`.
+
+  A operadora deste lab é a própria central, pelo perfil externo — a chamada
+  sai por uma porta e volta pela outra. Números começando em **55** são os que
+  ela completa.
+
+  ### Sua entrega
+
+  1. **Saída:** discar **`0`** seguido do número entrega a chamada ao tronco,
+     **sem o zero** — quem disca `0552112345678` chama `552112345678` na
+     operadora.
+  2. **Entrada:** o DID **`1140028922`** tem de cair no ramal **1080**. Ele
+     chega pelo perfil externo; descubra em que contexto isso o coloca antes de
+     escrever a regra, e lembre que o diretório `dialplan/public/` é incluído
+     inteiro.
+  3. **Plano B:** crie o tronco **`operadora-reserva`**, apontando para
+     `127.0.0.1:5099`, e faça a rota de saída tentar **primeiro o reserva e
+     depois o principal**. (É a inversão do que se faria em produção — aqui ela
+     serve para provar o failover, porque esse endereço não responde.)
+  4. **Prova:** grave em **`/root/troncos.txt`** os contadores dos dois
+     troncos, depois de uma chamada de saída que tenha passado pelo failover.
+
+verificar:
+  - descricao: "o tronco reserva existe e está instanciado na central"
+    script: |
+      #!/bin/bash
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      if ! $CLI -x status >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o PBX nao esta de pe","dica_diagnostica":"suba com devlab-pbx iniciar"}'
+        exit 1
+      fi
+      SAIDA=$($CLI -x "sofia status gateway operadora-reserva" 2>/dev/null | tr -d '\r')
+      case "$SAIDA" in
+        *Invalid*)
+          echo 'DEVLAB_JSON:{"mensagem":"a central responde Invalid Gateway! para o tronco operadora-reserva","dica_diagnostica":"o arquivo pode estar certo no disco: reloadxml NAO instancia gateway novo. Quem faz isso e um rescan do perfil externo"}'
+          exit 1 ;;
+      esac
+      if ! printf %s "$SAIDA" | grep -qE '^Proxy[[:space:]]+sip:127\.0\.0\.1:5099'; then
+        echo 'DEVLAB_JSON:{"mensagem":"o tronco operadora-reserva nao aponta para 127.0.0.1:5099","dica_diagnostica":"o endereco do outro lado e o param proxy da definicao do gateway"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "discar 0 + número entrega a chamada ao tronco, sem o zero"
+    script: |
+      #!/bin/bash
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      : > "$L"
+      if ! devlab-ramal 1081 --discar 0552112345678 --duracao 5 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada para fora nao completou","dica_diagnostica":"se o motivo foi 404, nao ha rota de saida no contexto escritorio; se foi outro, veja por qual gateway ela tentou sair no log"}'
+        exit 1
+      fi
+      # O oraculo e o destino REAL do bridge, com as variaveis ja resolvidas:
+      # a linha EXECUTE mostra o numero que de fato foi entregue ao tronco.
+      if ! grep -qE 'EXECUTE .*bridge\(.*sofia/gateway/operadora/552112345678' "$L"; then
+        if grep -qE 'EXECUTE .*bridge\(.*sofia/gateway/[a-z-]*/0552112345678' "$L"; then
+          echo 'DEVLAB_JSON:{"mensagem":"a chamada saiu pelo tronco COM o zero na frente","dica_diagnostica":"o zero e o codigo de saida da empresa, e nao faz parte do numero: capture so o resto na condicao e entregue a captura ao gateway"}'
+          exit 1
+        fi
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada nao foi entregue ao tronco operadora","dica_diagnostica":"o destino de um tronco no bridge e sofia/gateway/<nome>/<numero>; confira a linha EXECUTE do bridge no log, que mostra o destino ja resolvido"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o DID 1140028922 chega da operadora e cai no ramal 1080"
+    script: |
+      #!/bin/bash
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      : > "$L"
+      # O teste de DID de campo: ligue para o proprio numero e veja se ele
+      # volta. Aqui a chamada sai pelo tronco e reentra pelo perfil externo,
+      # que e por onde a operadora a entregaria.
+      if ! devlab-ramal 1081 --discar 01140028922 --duracao 6 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"ligar para o proprio DID nao completou","dica_diagnostica":"a chamada sai pelo tronco e volta pelo perfil externo. Se ela sai e morre, o DID nao esta no contexto em que uma chamada de fora cai"}'
+        exit 1
+      fi
+      if ! grep -qE 'EXECUTE .*sofia/external/.*transfer\(1080 ' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada que chegou de fora nao foi transferida para o 1080","dica_diagnostica":"quem chega pelo perfil externo cai no contexto que o PERFIL declara, e nao no da empresa; de la a regra transfere para dentro, dizendo o contexto no terceiro argumento"}'
+        exit 1
+      fi
+      if ! grep -qE 'EXECUTE .*bridge\(user/1080@' "$L"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada foi transferida mas nao chegou ao ramal 1080","dica_diagnostica":"o contexto de destino do transfer precisa ser o da empresa, que e quem roteia a faixa de ramais"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "a saída cai para o tronco principal quando o reserva recusa"
+    script: |
+      #!/bin/bash
+      CLI=/usr/local/freeswitch/bin/fs_cli
+      L=/usr/local/freeswitch/var/log/freeswitch/freeswitch.log
+      ANTES_RESERVA=$($CLI -x "sofia status gateway operadora-reserva" 2>/dev/null | grep -E '^FailedCallsOUT' | grep -oE '[0-9]+$')
+      ANTES_PRINCIPAL=$($CLI -x "sofia status gateway operadora" 2>/dev/null | grep -oE '^CallsOUT[[:space:]]+[0-9]+$' | grep -oE '[0-9]+$')
+      : > "$L"
+      if ! devlab-ramal 1081 --discar 0552199998888 --duracao 5 --silencioso >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"a chamada de saida nao completou com o tronco reserva na frente","dica_diagnostica":"a lista de destinos do bridge separa os troncos como separava os telefones do grupo em ordem; se a chamada morre no primeiro, ela nao esta em lista"}'
+        exit 1
+      fi
+      DEPOIS_RESERVA=$($CLI -x "sofia status gateway operadora-reserva" 2>/dev/null | grep -E '^FailedCallsOUT' | grep -oE '[0-9]+$')
+      DEPOIS_PRINCIPAL=$($CLI -x "sofia status gateway operadora" 2>/dev/null | grep -oE '^CallsOUT[[:space:]]+[0-9]+$' | grep -oE '[0-9]+$')
+      if [ "${DEPOIS_RESERVA:-0}" -le "${ANTES_RESERVA:-0}" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o tronco reserva nao registrou nenhuma tentativa falhada","dica_diagnostica":"ele precisa ser o PRIMEIRO da lista: a chamada tem de bater nele, ser recusada, e so entao seguir para o principal"}'
+        exit 1
+      fi
+      if [ "${DEPOIS_PRINCIPAL:-0}" -le "${ANTES_PRINCIPAL:-0}" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o tronco principal nao registrou a chamada que deveria ter herdado","dica_diagnostica":"depois do reserva recusar, a lista precisa continuar no principal — e o numero entregue a ele tambem vai sem o zero"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "/root/troncos.txt guarda os contadores dos dois troncos"
+    script: |
+      #!/bin/bash
+      ARQ=/root/troncos.txt
+      if [ ! -s "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"troncos.txt nao existe ou esta vazio","dica_diagnostica":"pergunte a central o status dos dois gateways e redirecione a resposta para o arquivo"}'
+        exit 1
+      fi
+      for G in operadora operadora-reserva; do
+        if ! grep -q "$G" "$ARQ"; then
+          echo "DEVLAB_JSON:{\"mensagem\":\"troncos.txt nao menciona o tronco $G\",\"dica_diagnostica\":\"o arquivo tem de trazer os contadores dos DOIS troncos, para que a comparacao entre eles seja lida sem contexto extra\"}"
+          exit 1
+        fi
+      done
+      if ! grep -qE 'FailedCallsOUT[[:space:]]+[1-9]' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"nenhum contador de falha maior que zero no arquivo","dica_diagnostica":"grave o arquivo DEPOIS de uma chamada que passou pelo failover; e a falha no reserva que prova que o plano B foi exercitado"}'
+        exit 1
+      fi
+      exit 0
+
+solucao_referencia: |
+  python3 - <<'PY'
+  import pathlib
+  raiz = pathlib.Path('/usr/local/freeswitch/etc/freeswitch')
+
+  (raiz / 'sip_profiles/external/operadora-reserva.xml').write_text('''<include>
+    <gateway name="operadora-reserva">
+      <param name="proxy" value="127.0.0.1:5099"/>
+      <param name="register" value="false"/>
+    </gateway>
+  </include>
+  ''')
+
+  (raiz / 'dialplan/public/60_did.xml').write_text('''<include>
+    <extension name="did-escritorio">
+      <condition field="destination_number" expression="^1140028922$">
+        <action application="transfer" data="1080 XML escritorio"/>
+      </condition>
+    </extension>
+  </include>
+  ''')
+
+  arquivo = raiz / 'dialplan/escritorio.xml'
+  saida = '''
+        <extension name="saida">
+          <condition field="destination_number" expression="^0(\\d+)$">
+            <action application="bridge" data="sofia/gateway/operadora-reserva/$1|sofia/gateway/operadora/$1"/>
+          </condition>
+        </extension>
+
+  '''
+  arquivo.write_text(arquivo.read_text().replace('  </context>', saida + '  </context>'))
+  PY
+  devlab-pbx cli "reloadxml"
+  devlab-pbx cli "sofia profile external rescan"
+  sleep 2
+  devlab-ramal 1081 --discar 0552112345678 --duracao 5 --silencioso
+  devlab-pbx cli "sofia status gateway operadora" > /root/troncos.txt
+  devlab-pbx cli "sofia status gateway operadora-reserva" >> /root/troncos.txt
+
+dicas:
+  - "Descubra em que contexto uma chamada de fora entra antes de escrever o DID: a resposta está no perfil externo, em `sip_profiles/external.xml`, e não em nenhum arquivo de dialplan. Do contexto de entrada você chega ao de dentro com `transfer`, cujo terceiro argumento é o contexto."
+  - "Se a central responde `Invalid Gateway!` para um tronco cujo arquivo está no disco, o `reloadxml` não basta — quem instancia gateway é um `rescan` do perfil externo. E o `0` que o usuário disca é código de saída da empresa: capture só o resto e entregue a captura ao tronco."
+  - "Saída: uma extensão para `^0(\\d+)$` com `bridge` para `sofia/gateway/operadora-reserva/$1|sofia/gateway/operadora/$1`. DID: um arquivo em `dialplan/public/` com a extensão para `^1140028922$` e `transfer` de `1080 XML escritorio`. Depois: `devlab-pbx cli \"reloadxml\"` e `devlab-pbx cli \"sofia profile external rescan\"`."
+
+erros_comuns:
+  - match: "Invalid Gateway!"
+    digita: "devlab-pbx cli \"sofia status gateway operadora-reserva\""
+    mensagem: "Invalid Gateway!"
+    causa: "o arquivo do tronco está no disco e o XML está certo, mas o perfil ainda não o instanciou — o `reloadxml` relê a árvore e não cria gateway"
+    conserto: "mande o perfil externo varrer os troncos de novo com `sofia profile external rescan`, e confirme perguntando o status do gateway"
+    categoria: config_nao_recarregada
+  - match: "motivo_do_fim=404"
+    digita: "devlab-ramal 1081 --discar 0552112345678 --duracao 5"
+    mensagem: "--- ramal 1081 ---\nregistro=ok\nchamada=nao_atendida\nmotivo_do_fim=404 (Not Found)"
+    causa: "nenhuma extensão do contexto da empresa casou com o número discado — para a central, ligar para fora não é diferente de ligar para um ramal que não existe"
+    conserto: "leia o percurso no log: a linha `Regex (FAIL)` mostra o número real ao lado da expressão, e o contexto que foi percorrido aparece na linha `parsing`"
+    categoria: conceitual
+
+cards_revisao:
+  - tronco-e-um-destino-nomeado
+  - quem-escolhe-o-contexto-de-entrada-e-o-perfil
+  - rescan-carrega-gateway-reloadxml-nao
