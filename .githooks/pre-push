@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Gancho de pre-push: o portão de privacidade roda ANTES de qualquer coisa sair
+# desta máquina.
+#
+# Ele existe porque o conserto não existe. Force-push move o ponteiro do branch
+# e não apaga nada: no GitHub, o objeto publicado continua acessível por SHA, e
+# os SHAs de push em repositório público são arquivados por terceiros. Foi o que
+# aconteceu no primeiro push deste projeto — a limpeza confiável exigiu apagar e
+# recriar o repositório.
+#
+# Por isso este é o único portão do projeto que roda automaticamente. Os outros
+# você chama quando quer; este te interrompe.
+#
+# Para instalar (o `scripts/setup.sh` já faz):
+#     git config core.hooksPath .githooks
+#
+# Para pular numa emergência consciente:
+#     git push --no-verify
+set -uo pipefail
+
+RAIZ="$(git rev-parse --show-toplevel)"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "pre-push: python3 não encontrado — o portão de privacidade não pôde rodar." >&2
+  echo "          Instale o python3 ou empurre com --no-verify, por sua conta." >&2
+  exit 1
+fi
+
+python3 "$RAIZ/scripts/checa-privacidade.py" || {
+  echo >&2
+  echo "pre-push ABORTADO: há conteúdo pessoal ou da máquina no que seria publicado." >&2
+  echo "Resolva antes — depois de empurrar, não há como despublicar." >&2
+  exit 1
+}

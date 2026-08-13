@@ -405,6 +405,24 @@ else
   ok "dependências instaladas"
 fi
 
+# ── 4a2. gancho de privacidade ─────────────────────────────────────────────
+# Ganchos do git não são versionados (moram em .git/hooks, que não vai no
+# repositório), então cada clone começa sem nenhum. `core.hooksPath` resolve:
+# aponta para um diretório que É versionado.
+#
+# O gancho roda o portão de privacidade antes de cada push. Ele existe porque
+# publicar não tem desfazer: force-push não apaga objeto nenhum no GitHub, e o
+# que já saiu continua acessível por SHA.
+passo "gancho de privacidade"
+
+if [ -d .git ] && [ -f .githooks/pre-push ]; then
+  chmod +x .githooks/pre-push 2>/dev/null || true
+  git config core.hooksPath .githooks
+  ok "pre-push instalado — o portão de privacidade roda antes de cada push"
+else
+  aviso "não é um clone git (ou .githooks sumiu): gancho de pre-push não instalado"
+fi
+
 # ── 4b. interface ──────────────────────────────────────────────────────────
 # O agente serve a própria UI, então o build é parte da instalação — não é
 # passo de desenvolvedor. `dist/` não é versionado (é artefato), logo todo

@@ -476,6 +476,7 @@ npm run valida             # valida o conteúdo e executa os checks sem Docker
 npm run teste:integracao   # sobe containers de verdade (pula se faltar Docker ou imagem)
 npm run fumaca             # prova o loop central pela API, ponta a ponta
 npm run tipos              # checagem de tipos dos dois pacotes
+npm run privacidade        # nada da máquina nem do autor no que seria publicado
 ```
 
 A **prova de fumaça** é a que responde "está funcionando?" numa instalação
@@ -565,12 +566,39 @@ de XP seria encenação.
 
 ## Antes de publicar no GitHub
 
-O repositório não contém nenhum caminho, nome de usuário, e-mail ou
-identificador da máquina onde foi desenvolvido. Os dados semeados nos labs
-(ramais, CDR, contatos) são fictícios e usam o domínio de exemplo
-`exemplo.local`. `.env`, `.devlab/` (o banco de progresso), `node_modules/` e
-`dist/` estão no `.gitignore`; o `package-lock.json` está versionado, para que
-`npm ci` reproduza exatamente as mesmas dependências.
+**Nada da máquina nem do autor entra neste repositório** — e isso deixou de ser
+uma promessa para virar um portão que interrompe o `git push`:
+
+```bash
+npm run privacidade      # varre o que SERIA publicado
+```
+
+O [`scripts/checa-privacidade.py`](scripts/checa-privacidade.py) percorre os
+arquivos que o git rastreia **e as mensagens de commit**, procurando o caminho
+do seu diretório pessoal, o seu usuário do sistema, o nome desta máquina, o
+nome da pasta local do projeto, chaves e tokens, endereços MAC e e-mails reais.
+Os valores sensíveis são lidos do ambiente, nunca escritos no script: um
+denylist com um nome dentro protegeria uma pessoa e publicaria justamente o
+nome que veio esconder. Ele também recusa que documentos internos — como o
+arquivo de continuidade de trabalho — sejam rastreados.
+
+Como todo portão deste projeto, ele **se auto-testa antes**: planta um caminho e
+uma chave numa amostra e exige encontrá-los. "Zero achados" e "a busca nunca
+rodou" imprimem a mesma linha verde, e só esse passo distingue os dois.
+
+O gancho [`.githooks/pre-push`](.githooks/pre-push) o chama a cada push, e o
+`setup.sh` o instala (`git config core.hooksPath .githooks`). É o único portão
+do projeto que roda sozinho, e a razão é que aqui não existe conserto barato:
+**force-push não apaga nada no GitHub.** O objeto continua acessível por SHA
+depois de reescrita a história, e SHAs de push em repositório público são
+arquivados por terceiros. A limpeza confiável é apagar e recriar o repositório
+— foi o que este projeto precisou fazer, no primeiro push, porque a promessa
+deste parágrafo existia sem nada que a verificasse.
+
+Os dados semeados nos labs (ramais, CDR, contatos) são fictícios e usam o
+domínio de exemplo `exemplo.local`. `.env`, `.devlab/` (o banco de progresso),
+`node_modules/` e `dist/` estão no `.gitignore`; o `package-lock.json` está
+versionado, para que `npm ci` reproduza exatamente as mesmas dependências.
 
 O [`.gitattributes`](.gitattributes) força LF em todo o repositório. Não é
 preferência de estilo: clonar pelo Git do Windows converteria os `.sh` para
