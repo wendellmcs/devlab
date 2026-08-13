@@ -191,10 +191,17 @@ def auto_teste(regras: list[tuple[str, str]]) -> None:
     imprimem a mesma linha verde. Sem este passo, um erro de digitação numa
     expressão regular transformaria o portão num carimbo.
     """
+    # As iscas são MONTADAS em pedaços, e isso não é estilo: escritas inteiras,
+    # elas casariam com as próprias regras quando este arquivo — que é
+    # rastreado — fosse varrido, e o portão acusaria a si mesmo para sempre.
+    # Descoberto rodando: a primeira versão reprovava o push com dois achados,
+    # os dois dentro desta função.
+    isca_chave = "AKIA" + "0123456789" + "ABCDEF"
+    isca_email = "fulano" + "@" + "empresa-de-verdade" + ".com.br"
     amostra = (
         f"caminho {os.path.expanduser('~')}/coisa\n"
-        "chave AKIA0123456789ABCDEF\n"
-        "contato fulano@empresa-de-verdade.com.br\n"
+        f"chave {isca_chave}\n"
+        f"contato {isca_email}\n"
     )
     encontrados = procurar(amostra, regras) + procurar_emails(amostra)
     rotulos = {r for r, _, _ in encontrados}
