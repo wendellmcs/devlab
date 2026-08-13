@@ -5,8 +5,11 @@ em Linux (no Windows, dentro do WSL2). O software é **de verdade**, em
 containers descartáveis; a aplicação é a camada de **curso, verificação e
 visualização** por cima dele.
 
-> **Estado atual: Fase 0 (MVP) implementada.** O loop central está fechado —
-> comando real → verificação por estado → progresso — sem nenhuma dependência de IA.
+> **Estado atual: Fases 0 e 3 implementadas.** São **41 lições** em três
+> trilhas — Linux, Troubleshooting SIP/RTP e FreeSWITCH/PABX —, com **120
+> checks** que rodam contra containers de verdade a cada build. O loop central
+> está fechado (comando real → verificação por estado → progresso) e não depende
+> de IA em nenhum ponto.
 
 ---
 
@@ -16,13 +19,16 @@ visualização** por cima dele.
 |---|---|
 | `devlab-agent` — Lab Manager, PTY Bridge, Verifier Runner, State Extractor, Progress Store | pronto |
 | Interface de 3 painéis (objetivo · terminal real · estado ao vivo) | pronta |
-| Imagem `devlab/linux-base` com árvore semeada | pronta |
-| Trilha **Linux · Operador** completa: 12 lições, 36 checks, capstone | pronta |
+| Trilha **Linux · Operador**: 12 lições, 36 checks, capstone | pronta |
+| Trilha **Troubleshooting SIP/RTP**, nos três níveis: 18 lições, 50 checks | pronta |
+| Trilha **FreeSWITCH/PABX** · Operador e Construtor: 11 lições, 34 checks | pronta |
+| Imagens de lab: `linux-base`, `voip-tools` (tshark, sngrep, SIPp) e `freeswitch-lab` (FreeSWITCH 1.10.12 + softphone `pjsua`, compilados do fonte) | prontas |
 | XP, custo de dica, portão de pré-requisitos, progresso em SQLite | pronto |
-| Catálogo de erros de Linux (6 assinaturas reais) | pronto |
+| Catálogo de erros com assinaturas reais | pronto |
 | `devlab doctor` · `devlab ia` · `devlab modelo` | pronto |
 | Camada de IA opcional (Ollama local **ou** API na nuvem com a sua chave) | pronta — **desligada por padrão**, adiantada da Fase 2 |
-| Git, SQL, Docker, Servidores, FreeSWITCH, SIP/RTP, Kamailio, Asterisk | Fases 1 a 4 |
+| Acessibilidade **WCAG AAA** com portão que reprova o build | pronta |
+| FreeSWITCH · Engenheiro; Git, SQL, Docker, Servidores, Kamailio, Asterisk | Fases 1, 2 e 4 |
 
 ---
 
@@ -113,7 +119,12 @@ container sobe em segundos com um bash de verdade dentro dele.
 - **Node.js 24+** — o agente roda TypeScript direto, sem passo de build, e usa
   o módulo nativo `node:sqlite`
 - **Docker Engine** (no Windows: dentro do WSL2, ou Docker Desktop com backend WSL2)
-- ~3 GB de disco para a Fase 0 (20–30 GB quando as trilhas de VoIP entrarem)
+- **~4 GB de disco** para as três imagens de lab atuais — `linux-base` 182 MB,
+  `voip-tools` 504 MB e `freeswitch-lab` 661 MB, mais as camadas intermediárias
+  do build (20–30 GB quando Kamailio e Homer entrarem, na Fase 4)
+- **O primeiro `devlab imagens` leva ~4 minutos**, e só por causa do
+  FreeSWITCH: os pacotes oficiais exigem token da SignalWire, então a imagem o
+  compila do fonte. Depois disso o build é pulado enquanto o contexto não mudar
 - **python3 + PyYAML** — só para `devlab validar` (o setup instala; no
   Debian/Ubuntu é `sudo apt install python3-yaml`, **não** `pip install`, que o
   PEP 668 bloqueia)
@@ -122,6 +133,32 @@ container sobe em segundos com um bash de verdade dentro dele.
 > **WSL2 e memória.** Por padrão o WSL2 fica com metade da RAM do Windows. Se o
 > `setup.sh` reclamar de pouca memória para o modelo de IA, aumente o teto em
 > `C:\Users\<você>\.wslconfig` (`[wsl2]` / `memory=16GB`) e rode `wsl --shutdown`.
+
+---
+
+## As trilhas prontas
+
+Três das dez trilhas do currículo estão no ar, com **1592 XP** somados. Toda
+lição é exercitada de ponta a ponta a cada `devlab validar`: o check tem de
+**reprovar antes** e **aprovar depois** da solução de referência, dentro de um
+container de verdade, com a rede e as capacidades que ela declara.
+
+| Trilha | Níveis | Lições | O que o aluno sai sabendo |
+|---|---|---|---|
+| **Linux** | Operador | 12 | navegar, ler e manipular arquivos no shell, sem GUI |
+| **Troubleshooting SIP/RTP** | Operador · Construtor · Engenheiro | 18 | capturar e ler uma chamada, medir perda e jitter, e **reproduzir** o defeito com SIPp |
+| **FreeSWITCH/PABX** | Operador · Construtor | 11 | operar a central e **escrevê-la**: directory, dialplan, mídia |
+
+As lições de VoIP e PBX rodam contra software real — FreeSWITCH atendendo, dois
+softphones `pjsua` registrados, RTP nos dois sentidos — e **sem rede nenhuma**:
+todas declaram `--network none`, e o tráfego acontece na loopback do próprio
+container. Cada lição pede só a capacidade de que precisa: a trilha de PBX não
+pede **nenhuma** (`--cap-drop ALL` inteiro), e a de captura pede `NET_RAW`, mais
+`NET_ADMIN` nas que mexem em firewall.
+
+Isso é medição, não promessa: `docs/DESIGN-PBX.md` e `docs/DESIGN-VOIP.md`
+trazem o experimento por trás de cada decisão — inclusive as que derrubaram a
+primeira resposta óbvia.
 
 ---
 
@@ -565,17 +602,20 @@ valer sobre a imagem.
 
 ## Próxima fase
 
-O PRD sugere dois caminhos, e a arquitetura suporta os dois porque as trilhas
-são independentes:
+A Fase 3 — a de maior retorno para quem trabalha com telefonia — foi antecipada
+e está entregue: a trilha de Troubleshooting SIP/RTP nos três níveis, e a de
+FreeSWITCH em dois. O que vem, em ordem de retorno:
 
+- **FreeSWITCH · Engenheiro** — voicemail e MWI, URA com menus aninhados, hunt
+  groups, troncos e gateways pelo perfil externo, CDR, ESL, `mod_conference` e
+  endurecimento contra fraude. É o que fecha a trilha F.
 - **Fase 1** — Git (DAG animado do repositório real), SQL (Postgres com dataset
   de CDR), completar Linux (Construtor e Engenheiro), repetição espaçada SM-2 e
   Treinos do Dia, material de apoio, skill tree.
-- **Atalho para retorno imediato no trabalho: pular para a Fase 3** —
-  FreeSWITCH com softphone `pjsua` real e a trilha de Troubleshooting SIP/RTP
-  (sngrep, tshark, SIPp) com o **ladder SIP** alimentado por captura real.
+- **Fase 4** — topologia carrier: Kamailio balanceando dois FreeSWITCH, com
+  RTPengine e prova de failover no Homer.
 
-O que já está pronto para receber qualquer uma das duas: labs multi-container
-via `compose.yaml` (o schema de `lab` já prevê), capacidades extras por lição
+O que já está pronto para receber qualquer uma delas: labs multi-container via
+`compose.yaml` (o schema de `lab` já prevê), capacidades extras por lição
 (`NET_ADMIN`/`NET_RAW` para captura de pacote), injeção de falha (`break`) e o
 catálogo de erros versionado.
