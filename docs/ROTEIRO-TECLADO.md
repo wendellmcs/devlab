@@ -99,14 +99,38 @@ Uma linha por execução. Não apague as antigas: a comparação é o valor.
 
 **Pendente — precisa de humano:**
 
-- [ ] **Passagem com leitor de tela real** (Orca no Linux, NVDA no Windows).
-      Não foi feita: não há leitor de tela instalado nesta máquina, e Chromium
-      headless não substitui um. O que a automação prova é a *estrutura* —
-      papéis, nomes acessíveis, ordem de foco, regiões `aria-live`. O que ela
-      **não** prova é se o que sai pelo áudio é compreensível.
-- [ ] **`screenReaderMode` do xterm.js** — a saída do shell é anunciada? É o
-      ponto mais difícil do produto e o único que exige o app com Docker de pé
-      (`npm run iniciar`), não o servidor de fixtures.
+- [x] **Passagem com leitor de tela real** — feita em 2026-08-13 com NVDA no
+      Windows. Ver o registro daquela data, abaixo.
+- [x] **`screenReaderMode` do xterm.js** — verificado na mesma passagem.
+
+### 2026-08-13 — primeira passagem com leitor de tela real (NVDA)
+
+**Quem ouviu:** o autor do projeto, com NVDA no Windows, contra o app REAL
+(`npm run iniciar` no WSL2, com Docker e container de verdade), alcançado do
+navegador do Windows em `http://localhost:7788`. Não foi o servidor de
+fixtures: o terminal precisa estar conectado para ser ouvido.
+
+**O que ficou estabelecido:** o percurso funciona com leitor de tela, incluindo
+o terminal. As duas perguntas que só o áudio responde foram respondidas por
+quem ouviu, e as duas caixas acima saíram de pendente.
+
+**O que este registro NÃO contém, e a omissão é deliberada:** a transcrição do
+que o NVDA falou em cada passo. Ela não foi anotada durante a sessão, e inventar
+os anúncios para "completar" o registro seria pior do que a lacuna — o valor
+deste arquivo é a comparação entre execuções, e uma comparação contra texto
+imaginado não vale nada. Fica como está: atestado pelo autor, sem transcrição.
+
+**Uma observação que veio junto, e que é trabalho futuro:** o relato foi *"ele é
+chato, mas funciona"*. Verbosidade é a natureza de um leitor de tela, então isso
+pode ser só ele sendo ele. Mas pode também ser a interface **anunciando demais**
+— e há candidatos concretos no código: seis regiões com `aria-live="polite"`
+(cabeçalho, estado do lab, painel de objetivo, conexão do terminal, escala,
+assistente de IA), algumas atualizando com frequência. Se um dia alguém for
+medir isso, a pergunta é: quantas dessas precisam mesmo interromper a leitura?
+Uma região que anuncia a cada 2,5 s transforma a tela num rádio ligado.
+
+Não está registrado como defeito porque não foi medido como defeito. Está
+registrado para que a próxima passagem saiba o que escutar.
 
 ### 2026-08-03 — confirmação destrutiva (3.3.6) e prazo do lab (2.2.6)
 
