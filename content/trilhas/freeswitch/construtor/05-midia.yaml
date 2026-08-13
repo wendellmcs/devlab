@@ -151,8 +151,15 @@ ensino:
     No log, o veredito dessas condições não sai como `Regex`, e sim assim:
 
     ```
-    Date/TimeMatch (PASS) [atendimento] break=on-false
+    Date/Time Match (PASS) [atendimento] break=on-false
+    Date/TimeMatch (FAIL) [atendimento] break=on-false
     ```
+
+    **Olhe duas vezes: as duas linhas não se escrevem igual.** No `PASS` há um
+    espaço entre `Date/Time` e `Match`; no `FAIL`, não. Não é erro de digitação
+    desta lição — é o que o FreeSWITCH escreve. Quem montar um filtro com uma
+    das formas vai jurar que a outra metade das chamadas não avaliou horário
+    nenhum. O jeito seguro é aceitar as duas: `Date/Time ?Match`.
 
     E o relógio é o **da central** — não o seu. A distinção parece pedante até
     a primeira vez que ela te morde, e neste lab ela morde já:
@@ -323,7 +330,7 @@ ensino:
         correto e o comportamento fica errado.
 
         É um caso em que a leitura do log ajuda a não perder tempo: o
-        `Date/TimeMatch` diz PASS ou FAIL, e comparar esse veredito com a hora
+        a linha de `Date/Time Match` diz PASS ou FAIL, e comparar esse veredito com a hora
         que você acha que é já resolve a dúvida.
     - tipo: transferencia
       pergunta: "Um mesmo aviso precisa ser tocado por seis rotas diferentes. Por que `transfer` para uma extensão dedicada é melhor do que repetir as ações nas seis?"
@@ -421,7 +428,10 @@ verificar:
       : > "$L"
       rm -f /root/recados/1050.wav
       devlab-ramal 1050 --discar 7200 --duracao 9 --silencioso >/dev/null 2>&1
-      if ! grep -qE 'Date/TimeMatch \((PASS|FAIL)\)' "$L"; then
+      # As duas grafias, e a diferenca e do FreeSWITCH: `Date/Time Match
+      # (PASS)` com espaco, `Date/TimeMatch (FAIL)` sem. Um filtro com so uma
+      # delas aprova metade das horas do dia e reprova a outra metade.
+      if ! grep -qE 'Date/Time ?Match \((PASS|FAIL)\)' "$L"; then
         echo 'DEVLAB_JSON:{"mensagem":"a chamada para 7200 nao chegou a avaliar nenhuma condicao de horario","dica_diagnostica":"o percurso no log mostra o que aconteceu: a primeira condicao filtra o numero, e a segunda e a do relogio"}'
         exit 1
       fi

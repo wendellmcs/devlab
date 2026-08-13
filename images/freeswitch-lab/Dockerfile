@@ -133,6 +133,31 @@ RUN C=/usr/local/freeswitch/etc/freeswitch \
  && sed -i 's|data="default_password=1234"|data="default_password=devlab"|' "$C/vars.xml" \
  && grep -q 'default_password=devlab' "$C/vars.xml"
 
+# O detector de silêncio do voicemail, desligado — e é o que torna o nível
+# Engenheiro possível (decisão 55).
+#
+# Medido: com o padrão (`record-silence-threshold=200`, `record-silence-hits=2`)
+# NENHUMA mensagem chega a ser gravada neste lab. O softphone manda silêncio
+# digital, cuja energia é 0, então os dois "hits" de silêncio acontecem nos
+# primeiros quadros e o voicemail encerra a gravação. Uma chamada de 35 s
+# produzia esta linha no log:
+#
+#   Message is less than minimum record length: 3, discarding it.
+#
+# O sintoma é cruel: a chamada completa, a caixa postal atende, o chamador ouve
+# a saudação e o bipe — e a caixa fica vazia, sem erro nenhum. Uma lição de
+# voicemail em cima disso não teria o que verificar.
+#
+# Com o limiar em 0 a detecção sai do caminho e a mensagem é gravada até o
+# chamador desligar. O que se grava continua sendo silêncio (não há microfone
+# num lab), então o que a lição cobra é o FATO da mensagem — que ela existe, de
+# quem veio, em que caixa caiu —, nunca o conteúdo sonoro. É a mesma decisão do
+# `--no-vad` no devlab-ramal (decisão 52), um andar acima.
+RUN C=/usr/local/freeswitch/etc/freeswitch \
+ && sed -i 's|<param name="record-silence-threshold" value="200"/>|<param name="record-silence-threshold" value="0"/>|' \
+      "$C/autoload_configs/voicemail.conf.xml" \
+ && grep -q 'record-silence-threshold" value="0"' "$C/autoload_configs/voicemail.conf.xml"
+
 # A quarta correção, e ela é de ENSINO (decisão 44). A config vanilla manda
 # carregar módulos que a lista reduzida não compilou, e o FreeSWITCH grita nove
 # vezes ao subir:

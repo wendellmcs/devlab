@@ -44,6 +44,7 @@ uso: devlab-ramal <numero> [opções]
   --digitos <seq>      digita estes dígitos (DTMF) depois de a chamada ser atendida
   --senha <senha>      senha do ramal (padrão: devlab)
   --atender            fica registrado e atende o que chegar
+  --mwi                assina o aviso de mensagem em espera e imprime o que chegar
   --silencioso         não imprime o andamento
 
   --listar             mostra os ramais que este lab tem no ar
@@ -55,6 +56,7 @@ numero=""
 destino=""
 duracao=10
 digitos=""
+mwi=0
 senha=$SENHA_PADRAO
 atender=0
 silencioso=0
@@ -67,6 +69,7 @@ while [ $# -gt 0 ]; do
     --digitos)    digitos="${2:-}"; shift 2 ;;
     --senha)      senha="${2:-}"; shift 2 ;;
     --atender)    atender=1; shift ;;
+    --mwi)        mwi=1; shift ;;
     --silencioso) silencioso=1; shift ;;
     --listar)     acao=listar; shift ;;
     --parar)      acao=parar; numero="${2:-}"; [ -n "$numero" ] && shift; shift ;;
@@ -240,13 +243,30 @@ diga "ramal $numero: registrando em $PBX (porta local $porta)..."
 # pedida: 4 s pedidos, 4 s gravados. O que se grava continua sendo silêncio (não
 # há microfone num lab), então o que a lição cobra é a DURAÇÃO e o caminho do
 # arquivo — nunca o conteúdo sonoro.
+# `--mwi` assina o evento `message-summary` no registro. Quem responde é o PBX,
+# com um NOTIFY trazendo `Messages-Waiting:` e `Voice-Message: novas/salvas` —
+# é a lâmpada de recado do telefone, e é o único jeito de um softphone headless
+# mostrar que ela acendeu.
+# As opções condicionais vão num ARRAY, e não em `${var:+...}`, porque essa
+# expansão pergunta se a variável está VAZIA — e `0` não está. Com `mwi=0` o
+# `${mwi:+--mwi}` expandia para `--mwi` do mesmo jeito, e todo softphone do lab
+# passou a assinar aviso de mensagem: uma SUBSCRIBE e uma NOTIFY a mais no
+# tráfego SIP de TODAS as lições. Quem pegou foi o `--conferir`, numa projeção
+# de `From:` que ganhou uma linha.
+#
+# O mesmo defeito estava em `${atender:+--auto-answer 200}` desde o começo,
+# calado porque auto-atender é inofensivo em quem só liga.
+extras=()
+[ "$mwi" = 1 ]     && extras+=(--mwi)
+[ "$atender" = 1 ] && extras+=(--auto-answer 200)
+
 roteiro | stdbuf -oL pjsua \
   --null-audio --no-vad --no-tcp \
   --id "sip:$numero@$PBX" \
   --registrar "sip:$PBX" \
   --realm '*' --username "$numero" --password "$senha" \
   --local-port "$porta" \
-  ${atender:+--auto-answer 200} \
+  "${extras[@]}" \
   >>"$LOG" 2>&1 &
 
 pjpid=$!
@@ -280,6 +300,27 @@ rm -f "$PID"
 #
 #   Call 0 state changed to CALLING → CONNECTING → CONFIRMED
 #   Call 0 is DISCONNECTED [reason=200 (OK)]
+# O aviso de mensagem em espera, como o softphone o recebeu. O pjsua imprime o
+# corpo do NOTIFY sob "Received MWI for acc":
+#
+#   Messages-Waiting: yes
+#   Voice-Message: 1/0 (0/0)
+#
+# `Voice-Message` é `novas/salvas`. Este veredito existe pelo mesmo motivo que
+# os outros: o aluno precisa distinguir "a lâmpada não acendeu" de "não há
+# recado" sem abrir log de softphone.
+if [ "$mwi" = 1 ]; then
+  if grep -q 'Messages-Waiting: yes' "$LOG" 2>/dev/null; then
+    echo "aviso_de_mensagem=sim" >>"$RESUMO"
+  elif grep -q 'Messages-Waiting: no' "$LOG" 2>/dev/null; then
+    echo "aviso_de_mensagem=nao" >>"$RESUMO"
+  else
+    echo "aviso_de_mensagem=nao_chegou" >>"$RESUMO"
+  fi
+  contagem=$(grep -oE 'Voice-Message: [0-9]+/[0-9]+' "$LOG" 2>/dev/null | tail -1 | cut -d' ' -f2)
+  [ -n "$contagem" ] && echo "mensagens_novas_e_salvas=$contagem" >>"$RESUMO"
+fi
+
 if [ -n "$destino" ]; then
   if grep -q 'state changed to CONFIRMED' "$LOG" 2>/dev/null; then
     echo "chamada=atendida" >>"$RESUMO"

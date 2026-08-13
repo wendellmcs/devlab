@@ -608,6 +608,95 @@ avaliado por ter escrito a condição certa, não por estudar no horário
 comercial. Vale a decisão 27 pelo avesso: quando a saída não pode ser fixa, o
 oráculo é que se torna função do relógio.
 
+---
+
+# As decisões do nível Engenheiro (2026-08-13)
+
+## 55. O detector de silêncio do voicemail sai, ou não há lição de voicemail
+
+Terceira vez que o mesmo inimigo aparece, e vale nomeá-lo: **um lab sem
+microfone quebra tudo o que decide por energia de áudio.** Já custou o VAD do
+softphone (decisão 52); agora custa o voicemail.
+
+Com o padrão do FreeSWITCH — `record-silence-threshold=200`,
+`record-silence-hits=2` — **nenhuma mensagem chega a ser gravada**. O softphone
+manda silêncio digital, energia 0, os dois "hits" acontecem nos primeiros
+quadros, e o log diz:
+
+```
+Message is less than minimum record length: 3, discarding it.
+```
+
+O sintoma é o pior tipo: a chamada completa, a caixa atende, o chamador ouve a
+saudação e o bipe, e **a caixa fica vazia sem erro nenhum**. Uma chamada de 35 s
+produzia zero mensagens.
+
+Com `record-silence-threshold=0` a detecção sai do caminho e a mensagem é
+gravada até o chamador desligar. Medido na imagem, sem ajuste manual: uma
+chamada de 28 s deixa uma mensagem de 16 s (a saudação come o resto), e o PBX a
+lista com metadados que servem de oráculo:
+
+```
+vm_list 1010@127.0.0.1
+1786616584:0:1010:127.0.0.1:inbox:/…/msg_….wav:…:Extension 1001:1001:16
+   epoch  lida caixa  domínio  pasta    arquivo    uuid    nome      de   dur
+```
+
+Estável para check: caixa, domínio, pasta e quem ligou. **Instável:** epoch,
+uuid, caminho (que contém o uuid) e duração — vale a decisão 27.
+
+## 56. MWI funciona, e o softphone consegue mostrar a lâmpada
+
+`--mwi` no `pjsua` assina `message-summary` no registro, e o FreeSWITCH
+responde com um NOTIFY que o próprio pjsua imprime:
+
+```
+Received MWI for acc 1:
+Messages-Waiting: yes
+Voice-Message: 1/0 (0/0)
+```
+
+O `devlab-ramal` ganhou `--mwi` e extrai isso como veredito, no mesmo formato
+dos outros: `aviso_de_mensagem=sim` e `mensagens_novas_e_salvas=1/0`. É o único
+jeito de um softphone headless mostrar que a lâmpada de recado acendeu.
+
+## 57. `${var:+...}` pergunta se a variável está VAZIA — e `0` não está
+
+Bug introduzido e pego no mesmo dia, pelo `--conferir`. A opção nova entrou como
+`${mwi:+--mwi}` com `mwi=0` por padrão — e **`"0"` é string não vazia**, então
+todo softphone do lab passou a assinar MWI. Uma SUBSCRIBE e uma NOTIFY a mais no
+tráfego SIP de **todas** as lições; quem denunciou foi uma projeção de `From:`
+que ganhou uma linha.
+
+O mesmo defeito estava em `${atender:+--auto-answer 200}` desde o começo, calado
+porque auto-atender é inofensivo em quem só liga. As duas opções agora vão num
+array (`extras=()`), com `[ "$x" = 1 ]` decidindo. Confirmado depois: as 11
+demonstrações de PBX voltaram a bater, e `--atender` continua atendendo.
+
+## 58. O FreeSWITCH escreve o veredito de horário de DUAS formas
+
+A mais barata de errar e a mais cara de descobrir:
+
+```
+Date/Time Match (PASS)     ← com espaço
+Date/TimeMatch (FAIL)      ← sem espaço
+```
+
+Não é erro de transcrição: é o que o FreeSWITCH emite. Um filtro com uma das
+formas aprova metade das horas do dia e reprova a outra metade.
+
+E o modo como isso apareceu é a parte que interessa: o check da lição
+`pbx-con-05-midia` procurava só `Date/TimeMatch`, e **passou em todas as
+validações** porque todas rodaram à noite no Brasil — ou seja, fora de 8–17
+**UTC**, sempre no ramo FAIL. Bastou validar às 10h UTC para o ramo PASS ser
+exercitado pela primeira vez e o check reprovar.
+
+Corolário para qualquer check que dependa do relógio: **ele precisa ser
+exercitado nos dois ramos antes de merecer confiança.** Um único horário de
+validação esconde metade do código. A lição passou a aceitar `Date/Time ?Match`
+e a ENSINAR a discrepância, que é o tipo de coisa que quem filtra log de PBX vai
+encontrar sozinho, no pior momento.
+
 ## O que ainda não foi decidido
 
 - **Multi-container ou um só.** O PRD §4.2 prevê `compose.yaml` para labs de
