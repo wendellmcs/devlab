@@ -350,9 +350,8 @@ mexer nos limites nem pedir capacidade nenhuma além do que a G já pede.
 
 ## 47. A trilha F não declara prereq da G — e não cita as ferramentas dela
 
-A pergunta ficou registrada no CONTINUAR: `tcpdump`, `tshark` e `sngrep` têm
-dono na trilha G, a imagem da F os traz, e as lições da F vão querer
-diagnóstico. Decidido: **a F fica dentro das próprias ferramentas, sem
+A pergunta estava em aberto: `tcpdump`, `tshark` e `sngrep` têm dono na trilha
+G, a imagem da F os traz, e as lições da F vão querer diagnóstico. Decidido: **a F fica dentro das próprias ferramentas, sem
 pré-requisito da G**, por três razões que se somam:
 
 1. **A ordem do PRD §7 põe F antes de G.** Um prereq de lição da F para lição

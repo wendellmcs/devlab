@@ -14,3 +14,7 @@ dist/
 .env
 .env.local
 __pycache__/
+
+# Documento de continuidade do trabalho: fica na máquina, fora do repositório
+# público. Ele traz caminho local, configuração de máquina e notas pessoais.
+docs/CONTINUAR.md
