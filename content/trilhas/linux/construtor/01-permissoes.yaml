@@ -1,0 +1,346 @@
+id: linux-con-01-permissoes
+trilha: linux
+nivel: construtor
+ordem: 1
+titulo: "Permissão em arquivo: as três classes e os três bits"
+capacidade: "Sei ler a permissão de um arquivo e ajustá-la, na notação simbólica e na octal."
+xp: 40
+prereqs: [linux-op-12-capstone]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    # O backup.sh já nasce 0644 na imagem, de propósito (ver o Dockerfile da
+    # linux-base). Reafirmo aqui para a lição não depender de a imagem manter
+    # essa escolha: se alguém mudar o Dockerfile, a lição continua de pé.
+    chmod 0644 /home/aluno/scripts/backup.sh
+    # O ramais.txt tem "senha demo - trocar" dentro e nasce legível por todo
+    # mundo. É o segundo caso da tarefa, e o mais parecido com auditoria real.
+    chmod 0644 /home/aluno/configs/ramais.txt
+    chown aluno:aluno /home/aluno/scripts/backup.sh /home/aluno/configs/ramais.txt
+
+ensina:
+  conceitos:
+    - id: permissao-tem-tres-classes
+      titulo: "Toda permissão responde três vezes: ao dono, ao grupo e aos outros"
+    - id: octal-e-a-soma-de-quatro-dois-um
+      titulo: "O número octal é uma soma: r=4, w=2, x=1"
+    - id: bit-x-e-o-que-deixa-executar
+      titulo: "Sem o bit x, um script é só texto — o kernel recusa antes de o bash ler"
+  comandos:
+    - chmod
+    - stat
+
+ensino:
+  gancho: |
+    O plantão anterior deixou pronta a rotina que empacota os logs de chamada.
+    Você abre o terminal, chama o script e recebe:
+
+    ```
+    bash: ./scripts/backup.sh: Permission denied
+    ```
+
+    O arquivo está lá. Você é o dono dele. O conteúdo está certo — dá para ler
+    inteiro. E mesmo assim ele não roda.
+
+    No mesmo diretório de configuração está o `ramais.txt`, com a observação
+    "senha demo - trocar" na linha do 1003. Esse arquivo está legível para
+    qualquer conta do servidor. Os dois problemas são o mesmo problema, e são
+    resolvidos pelo mesmo comando.
+
+  objetivos:
+    - verbo: identificar
+      texto: "ler a permissão de um arquivo nas duas notações e dizer quem pode o quê"
+    - verbo: explicar
+      texto: "explicar por que um script legível ainda assim é recusado na execução"
+    - verbo: executar
+      texto: "ajustar a permissão de um arquivo com `chmod`, na forma simbólica e na octal"
+    - verbo: escolher
+      texto: "escolher a permissão mínima que atende ao caso, em vez da mais folgada"
+
+  modelo_mental: |
+    O sistema não guarda uma lista de quem pode abrir cada arquivo. Ele guarda
+    **três respostas**, e decide qual delas vale por você olhando quem você é:
+
+    | Se você é… | vale a resposta |
+    |---|---|
+    | o **dono** do arquivo | do dono |
+    | membro do **grupo** do arquivo | do grupo |
+    | qualquer outra pessoa | de **outros** |
+
+    Vale **a primeira que casa, e só ela**. Sendo o dono, você recebe a resposta
+    do dono mesmo que a de "outros" seja mais generosa — o sistema não procura a
+    melhor, procura a sua. É o que explica o caso que parece contraditório: um
+    arquivo `r--rwxrwx` é ilegível para quem o criou e executável para o resto
+    do mundo.
+
+    Cada resposta tem três bits:
+
+    | bit | em arquivo | vale |
+    |---|---|---|
+    | `r` | ler o conteúdo | 4 |
+    | `w` | alterar o conteúdo | 2 |
+    | `x` | **executar** | 1 |
+
+    A linha `-rw-r--r--` é isso, em sequência: o primeiro caractere diz o tipo
+    (`-` arquivo comum, `d` diretório), e os nove seguintes são três grupos de
+    três — dono `rw-`, grupo `r--`, outros `r--`.
+
+    O número octal é a mesma coisa somada, um dígito por classe: `rw-` é 4+2 =
+    **6**, `r--` é 4 = **4**. Daí `644`. E `rwx` é 4+2+1 = **7**, que é de onde
+    vem o `755` de todo script que roda.
+
+    O `x` é o que trava o `backup.sh`. Ele não é uma etiqueta que o `bash`
+    consulta por educação: o **kernel** recusa carregar o arquivo antes de o
+    `bash` ter chance de ler uma linha. É por isso que o erro é `Permission
+    denied` e não uma reclamação de sintaxe — nada do conteúdo chegou a ser
+    interpretado.
+
+  anatomia:
+    - linha: "chmod u+x scripts/backup.sh"
+      partes:
+        - trecho: "chmod"
+          papel: comando
+          explica: "change mode: altera os bits de permissão de um arquivo que já existe"
+        - trecho: "u"
+          papel: argumento
+          explica: "a classe alvo: `u` dono, `g` grupo, `o` outros, `a` todas"
+        - trecho: "+"
+          papel: operador
+          explica: "acrescenta sem mexer no resto; `-` remove, `=` define exatamente"
+        - trecho: "x"
+          papel: argumento
+          explica: "o bit: `r` ler, `w` escrever, `x` executar"
+        - trecho: "scripts/backup.sh"
+          papel: argumento
+          explica: "o alvo; aceita vários, e aceita padrão do shell"
+    - linha: "chmod 640 configs/ramais.txt"
+      partes:
+        - trecho: "chmod"
+          papel: comando
+          explica: "o mesmo comando; muda só a forma de dizer o alvo"
+        - trecho: "6"
+          papel: argumento
+          explica: "dono: 4+2, lê e escreve. Sem o 1, não executa"
+        - trecho: "4"
+          papel: argumento
+          explica: "grupo: só lê"
+        - trecho: "0"
+          papel: argumento
+          explica: "outros: nada. É este dígito que fecha o arquivo para o resto do servidor"
+
+  demonstracao:
+    - comando: "stat -c '%A %a %n' scripts/backup.sh"
+      saida: |-2
+        -rw-r--r-- 644 scripts/backup.sh
+      nota: "As duas notações lado a lado, e nada mais. Uso `stat` em vez de `ls -l` de propósito: `ls -l` imprimiria também a data do arquivo, que não tem nada a ver com o assunto."
+    - comando: "./scripts/backup.sh"
+      saida: |-2
+        bash: line 8: ./scripts/backup.sh: Permission denied
+      nota: "O sintoma. O `line 8` é do roteiro que gravou esta demonstração — no seu terminal sai só `bash: ./scripts/backup.sh: Permission denied`. O que importa é o resto: a recusa é de permissão, não de sintaxe, porque o kernel parou antes de o conteúdo ser lido."
+    - comando: "head -3 scripts/backup.sh"
+      saida: |-2
+        #!/bin/bash
+        # Rotina de backup dos logs de chamada.
+        # Observe que este arquivo ainda NAO tem permissao de execucao.
+      nota: "E no entanto ler, você lê. `r` está lá para o dono; o que falta é o `x`. Ler e executar são autorizações diferentes."
+    - comando: "chmod u+x scripts/backup.sh"
+      saida: ""
+      nota: "Forma simbólica: acrescenta `x` só para o dono e não toca em mais nada."
+    - comando: "stat -c '%A %a %n' scripts/backup.sh"
+      saida: |-2
+        -rwxr--r-- 744 scripts/backup.sh
+      nota: "744. O 7 do dono é 4+2+1; grupo e outros seguem em 4, como estavam. O `+` mexeu num bit só."
+    - comando: "chmod 755 scripts/backup.sh"
+      saida: ""
+      nota: "Forma octal: define os três dígitos de uma vez. Aqui é o jeito curto de dizer \"dono faz tudo, o resto lê e executa\"."
+    - comando: "stat -c '%A %a %n' scripts/backup.sh"
+      saida: |-2
+        -rwxr-xr-x 755 scripts/backup.sh
+      nota: "`-rwxr-xr-x`. É a permissão padrão de script que roda — e agora o `./scripts/backup.sh` funcionaria."
+    - comando: "chmod 600 configs/ramais.txt"
+      saida: ""
+      nota: "O outro caso: 6 para o dono, 0 para grupo e 0 para outros. O arquivo sai do alcance do resto do servidor."
+    - comando: "stat -c '%A %a %n' configs/ramais.txt"
+      saida: |-2
+        -rw------- 600 configs/ramais.txt
+      nota: "`-rw-------`. Os seis traços à direita são o ponto: ninguém além do dono lê a senha que está lá dentro."
+
+  pratica_guiada:
+    - instrucao: "Antes de mudar qualquer coisa, leia a permissão atual do script."
+      modelo: "stat -c '%A %a %n' ____"
+      resposta: "stat -c '%A %a %n' scripts/backup.sh"
+    - instrucao: "Acrescente o bit de execução para o dono, sem mexer nas outras classes."
+      modelo: "chmod ____ scripts/backup.sh"
+      resposta: "chmod u+x scripts/backup.sh"
+    - instrucao: "Agora diga a mesma coisa em octal, deixando dono com tudo e as outras classes com leitura e execução."
+      modelo: "chmod ____ scripts/backup.sh"
+      resposta: "chmod 755 scripts/backup.sh"
+    - instrucao: "Feche o arquivo de ramais para todo mundo que não seja o dono."
+      modelo: "chmod ____ configs/ramais.txt"
+      resposta: "chmod 600 configs/ramais.txt"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Um arquivo está como `r--rwxrwx` e você é o dono dele. Consegue executá-lo?"
+      resposta: |
+        Não. Vale **a resposta da sua classe, e só ela**: você é o dono, então a
+        sua resposta é `r--` — leitura e nada mais. As permissões generosas de
+        grupo e de outros não são consultadas para você. É o exemplo que mostra
+        que o sistema não procura a melhor permissão, procura a *sua*.
+    - tipo: diagnostico
+      pergunta: "Você roda um script e recebe `Permission denied`. Roda `cat` no mesmo arquivo e o conteúdo aparece inteiro. O que isso já eliminou?"
+      resposta: |
+        Eliminou "o arquivo não existe", "está no caminho errado" e "não tenho
+        leitura" — `cat` provou os três. Sobra o bit `x` para a sua classe.
+        Confirme com `stat -c '%A %a %n'` e olhe o terceiro caractere do
+        primeiro grupo.
+    - tipo: transferencia
+      pergunta: "Um arquivo de credenciais precisa ser lido pelo dono e por mais ninguém, nem para leitura. Que octal você usa, e por quê não `604`?"
+      resposta: |
+        `600`. O dono lê e escreve (4+2), grupo e outros ficam em zero. O `604`
+        deixaria o último dígito em 4, ou seja, **qualquer conta do servidor
+        leria** o arquivo — que é exatamente o que se queria impedir.
+
+objetivo_md: |
+  Duas permissões erradas no mesmo lab, e as duas aparecem em auditoria de
+  servidor real: um script que não roda e um arquivo com senha dentro que o
+  servidor inteiro pode ler.
+
+  Lembre da soma, que é o que traduz uma notação na outra:
+
+  | | r | w | x | |
+  |---|---|---|---|---|
+  | vale | 4 | 2 | 1 | |
+  | `rwx` | 4 | 2 | 1 | **7** |
+  | `rw-` | 4 | 2 | — | **6** |
+  | `r-x` | 4 | — | 1 | **5** |
+  | `r--` | 4 | — | — | **4** |
+  | `---` | — | — | — | **0** |
+
+  ### Sua tarefa
+
+  1. Deixe `scripts/backup.sh` **executável**, na permissão padrão de script:
+     dono com tudo, grupo e outros com leitura e execução. É o `755`.
+  2. Rode o script. Ele grava um pacote em `downloads/`.
+  3. Feche `configs/ramais.txt` para **todo mundo que não seja o dono** — nem
+     leitura para o grupo, nem para outros. É o `600`.
+
+  > Confira o resultado com `stat -c '%A %a %n' <arquivo>`, que mostra a forma
+  > simbólica e a octal na mesma linha. É mais direto que `ls -l` para este
+  > assunto, e não imprime a data do arquivo junto.
+
+verificar:
+  - descricao: "backup.sh está 755"
+    script: |
+      #!/bin/bash
+      ALVO=/home/aluno/scripts/backup.sh
+      MODO=$(stat -c %a "$ALVO")
+      if [ "$MODO" = "755" ]; then exit 0; fi
+      echo "modo atual: $MODO"
+      if [ "$MODO" = "644" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o backup.sh continua sem o bit de execucao","dica_diagnostica":"o terceiro caractere de cada grupo e o x. Em octal, o digito precisa ser impar para incluir o 1."}'
+        exit 1
+      fi
+      case "$MODO" in
+        744|700|7??)
+          echo 'DEVLAB_JSON:{"mensagem":"o dono ja executa, mas o modo pedido era 755","dica_diagnostica":"755 = dono 4+2+1, grupo 4+1, outros 4+1. Voce provavelmente usou u+x, que so mexe no dono."}'
+          ;;
+        *)
+          echo 'DEVLAB_JSON:{"mensagem":"o modo do backup.sh nao e 755","dica_diagnostica":"chmod aceita o numero direto: tres digitos, um por classe."}'
+          ;;
+      esac
+      exit 1
+
+  - descricao: "o script rodou e gravou o pacote em downloads/"
+    script: |
+      #!/bin/bash
+      # Glob em vez de nome fechado: o backup.sh carimba a data no nome do
+      # arquivo, e um check com a data de hoje escrita dentro passaria a
+      # reprovar amanhã por motivo nenhum.
+      shopt -s nullglob
+      PACOTES=(/home/aluno/downloads/backup-*.tar.gz)
+      if [ ${#PACOTES[@]} -eq 0 ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao ha nenhum backup-*.tar.gz em downloads/","dica_diagnostica":"depois do chmod, rode o script: ./scripts/backup.sh (o ./ e obrigatorio, porque o diretorio atual nao esta no PATH)"}'
+        exit 1
+      fi
+      if [ ! -s "${PACOTES[0]}" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o pacote existe mas esta vazio","dica_diagnostica":"rode o script de novo e leia a saida dele; ele avisa onde gravou"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "ramais.txt está 600"
+    script: |
+      #!/bin/bash
+      ALVO=/home/aluno/configs/ramais.txt
+      MODO=$(stat -c %a "$ALVO")
+      if [ "$MODO" = "600" ]; then exit 0; fi
+      echo "modo atual: $MODO"
+      case "$MODO" in
+        6??|640|660)
+          echo 'DEVLAB_JSON:{"mensagem":"ainda sobra permissao para grupo ou para outros","dica_diagnostica":"os dois ultimos digitos precisam ser 0. Em simbolico seria go-rwx."}'
+          ;;
+        *)
+          echo 'DEVLAB_JSON:{"mensagem":"o modo do ramais.txt nao e 600","dica_diagnostica":"600 = dono le e escreve (4+2), grupo 0, outros 0."}'
+          ;;
+      esac
+      exit 1
+
+  - descricao: "o conteúdo dos dois arquivos continua intacto"
+    script: |
+      #!/bin/bash
+      # Permissão se conserta mexendo em permissão. Reescrever o arquivo para
+      # "consertar" o acesso é o erro clássico ao lado, e ele passaria nos
+      # checks acima sem este.
+      grep -q 'senha demo' /home/aluno/configs/ramais.txt || {
+        echo 'DEVLAB_JSON:{"mensagem":"o conteudo do ramais.txt mudou","dica_diagnostica":"a tarefa era mudar a PERMISSAO, nao o arquivo. Use Resetar lab e refaca so com chmod."}'
+        exit 1
+      }
+      grep -q 'Rotina de backup' /home/aluno/scripts/backup.sh || {
+        echo 'DEVLAB_JSON:{"mensagem":"o conteudo do backup.sh mudou","dica_diagnostica":"nao era preciso editar o script: so faltava o bit de execucao."}'
+        exit 1
+      }
+      exit 0
+
+dicas:
+  - "Comece lendo o que está lá: `stat -c '%A %a %n' scripts/backup.sh configs/ramais.txt` aceita os dois de uma vez. Compare cada linha com a tabela do enunciado e escreva num papel qual octal você quer em cada arquivo antes de digitar qualquer `chmod`."
+  - "São dois comandos e uma execução. A forma é `chmod 755 scripts/backup.sh`, depois `./scripts/backup.sh`, depois `chmod` com o octal que zera grupo e outros no `configs/ramais.txt`."
+  - "chmod 755 scripts/backup.sh && ./scripts/backup.sh && chmod 600 configs/ramais.txt"
+
+erros_comuns:
+  - match: "Permission denied"
+    digita: "./scripts/backup.sh"
+    mensagem: "bash: ./scripts/backup.sh: Permission denied"
+    causa: "falta o bit x para a sua classe; o kernel recusa carregar o arquivo antes de o bash ler qualquer linha dele"
+    conserto: "acrescente o bit de execução com `chmod` e rode de novo"
+    categoria: permissao
+  - match: "command not found"
+    digita: "backup.sh"
+    mensagem: "bash: backup.sh: command not found"
+    causa: "sem `./` o shell procura o nome nos diretórios do PATH, e o diretório atual não está lá"
+    conserto: "chame pelo caminho: `./scripts/backup.sh`"
+    categoria: sintaxe
+  - match: "missing operand"
+    digita: "chmod scripts/backup.sh"
+    mensagem: "chmod: missing operand after 'scripts/backup.sh'"
+    causa: "o chmod recebeu só o alvo; falta dizer QUAL permissão aplicar"
+    conserto: "o modo vem antes do arquivo: `chmod 755 scripts/backup.sh`"
+    categoria: sintaxe
+  - match: "invalid mode"
+    digita: "chmod 775x configs/ramais.txt"
+    mensagem: "chmod: invalid mode: '775x'"
+    causa: "o modo octal tem três dígitos e nada mais; misturar com letra não é aceito"
+    conserto: "escolha uma das duas notações: `chmod 600 …` ou `chmod go-rwx …`"
+    categoria: sintaxe
+
+cards_revisao:
+  - permissao-tem-tres-classes
+  - octal-e-a-soma-de-quatro-dois-um
+  - bit-x-e-o-que-deixa-executar
+
+solucao_referencia: |
+  chmod 755 /home/aluno/scripts/backup.sh
+  /home/aluno/scripts/backup.sh
+  chmod 600 /home/aluno/configs/ramais.txt

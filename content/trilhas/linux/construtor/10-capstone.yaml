@@ -1,0 +1,329 @@
+id: linux-con-10-capstone
+trilha: linux
+nivel: construtor
+ordem: 10
+titulo: "Capstone: disco cheio, serviço travado e permissão quebrada"
+capacidade: "Sei receber um servidor com três defeitos ao mesmo tempo, provar cada um e consertar sem derrubar o que estava de pé."
+xp: 90
+capstone: true
+prereqs: [linux-con-09-arquivar]
+
+lab:
+  # Mede processo e dono: a árvore falsa responderia sobre o host.
+  # Ver a decisão 65 em docs/DESIGN-LINUX.md.
+  exige_container: true
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno
+    mkdir -p "$BASE/servico" "$BASE/varlog" "$BASE/laudo"
+
+    # --- Defeito 1: permissão. O coletor não roda, e as credenciais estão
+    # legíveis para o servidor inteiro.
+    cat > "$BASE/servico/coletar.sh" <<'SH'
+    #!/bin/bash
+    echo "coleta concluida"
+    SH
+    cat > "$BASE/servico/credenciais.conf" <<'TXT'
+    # credenciais do tronco de saida
+    usuario = tronco-saida
+    senha   = 4f9c2b71e0
+    TXT
+    chmod 0644 "$BASE/servico/coletar.sh" "$BASE/servico/credenciais.conf"
+
+    # --- Defeito 2: disco. Logs grandes e pequenos misturados. Os três grandes
+    # somam 77000 bytes; os dois pequenos ficam.
+    escreve() { head -c "$2" /dev/zero | tr '\0' "$3" > "$1"; }
+    escreve "$BASE/varlog/chamadas.log" 12000 a
+    escreve "$BASE/varlog/sip-trace.log" 25000 b
+    escreve "$BASE/varlog/gravacoes.log" 40000 c
+    escreve "$BASE/varlog/alarmes.log"     500 d
+    escreve "$BASE/varlog/cron.log"        900 e
+
+    chown -R aluno:aluno "$BASE/servico" "$BASE/varlog" "$BASE/laudo"
+
+    # --- Defeito 3: o gravador travado, que ignora o TERM. E o coletor de CDR
+    # saudável ao lado, que não pode ser derrubado junto.
+    printf '#!/bin/bash\ntrap "" TERM\nwhile true; do sleep 5; done\n' > /usr/local/bin/gravador-vm
+    printf '#!/bin/bash\nwhile true; do sleep 5; done\n' > /usr/local/bin/coletor-cdr
+    chmod 0755 /usr/local/bin/gravador-vm /usr/local/bin/coletor-cdr
+    setpriv --reuid=aluno --regid=aluno --clear-groups /usr/local/bin/gravador-vm &
+    setpriv --reuid=aluno --regid=aluno --clear-groups /usr/local/bin/coletor-cdr &
+    sleep 1
+
+ensina:
+  conceitos: []
+  comandos: []
+
+ensino:
+  gancho: |
+    Plantão da madrugada. O monitoramento abriu três alertas do mesmo servidor
+    de telefonia, com dez minutos de diferença, e quem estava antes de você foi
+    embora sem anotar nada:
+
+    > **02:14** — partição de log acima de 90%
+    > **02:23** — `gravador-vm` sem responder ao *health check*
+    > **02:31** — coleta de CDR não executou no horário
+
+    Você tem acesso ao servidor como `aluno`, e é o único de plantão.
+
+    Antes de consertar qualquer coisa: o que estiver de pé **continua de pé**.
+    Derrubar o serviço que ainda funciona é como esta madrugada vira incidente.
+
+  objetivos:
+    - verbo: diagnosticar
+      texto: "identificar três defeitos independentes a partir dos sintomas relatados"
+    - verbo: executar
+      texto: "coletar a evidência de cada um antes de mexer no sistema"
+    - verbo: construir
+      texto: "liberar espaço arquivando o que é grande, sem perder o conteúdo"
+    - verbo: escolher
+      texto: "consertar cada defeito com a ferramenta certa, preservando o que já funcionava"
+
+  modelo_mental: |
+    Os três alertas são **três defeitos diferentes**, e nenhum deles causa o
+    outro. A tentação do plantão é procurar uma causa comum; aqui não há.
+
+    | alerta | onde olhar | do que se trata |
+    |---|---|---|
+    | partição cheia | `~/varlog/` | arquivo grande demais para o espaço |
+    | serviço sem responder | tabela de processos | processo que ignora o pedido de encerrar |
+    | coleta não executou | `~/servico/` | permissão |
+
+    Duas regras de plantão valem para os três, e as duas já apareceram nesta
+    trilha:
+
+    1. **Prove antes de consertar.** Depois do conserto o sintoma some, e com
+       ele a evidência. Um laudo escrito depois é memória, não prova.
+    2. **Mire no alvo exato.** Um padrão amplo demais encerra o serviço errado
+       junto; um `rm` amplo demais leva o log que ainda não foi arquivado.
+
+    O espaço só é liberado quando o arquivo **sai** do diretório. Empacotar sem
+    remover não devolve um byte — o pacote é para o conteúdo não se perder,
+    não para o disco esvaziar.
+
+objetivo_md: |
+  Três alertas, três defeitos independentes, um servidor que não pode parar.
+
+  ### Sua tarefa
+
+  **Primeiro a prova, depois o conserto.**
+
+  1. **Evidência.** Grave em `~/laudo/`:
+     - `processos.txt` — a linha do `ps` com **dono, estado e nome** do
+       processo que não responde;
+     - `grandes.txt` — o caminho dos `.log` de `~/varlog/` **maiores que
+       10 kB**, um por linha, em ordem.
+
+  2. **Espaço.** Empacote esses logs grandes em `~/laudo/grandes.tar.gz`, com
+     caminho limpo (sem o prefixo `varlog/`), e **remova-os** de `~/varlog/`.
+     Os pequenos continuam onde estão. Depois grave em `~/laudo/liberado.txt`
+     o total de **bytes liberados**, só o número.
+
+  3. **Serviço.** Encerre o `gravador-vm`. O `coletor-cdr` **tem de continuar
+     rodando** no fim.
+
+  4. **Permissão.** Deixe `~/servico/coletar.sh` executável no padrão de script
+     (`755`), e `~/servico/credenciais.conf` legível **só pelo dono** (`600`) —
+     ele tem uma senha dentro.
+
+  > Comece pelo item 1 inteiro. Depois que você matar o processo e apagar os
+  > logs, não há mais como provar que eles existiam.
+
+verificar:
+  - descricao: "a evidência do processo travado foi coletada"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/laudo/processos.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/laudo/processos.txt","dica_diagnostica":"projete as colunas com ps -eo user,stat,comm, filtre pelo nome do servico e redirecione"}'
+        exit 1
+      fi
+      if ! grep -q 'gravador-vm' "$ARQ"; then
+        echo "conteudo: $(head -3 "$ARQ")"
+        echo 'DEVLAB_JSON:{"mensagem":"a evidencia nao menciona o gravador-vm","dica_diagnostica":"o alerta era do gravador-vm; filtre a saida do ps por esse nome"}'
+        exit 1
+      fi
+      if ! grep -q 'aluno' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"falta o dono na evidencia","dica_diagnostica":"inclua user entre as colunas: ps -eo user,stat,comm"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "grandes.txt lista os três logs acima de 10 kB, em ordem"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/laudo/grandes.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/laudo/grandes.txt","dica_diagnostica":"find ~/varlog -name \"*.log\" -size +10k, ordenado"}'
+        exit 1
+      fi
+      N=$(grep -c . "$ARQ")
+      if [ "$N" != "3" ]; then
+        echo "linhas: $N (esperado 3)"
+        echo 'DEVLAB_JSON:{"mensagem":"o grandes.txt nao tem os tres logs grandes","dica_diagnostica":"sao os de 12000, 25000 e 40000 bytes. Sem sufixo o -size conta blocos de 512 bytes, nao kB."}'
+        exit 1
+      fi
+      for n in chamadas sip-trace gravacoes; do
+        grep -q "$n\.log" "$ARQ" || {
+          echo "falta $n.log"
+          echo 'DEVLAB_JSON:{"mensagem":"falta um dos tres logs grandes na lista","dica_diagnostica":"confira o criterio de tamanho: -size +10k"}'
+          exit 1
+        }
+      done
+      if grep -qE 'alarmes|cron' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"entrou log pequeno na lista dos grandes","dica_diagnostica":"alarmes.log e cron.log tem menos de 1 kB: o corte e +10k"}'
+        exit 1
+      fi
+      if [ "$(sort "$ARQ")" != "$(cat "$ARQ")" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a lista nao esta ordenada","dica_diagnostica":"a ordem do find nao e estavel: passe por sort"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "os logs grandes foram arquivados e removidos, e os pequenos ficaram"
+    script: |
+      #!/bin/bash
+      P=/home/aluno/laudo/grandes.tar.gz
+      V=/home/aluno/varlog
+      if [ ! -f "$P" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/laudo/grandes.tar.gz","dica_diagnostica":"tar -czf ~/laudo/grandes.tar.gz -C ~/varlog <os tres nomes>"}'
+        exit 1
+      fi
+      LISTA=$(tar -tzf "$P" 2>/dev/null) || {
+        echo 'DEVLAB_JSON:{"mensagem":"o pacote nao e um tar.gz valido","dica_diagnostica":"faltou o z na criacao?"}'
+        exit 1
+      }
+      if echo "$LISTA" | grep -q 'varlog/'; then
+        echo "membros: $(echo "$LISTA" | tr '\n' ' ')"
+        echo 'DEVLAB_JSON:{"mensagem":"os membros do pacote carregam o prefixo varlog/","dica_diagnostica":"empacote de dentro do diretorio, com -C varlog"}'
+        exit 1
+      fi
+      for n in chamadas sip-trace gravacoes; do
+        echo "$LISTA" | grep -q "$n\.log" || {
+          echo "membros: $(echo "$LISTA" | tr '\n' ' ')"
+          echo "DEVLAB_JSON:{\"mensagem\":\"o $n.log nao esta no pacote\",\"dica_diagnostica\":\"os tres logs grandes tem de estar dentro antes de serem apagados\"}"
+          exit 1
+        }
+      done
+      # Removidos de varlog: é o que libera espaço de verdade.
+      for n in chamadas sip-trace gravacoes; do
+        if [ -e "$V/$n.log" ]; then
+          echo 'DEVLAB_JSON:{"mensagem":"os logs grandes continuam em ~/varlog/","dica_diagnostica":"empacotar nao libera espaco: o arquivo so sai do disco quando e removido. Confira o pacote antes de apagar."}'
+          exit 1
+        fi
+      done
+      # E os pequenos NÃO podiam ir junto.
+      for n in alarmes cron; do
+        if [ ! -f "$V/$n.log" ]; then
+          echo 'DEVLAB_JSON:{"mensagem":"um log pequeno foi apagado junto","dica_diagnostica":"o alvo eram so os maiores que 10 kB. Use Resetar lab e mire pelo resultado do find."}'
+          exit 1
+        fi
+      done
+      exit 0
+
+  - descricao: "liberado.txt traz o total de bytes liberados"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/laudo/liberado.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/laudo/liberado.txt","dica_diagnostica":"some o tamanho dos tres logs grandes ANTES de apaga-los"}'
+        exit 1
+      fi
+      V=$(tr -cd '0-9' < "$ARQ")
+      if [ "$V" != "77000" ]; then
+        echo "conteudo: '$V' (esperado 77000)"
+        echo 'DEVLAB_JSON:{"mensagem":"o total de bytes liberados nao confere","dica_diagnostica":"12000 + 25000 + 40000 = 77000. Se o numero veio com a palavra total junto, isole so o numero; e a soma e dos arquivos, nao da lista de nomes."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o gravador-vm parou e o coletor-cdr continua rodando"
+    script: |
+      #!/bin/bash
+      # Descarta o estado Z: o zumbi é o recibo de quem já morreu (decisão 70b).
+      TRAVADO=$(ps -eo stat=,comm= | awk '$1 !~ /^Z/ && $2 == "gravador-vm"' | grep -c .)
+      SAUDAVEL=$(ps -eo stat=,comm= | awk '$1 !~ /^Z/ && $2 == "coletor-cdr"' | grep -c .)
+      if [ "$TRAVADO" != "0" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o gravador-vm continua rodando","dica_diagnostica":"ele ignora o TERM: o kill sem opcao nao basta. Depois de morto ele aparece como Z, e isso e esperado."}'
+        exit 1
+      fi
+      if [ "$SAUDAVEL" = "0" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o coletor-cdr foi derrubado junto","dica_diagnostica":"ele estava saudavel e nao era o alvo. Um padrao amplo demais leva os dois; mire pelo PID exato."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "as permissões do serviço foram corrigidas"
+    script: |
+      #!/bin/bash
+      S=$(stat -c %a /home/aluno/servico/coletar.sh)
+      C=$(stat -c %a /home/aluno/servico/credenciais.conf)
+      if [ "$S" != "755" ]; then
+        echo "coletar.sh: $S (esperado 755)"
+        echo 'DEVLAB_JSON:{"mensagem":"o coletar.sh nao esta 755","dica_diagnostica":"era por isso que a coleta nao executava: faltava o bit x. 755 = dono tudo, grupo e outros leem e executam."}'
+        exit 1
+      fi
+      if [ "$C" != "600" ]; then
+        echo "credenciais.conf: $C (esperado 600)"
+        echo 'DEVLAB_JSON:{"mensagem":"o credenciais.conf nao esta 600","dica_diagnostica":"tem uma senha dentro: os dois ultimos digitos precisam ser zero"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o conteúdo dos arquivos do serviço não foi alterado"
+    script: |
+      #!/bin/bash
+      grep -q '4f9c2b71e0' /home/aluno/servico/credenciais.conf || {
+        echo 'DEVLAB_JSON:{"mensagem":"o credenciais.conf foi alterado","dica_diagnostica":"o defeito era de PERMISSAO. Reescrever o arquivo nao conserta acesso. Use Resetar lab."}'
+        exit 1
+      }
+      grep -q 'coleta concluida' /home/aluno/servico/coletar.sh || {
+        echo 'DEVLAB_JSON:{"mensagem":"o coletar.sh foi alterado","dica_diagnostica":"nao era preciso editar o script: so faltava o bit de execucao"}'
+        exit 1
+      }
+      exit 0
+
+erros_comuns:
+  - match: "Directory not empty"
+    digita: "rmdir varlog"
+    mensagem: "rmdir: failed to remove 'varlog': Directory not empty"
+    causa: "a tarefa é remover os logs grandes de dentro, não o diretório"
+    conserto: "remova os arquivos pelo nome; o `varlog/` continua existindo"
+    categoria: ferramenta_errada
+  - match: "Removing leading"
+    digita: "tar -czf laudo/grandes.tar.gz /home/aluno/varlog/chamadas.log"
+    mensagem: "tar: Removing leading `/' from member names"
+    causa: "caminho absoluto no pacote; o membro vai ficar como `home/aluno/varlog/…`"
+    conserto: "empacote de dentro com `-C varlog` e nomeie os arquivos sem caminho"
+    categoria: conceitual
+  - match: "No such process"
+    digita: "kill 14"
+    mensagem: "bash: kill: (14) - No such process"
+    causa: "o PID anotado já não vale — ou o processo mudou, ou você leu o número errado"
+    conserto: "descubra o PID na hora: `kill $(pgrep gravador-vm)`"
+    categoria: conceitual
+
+cards_revisao:
+  - bit-x-e-o-que-deixa-executar
+  - term-e-pedido-kill-e-ordem
+  - size-sem-sufixo-conta-blocos
+  - listar-antes-de-extrair
+
+solucao_referencia: |
+  cd /home/aluno
+  # 1. evidência, antes de qualquer conserto
+  ps -eo user,stat,comm | grep gravador-vm > laudo/processos.txt
+  find varlog -name '*.log' -size +10k | sort > laudo/grandes.txt
+  # 2. espaço: soma, empacota, remove
+  find varlog -name '*.log' -size +10k | xargs wc -c | tail -1 | awk '{print $1}' > laudo/liberado.txt
+  tar -czf laudo/grandes.tar.gz -C varlog chamadas.log sip-trace.log gravacoes.log
+  rm varlog/chamadas.log varlog/sip-trace.log varlog/gravacoes.log
+  # 3. serviço travado
+  kill $(pgrep gravador-vm)
+  sleep 1
+  kill -9 $(pgrep gravador-vm)
+  sleep 1
+  # 4. permissões
+  chmod 755 servico/coletar.sh
+  chmod 600 servico/credenciais.conf

@@ -1,0 +1,389 @@
+id: linux-con-03-dono
+trilha: linux
+nivel: construtor
+ordem: 3
+titulo: "Dono, grupo e identidade: quem é você para o sistema"
+capacidade: "Sei descobrir de quem é um arquivo, explicar por que não consigo mudar isso, e compartilhar um diretório com a equipe pelo grupo."
+xp: 40
+prereqs: [linux-con-02-diretorios]
+
+lab:
+  # Sem container esta lição não mede nada: a árvore falsa do validador lê o
+  # /etc/passwd do HOST (27 linhas, sem o usuário aluno) e o adapta() apaga
+  # toda linha de chown. Ver a decisão 65 em docs/DESIGN-LINUX.md.
+  exige_container: true
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno
+    # O grupo que a equipe de suporte usa. O aluno entra nele aqui, como root,
+    # porque ele nunca poderia se acrescentar a um grupo sozinho.
+    groupadd -g 3000 suporte
+    usermod -aG suporte aluno
+    # O que o instalador do gateway deixou: dono root, e o aluno não é root.
+    mkdir -p "$BASE/entregue"
+    # Repare no que NÃO está aqui: timeout_registro. É a linha que falta, e é
+    # o que o chamado pede para acrescentar — na cópia.
+    cat > "$BASE/entregue/gateway.conf" <<'TXT'
+    # entregue pelo fornecedor em 28/07 - NAO EDITAR NO LUGAR
+    gateway        = saida-1
+    endereco       = 10.10.0.9
+    porta_sip      = 5060
+    codec          = PCMA
+    TXT
+    chown root:root "$BASE/entregue" "$BASE/entregue/gateway.conf"
+    chmod 755 "$BASE/entregue"
+    chmod 644 "$BASE/entregue/gateway.conf"
+
+ensina:
+  conceitos:
+    - id: identidade-e-um-numero
+      titulo: "Para o kernel você é um número; o nome é tradução feita depois"
+    - id: so-root-troca-o-dono
+      titulo: "Só o root troca dono — nem para DAR o seu arquivo você tem permissão"
+    - id: grupo-e-o-mecanismo-de-compartilhar
+      titulo: "Grupo é como duas contas trabalham no mesmo arquivo sem abrir para o mundo"
+  comandos:
+    - id
+    - groups
+    - chown
+    - chgrp
+
+ensino:
+  gancho: |
+    O fornecedor entregou a configuração do gateway e ela está em
+    `entregue/gateway.conf`. Falta nela a linha de `timeout_registro`, que é o
+    que faz o gateway perder o registro — e o editor recusa gravar.
+
+    Você já sabe ler permissão, então confere: o arquivo está `644`. Leitura
+    para todo mundo, escrita para o dono. E você **consegue** ler. Então a
+    permissão não é o problema inteiro.
+
+    O problema é a outra metade da pergunta, a que ainda não foi feita nesta
+    trilha: `644` para o dono — mas **quem é o dono?**
+
+  objetivos:
+    - verbo: identificar
+      texto: "descobrir o dono e o grupo de um arquivo, pelo nome e pelo número"
+    - verbo: explicar
+      texto: "explicar por que um usuário comum não consegue trocar o dono nem do próprio arquivo"
+    - verbo: executar
+      texto: "compartilhar um diretório com a equipe usando grupo em vez de abrir para outros"
+    - verbo: escolher
+      texto: "escolher entre copiar para um lugar seu e pedir elevação, diante de um arquivo de root"
+
+  modelo_mental: |
+    O kernel não conhece o nome "aluno". Ele conhece **1000**. Todo arquivo
+    guarda dois números — o **uid** do dono e o **gid** do grupo — e a tradução
+    para nome acontece só na hora de imprimir na tela, consultando
+    `/etc/passwd` e `/etc/group`.
+
+    Isso não é curiosidade: é o que explica um arquivo aparecer com dono
+    `1001` em vez de um nome quando você o copia para outra máquina. O número
+    viajou; a tradução ficou para trás.
+
+    ### As três perguntas, na ordem em que o sistema faz
+
+    Já vimos as três classes. Agora dá para dizer como o sistema escolhe qual
+    vale, e é literalmente esta ordem:
+
+    1. o **uid** do arquivo é igual ao seu? → vale a permissão do **dono**
+    2. o **gid** do arquivo está na sua lista de grupos? → vale a do **grupo**
+    3. senão → vale a de **outros**
+
+    O `id` responde as duas coisas que você precisa para simular isso de
+    cabeça: seu uid e **todos** os grupos de que você participa.
+
+    ### Trocar dono é privilégio de root, e não tem exceção
+
+    A regra surpreende quem vem de outros sistemas: **você não pode dar um
+    arquivo seu para outra pessoa.** Nem sendo o dono dele.
+
+    ```
+    $ chown root meu.txt
+    chown: changing ownership of 'meu.txt': Operation not permitted
+    ```
+
+    Não é implicância. Se qualquer um pudesse doar arquivos, qualquer um
+    poderia estourar a cota de disco de outra conta, ou plantar um arquivo
+    executável no nome de alguém. Por isso `chown` exige root — sempre.
+
+    O **grupo** é a válvula de escape, e é por isso que ele existe: `chgrp`
+    você pode, desde que seja **dono do arquivo** e **membro do grupo de
+    destino**. É assim que duas contas trabalham no mesmo diretório sem que ele
+    precise ficar legível para o servidor inteiro.
+
+    ### O que fazer diante de um arquivo de root
+
+    Você tem duas saídas honestas, e "forçar" não é uma delas:
+
+    - **copiar para um lugar seu** e trabalhar na cópia — a cópia nasce sua,
+      porque quem cria é você;
+    - **pedir elevação** a quem tem (num servidor de verdade, `sudo`).
+
+    Neste lab a segunda não existe: o perfil de segurança do DevLab liga
+    `no-new-privileges` em todo container, e com ele o `sudo` recusa elevar
+    mesmo instalado. A decisão está registrada em `docs/DESIGN-LINUX.md`. O que
+    você exercita aqui é a primeira saída, que é também a mais usada em campo.
+
+  anatomia:
+    - linha: "chgrp suporte equipe"
+      partes:
+        - trecho: "chgrp"
+          papel: comando
+          explica: "troca só o GRUPO. Você pode, sendo dono do arquivo e membro do grupo de destino"
+        - trecho: "suporte"
+          papel: argumento
+          explica: "o grupo de destino, por nome; aceita o gid numérico também"
+        - trecho: "equipe"
+          papel: argumento
+          explica: "o alvo. Com `-R` desceria na árvore inteira"
+    - linha: "chown root:root entregue/gateway.conf"
+      partes:
+        - trecho: "chown"
+          papel: comando
+          explica: "troca dono, e opcionalmente grupo. Exige root — sem exceção"
+        - trecho: "root:root"
+          papel: argumento
+          explica: "dono à esquerda do `:`, grupo à direita; qualquer um dos dois pode ser omitido"
+        - trecho: "entregue/gateway.conf"
+          papel: argumento
+          explica: "o alvo"
+
+  demonstracao:
+    - comando: "id"
+      saida: |-2
+        uid=1000(aluno) gid=1000(aluno) groups=1000(aluno),3000(suporte)
+      nota: "Sua identidade inteira: o uid, o grupo principal e a lista de grupos extras. É esta lista que o sistema consulta na segunda pergunta."
+    - comando: "stat -c '%U:%G  %u:%g  %a  %n' entregue/gateway.conf README.txt"
+      saida: |-2
+        root:root  0:0  644  entregue/gateway.conf
+        aluno:aluno  1000:1000  644  README.txt
+      nota: "Os mesmos donos, por nome e por número. O arquivo do fornecedor é 0:0 — root. O seu é 1000:1000. O `644` é idêntico nos dois; o que muda é para QUEM o primeiro dígito vale."
+    - comando: "head -1 /etc/passwd && tail -1 /etc/passwd"
+      saida: |-2
+        root:x:0:0:root:/root:/bin/bash
+        aluno:x:1000:1000::/home/aluno:/bin/bash
+      nota: "A tabela de tradução, na primeira e na última linha: `root` com uid 0 e `aluno` com uid 1000. Terceiro e quarto campos são uid e gid — é daqui que sai o nome que o `stat` acabou de imprimir."
+    - comando: "chown aluno entregue/gateway.conf"
+      saida: |-2
+        chown: changing ownership of 'entregue/gateway.conf': Operation not permitted
+      nota: "A recusa. Não adianta ser leitura do arquivo nem estar dentro da sua pasta pessoal: trocar dono é root, e você não é."
+    - comando: "chown root README.txt"
+      saida: |-2
+        chown: changing ownership of 'README.txt': Operation not permitted
+      nota: "E aqui a que costuma surpreender: nem o SEU arquivo você pode dar. A regra não é sobre quem perde, é sobre quem ganha — ninguém recebe arquivo sem ser root quem entrega."
+    - comando: "chgrp suporte README.txt"
+      saida: ""
+      nota: "Já o grupo, sim: você é dono do README.txt e é membro de `suporte`. As duas condições fecham, e o comando passa em silêncio."
+    - comando: "stat -c '%U:%G %n' README.txt"
+      saida: |-2
+        aluno:suporte README.txt
+      nota: "Dono continua `aluno`, grupo virou `suporte`. É esta a operação que compartilha trabalho sem abrir nada para \"outros\"."
+    - comando: "cp entregue/gateway.conf gateway-meu.conf && stat -c '%U:%G %a %n' gateway-meu.conf"
+      saida: |-2
+        aluno:aluno 644 gateway-meu.conf
+      nota: "A saída para o arquivo do fornecedor: a cópia nasce SUA, porque quem a criou foi você. Agora dá para editar — e o original fica intacto para conferência."
+
+  pratica_guiada:
+    - instrucao: "Descubra seu uid e de quais grupos você participa."
+      modelo: "____"
+      resposta: "id"
+    - instrucao: "Veja dono e grupo do arquivo do fornecedor, por nome e por número."
+      modelo: "stat -c '%U:%G %u:%g %n' ____"
+      resposta: "stat -c '%U:%G %u:%g %n' entregue/gateway.conf"
+    - instrucao: "Crie o diretório da equipe e passe o grupo dele para `suporte`."
+      modelo: "mkdir ~/equipe && chgrp ____ ~/equipe"
+      resposta: "mkdir ~/equipe && chgrp suporte ~/equipe"
+    - instrucao: "Dê ao grupo as três permissões no diretório, sem abrir nada para outros."
+      modelo: "chmod ____ ~/equipe"
+      resposta: "chmod 770 ~/equipe"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você copiou arquivos para outro servidor e agora `ls -l` mostra o dono como `1004` em vez de um nome. O arquivo está corrompido?"
+      resposta: |
+        Não. O número é o que o arquivo sempre guardou; o nome era tradução. No
+        servidor de destino não existe conta com uid 1004, então não há para
+        que traduzir e o `ls` mostra o número cru. Conserta-se criando a conta
+        correspondente ou trocando o dono — e trocar dono precisa de root.
+    - tipo: predicao
+      pergunta: "Um arquivo é `aluno:suporte` com permissão `640`. A Ana está no grupo `suporte` e não é a dona. O que ela consegue fazer? E o Bruno, que não está no grupo?"
+      resposta: |
+        A Ana casa na segunda pergunta (o gid do arquivo está na lista dela),
+        então vale `4` — ela **lê e não escreve**. O Bruno não casa em nenhuma
+        das duas primeiras, então vale a de outros, que é `0`: ele não consegue
+        nem ler.
+    - tipo: transferencia
+      pergunta: "Você precisa entregar um relatório para a conta `deploy`, que não é sua e não compartilha grupo com você. `chown deploy relatorio.txt` foi recusado. Como resolver sem root?"
+      resposta: |
+        Não dá para *empurrar* o arquivo. O caminho é deixá-lo alcançável e
+        fazer a outra conta puxar: coloque-o num diretório que a conta `deploy`
+        consiga atravessar, com leitura para ela, e quem executa a cópia é o
+        `deploy` — a cópia nasce dele, sem `chown` nenhum. Se for preciso que o
+        arquivo mude de dono de fato, aí sim é tarefa para quem tem elevação.
+
+objetivo_md: |
+  O arquivo do fornecedor é do `root`, e você não é o `root`. Nem no seu
+  próprio diretório pessoal isso muda: dono é dono.
+
+  | operação | quem pode |
+  |---|---|
+  | trocar **dono** (`chown`) | só o root — nem para doar o seu |
+  | trocar **grupo** (`chgrp`) | o dono do arquivo, para um grupo de que ele participa |
+  | trocar **permissão** (`chmod`) | o dono do arquivo (e o root) |
+
+  Você já faz parte do grupo `suporte` — confira com `id`.
+
+  ### Sua tarefa
+
+  A configuração do fornecedor veio **sem** a linha de `timeout_registro`, e é
+  por isso que o gateway perde o registro. Ela não pode ser editada no lugar —
+  o comentário na primeira linha diz isso, e o dono dela diz mais ainda. Monte
+  a área da equipe e trabalhe na cópia:
+
+  1. Crie `~/equipe/`, com **grupo `suporte`** e permissão `770` — o grupo
+     inteiro trabalha ali dentro, e "outros" não entra nem para listar.
+  2. Copie `entregue/gateway.conf` para dentro de `~/equipe/`, mantendo o nome.
+  3. Deixe a cópia com **grupo `suporte`** e com **escrita para o grupo** (`660`),
+     para que qualquer colega do plantão consiga ajustá-la.
+  4. Acrescente ao fim da cópia — e só dela — a linha:
+
+     ```
+     timeout_registro = 60
+     ```
+
+  > O `entregue/gateway.conf` original tem de continuar do `root` e sem uma
+  > vírgula alterada. Ele é a referência de conferência com o fornecedor.
+
+verificar:
+  - descricao: "~/equipe/ existe, é do grupo suporte e está 770"
+    script: |
+      #!/bin/bash
+      DIR=/home/aluno/equipe
+      if [ ! -d "$DIR" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a pasta ~/equipe nao existe","dica_diagnostica":"mkdir ~/equipe, depois chgrp e chmod nela"}'
+        exit 1
+      fi
+      G=$(stat -c %G "$DIR"); M=$(stat -c %a "$DIR"); U=$(stat -c %U "$DIR")
+      if [ "$U" != "aluno" ]; then
+        echo "dono: $U"
+        echo 'DEVLAB_JSON:{"mensagem":"a pasta ~/equipe nao e sua","dica_diagnostica":"crie voce mesmo a pasta: quem cria vira dono"}'
+        exit 1
+      fi
+      if [ "$G" != "suporte" ]; then
+        echo "grupo atual: $G"
+        echo 'DEVLAB_JSON:{"mensagem":"a pasta ~/equipe ainda nao e do grupo suporte","dica_diagnostica":"chgrp suporte ~/equipe — voce e dono e e membro do grupo, entao pode"}'
+        exit 1
+      fi
+      if [ "$M" != "770" ]; then
+        echo "modo atual: $M"
+        echo 'DEVLAB_JSON:{"mensagem":"a permissao da pasta nao e 770","dica_diagnostica":"770 = dono rwx, grupo rwx, outros nada. Sem o x do grupo os colegas nem atravessam a pasta."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "a cópia está em ~/equipe/, com grupo suporte e escrita de grupo"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/equipe/gateway.conf
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/equipe/gateway.conf","dica_diagnostica":"copie o arquivo do fornecedor para dentro da pasta da equipe, mantendo o nome"}'
+        exit 1
+      fi
+      U=$(stat -c %U "$ARQ"); G=$(stat -c %G "$ARQ"); M=$(stat -c %a "$ARQ")
+      if [ "$U" != "aluno" ]; then
+        echo "dono: $U"
+        echo 'DEVLAB_JSON:{"mensagem":"a copia nao e sua","dica_diagnostica":"cp cria um arquivo NOVO, que nasce seu. Se o dono ainda e root, voce provavelmente usou cp -a ou cp -p, que preservam metadados."}'
+        exit 1
+      fi
+      if [ "$G" != "suporte" ]; then
+        echo "grupo atual: $G"
+        echo 'DEVLAB_JSON:{"mensagem":"a copia ainda nao e do grupo suporte","dica_diagnostica":"chgrp suporte no arquivo copiado"}'
+        exit 1
+      fi
+      if [ "$M" != "660" ]; then
+        echo "modo atual: $M"
+        echo 'DEVLAB_JSON:{"mensagem":"a copia nao esta 660","dica_diagnostica":"660 = dono le e escreve, grupo le e escreve, outros nada. E o w do grupo que deixa o colega ajustar o arquivo."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "a linha de timeout foi acrescentada à cópia"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/equipe/gateway.conf
+      if ! grep -qE '^timeout_registro *= *60' "$ARQ"; then
+        echo "linha atual: $(grep -E '^timeout_registro' "$ARQ" || echo '(ausente)')"
+        echo 'DEVLAB_JSON:{"mensagem":"falta a linha timeout_registro = 60 na copia","dica_diagnostica":"acrescente ao FIM do arquivo copiado, com o redirecionamento que acrescenta em vez de sobrescrever"}'
+        exit 1
+      fi
+      # A cópia tem de continuar sendo a configuração, não um arquivo de uma linha.
+      # É o erro de quem usa > no lugar de >>.
+      if ! grep -q 'gateway *= *saida-1' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a copia perdeu o resto do conteudo","dica_diagnostica":"o > sobrescreve o arquivo inteiro; para acrescentar uma linha o operador e o >>"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o original continua do root e sem alteração"
+    script: |
+      #!/bin/bash
+      ORIG=/home/aluno/entregue/gateway.conf
+      U=$(stat -c %U:%G "$ORIG")
+      if [ "$U" != "root:root" ]; then
+        echo "dono atual: $U"
+        echo 'DEVLAB_JSON:{"mensagem":"o dono do arquivo do fornecedor mudou","dica_diagnostica":"nenhum passo da tarefa pedia isso — e como aluno voce nem conseguiria. Use Resetar lab."}'
+        exit 1
+      fi
+      if grep -qE '^timeout_registro' "$ORIG"; then
+        echo 'DEVLAB_JSON:{"mensagem":"a linha foi parar no arquivo do fornecedor","dica_diagnostica":"o acrescimo era na copia dentro de ~/equipe/. O original e a referencia de conferencia."}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Rode `id` primeiro e confirme que você está no grupo `suporte` — é isso que torna o `chgrp` possível. Depois olhe `stat -c '%U:%G %a %n' entregue/gateway.conf` e pergunte-se qual dos três dígitos vale para você."
+  - "A ordem é: criar a pasta, ajustar grupo e permissão dela, copiar o arquivo para dentro, ajustar grupo e permissão da cópia, e por último acrescentar a linha ao fim da cópia — com o operador que acrescenta, não com o que sobrescreve."
+  - "mkdir ~/equipe && chgrp suporte ~/equipe && chmod 770 ~/equipe && cp entregue/gateway.conf ~/equipe/ && chgrp suporte ~/equipe/gateway.conf && chmod 660 ~/equipe/gateway.conf && echo 'timeout_registro = 60' >> ~/equipe/gateway.conf"
+
+erros_comuns:
+  - match: "changing ownership of .*Operation not permitted"
+    digita: "chown aluno entregue/gateway.conf"
+    mensagem: "chown: changing ownership of 'entregue/gateway.conf': Operation not permitted"
+    causa: "trocar dono é privilégio de root, e vale mesmo dentro da sua pasta pessoal e mesmo para um arquivo seu"
+    conserto: "trabalhe numa cópia, que nasce sua, ou peça a quem tem elevação"
+    categoria: permissao
+  - match: "changing group of .*Operation not permitted"
+    digita: "chgrp suporte entregue/gateway.conf"
+    mensagem: "chgrp: changing group of 'entregue/gateway.conf': Operation not permitted"
+    causa: "`chgrp` exige ser DONO do arquivo; ser membro do grupo de destino sozinho não basta"
+    conserto: "aplique o chgrp num arquivo seu — por exemplo, na cópia que você criou"
+    categoria: permissao
+  - match: "invalid group"
+    digita: "chgrp suportes ~/equipe"
+    mensagem: "chgrp: invalid group: 'suportes'"
+    causa: "o grupo informado não existe; o nome não é traduzível para um gid"
+    conserto: "confira o nome exato na saída de `id` ou de `groups`"
+    categoria: sintaxe
+  - match: "Permission denied"
+    digita: "echo 'timeout_registro = 60' >> entregue/gateway.conf"
+    mensagem: "bash: entregue/gateway.conf: Permission denied"
+    causa: "o arquivo é 644 e o dono é o root: para você vale a permissão de outros, que é só leitura"
+    conserto: "copie para um diretório seu e edite a cópia"
+    categoria: permissao
+
+cards_revisao:
+  - identidade-e-um-numero
+  - so-root-troca-o-dono
+  - grupo-e-o-mecanismo-de-compartilhar
+
+solucao_referencia: |
+  cd /home/aluno
+  mkdir -p /home/aluno/equipe
+  chgrp suporte /home/aluno/equipe
+  chmod 770 /home/aluno/equipe
+  cp entregue/gateway.conf /home/aluno/equipe/gateway.conf
+  chgrp suporte /home/aluno/equipe/gateway.conf
+  chmod 660 /home/aluno/equipe/gateway.conf
+  echo 'timeout_registro = 60' >> /home/aluno/equipe/gateway.conf

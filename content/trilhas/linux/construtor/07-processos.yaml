@@ -1,0 +1,392 @@
+id: linux-con-07-processos
+trilha: linux
+nivel: construtor
+ordem: 7
+titulo: "Processos e sinais: pedir que pare, e obrigar quando não para"
+capacidade: "Sei achar o processo certo pelo nome, encerrá-lo na ordem correta, e reconhecer um zumbi em vez de insistir em matá-lo."
+xp: 40
+prereqs: [linux-con-06-transformar]
+
+lab:
+  # A árvore falsa mostraria os ~60 processos da máquina de quem estuda em vez
+  # dos 6 do lab. Ver a decisão 65 em docs/DESIGN-LINUX.md.
+  exige_container: true
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    mkdir -p /home/aluno/relatorios
+    chown aluno:aluno /home/aluno/relatorios
+
+    # O gravador que TRAVOU: ele ignora o TERM. É o defeito da lição, e é o que
+    # produz o sintoma real de campo — o serviço que "não morre".
+    printf '#!/bin/bash\ntrap "" TERM\nwhile true; do sleep 5; done\n' \
+      > /usr/local/bin/gravador-vm
+    # O coletor SAUDÁVEL. Existe para a tarefa ter o que preservar: quem mata
+    # tudo que se move resolve o chamado e derruba outro serviço junto.
+    printf '#!/bin/bash\nwhile true; do sleep 5; done\n' \
+      > /usr/local/bin/coletor-cdr
+    # O terceiro NÃO é iniciado aqui: é o aluno que sobe, com prioridade baixa.
+    printf '#!/bin/bash\nwhile true; do sleep 5; done\n' \
+      > /usr/local/bin/reprocessa
+    chmod 0755 /usr/local/bin/gravador-vm /usr/local/bin/coletor-cdr /usr/local/bin/reprocessa
+
+    # setpriv faz exec e não deixa pai nenhum para trás; `runuser` deixaria um
+    # processo de root casando com o mesmo nome. Ver a decisão 70b.
+    setpriv --reuid=aluno --regid=aluno --clear-groups /usr/local/bin/gravador-vm &
+    setpriv --reuid=aluno --regid=aluno --clear-groups /usr/local/bin/coletor-cdr &
+    sleep 1
+
+ensina:
+  conceitos:
+    - id: term-e-pedido-kill-e-ordem
+      titulo: "TERM é um pedido que o processo pode ignorar; KILL nem chega até ele"
+    - id: zumbi-e-registro-nao-processo
+      titulo: "`<defunct>` é o recibo de um processo já morto, não um processo a matar"
+    - id: nice-abaixa-prioridade-sem-privilegio
+      titulo: "Baixar a prioridade não pede privilégio; subir, sim"
+  comandos:
+    - ps
+    - pgrep
+    - kill
+    - nice
+
+ensino:
+  gancho: |
+    O chamado diz: "o voicemail parou de gravar; reinicie o serviço". Você acha
+    o processo e manda parar:
+
+    ```
+    kill 14
+    ```
+
+    Nada acontece. O processo continua lá. Você repete, e continua lá.
+
+    Aí alguém do plantão sugere o de sempre: `kill -9`. Você manda, e agora o
+    `ps` mostra uma coisa nova:
+
+    ```
+    Z    aluno    gravador-vm
+    ```
+
+    Um `Z`, e o nome entre colchetes com um `<defunct>` do lado. Parece que
+    piorou. Não piorou — o processo morreu, e o que sobrou não é um processo.
+
+  objetivos:
+    - verbo: identificar
+      texto: "achar o processo certo pelo nome, sem depender de decorar PID"
+    - verbo: explicar
+      texto: "explicar por que um processo pode ignorar o TERM e não pode ignorar o KILL"
+    - verbo: diagnosticar
+      texto: "distinguir um processo travado de um zumbi na saída do `ps`"
+    - verbo: executar
+      texto: "encerrar um serviço na ordem correta e subir outro com prioridade baixa"
+
+  modelo_mental: |
+    Um processo é um programa **em execução**, com um número que só ele tem
+    naquele instante: o **PID**. Você não conversa com ele por texto — você
+    manda **sinal**, que é uma interrupção numerada que o kernel entrega.
+
+    | sinal | nº | o que é | dá para ignorar? |
+    |---|---|---|---|
+    | `TERM` | 15 | "por favor, termine" — o padrão do `kill` | **sim** |
+    | `INT` | 2 | o que o Ctrl-C manda | sim |
+    | `HUP` | 1 | tradicionalmente "releia sua configuração" | sim |
+    | `KILL` | 9 | não é entregue ao processo: o **kernel** o remove | **não** |
+
+    A diferença entre TERM e KILL é a lição inteira. O **TERM é um pedido**: o
+    programa recebe e decide o que fazer — fechar arquivo, terminar a chamada
+    em curso, gravar o que faltava. Um programa bem-escrito usa isso para não
+    corromper dados. Um programa com defeito pode ignorá-lo por completo, e é o
+    que acontece no lab.
+
+    O **KILL não é entregue**. O processo não roda mais uma linha, não fecha
+    arquivo, não grava nada. Por isso ele funciona sempre — e por isso é o
+    último recurso, não o primeiro. Matar com `-9` um serviço no meio de uma
+    gravação deixa o arquivo pela metade.
+
+    **A ordem certa é: pede, espera, obriga.**
+
+    ### Achar o processo
+
+    O `ps` tira uma foto da tabela de processos. `ps -e` lista todos, e `-o`
+    escolhe quais colunas sair — o que é bem mais útil do que decorar as do
+    `ps aux`:
+
+    | coluna | é |
+    |---|---|
+    | `pid` | o número que o `kill` precisa |
+    | `user` | de quem é o processo |
+    | `comm` | o nome do executável (**cortado em 15 caracteres**) |
+    | `args` | a linha de comando inteira |
+    | `stat` | o estado: `S` dormindo, `R` rodando, **`Z` zumbi** |
+    | `ni` | a prioridade (*niceness*) |
+
+    O `pgrep` é o atalho: `pgrep gravador-vm` devolve direto o PID de quem casa
+    com o nome. Como ele compara contra o `comm`, um padrão com mais de 15
+    caracteres nunca casa — e ele avisa isso quando acontece.
+
+    ### O zumbi
+
+    Quando um processo morre, o kernel guarda a entrada dele na tabela até o
+    **pai** ler o código de saída. Esse intervalo é o estado `Z`, e o `ps`
+    mostra o nome entre colchetes com `<defunct>`.
+
+    **Zumbi não consome CPU nem memória — ele é um recibo por recolher.** Não
+    adianta mandar sinal: não há a quem entregar. Ele some quando o pai o
+    recolhe, ou quando o pai morre e alguém o recolhe no lugar.
+
+    Neste lab ele **não** vai sumir, e é bom saber por quê: os serviços foram
+    iniciados pela preparação do lab, cujo shell já terminou, então o pai deles
+    passou a ser o processo número 1 do container — que aqui é um `sleep`, e um
+    `sleep` nunca recolhe ninguém. Num servidor de verdade quem faz esse papel
+    é o `init`, e ele recolhe.
+
+    Um punhado de zumbis é normal. Zumbi aos milhares é sintoma — de um pai
+    vivo que não recolhe os filhos.
+
+    ### Prioridade
+
+    O `nice` define a *niceness* de um processo: de **-20** (egoísta, ganha CPU
+    antes dos outros) a **19** (educado, cede a vez). O padrão é 0.
+
+    A assimetria importa: **abaixar a própria prioridade qualquer um pode;
+    subir exige privilégio.** Faz sentido — ceder a vez não prejudica ninguém,
+    furar a fila prejudica. É por isso que `nice -n 10` funciona no lab e
+    `nice -n -10` não funcionaria.
+
+  anatomia:
+    - linha: "ps -eo pid,user,stat,comm --sort=comm"
+      partes:
+        - trecho: "ps"
+          papel: comando
+          explica: "tira uma foto da tabela de processos naquele instante"
+        - trecho: "-e"
+          papel: opcao
+          explica: "todos os processos, não só os do seu terminal"
+        - trecho: "-o pid,user,stat,comm"
+          papel: opcao
+          explica: "escolhe as colunas, na ordem pedida — em vez de aceitar as do `ps aux`"
+        - trecho: "--sort=comm"
+          papel: opcao
+          explica: "ordena pelo nome; sem isto a ordem é a da tabela, que muda a cada foto"
+    - linha: "kill -9 14"
+      partes:
+        - trecho: "kill"
+          papel: comando
+          explica: "manda um sinal. O nome engana: sem opção ele manda TERM, que é um pedido"
+        - trecho: "-9"
+          papel: opcao
+          explica: "o sinal KILL. Aceita `-KILL` também, que é mais legível"
+        - trecho: "14"
+          papel: argumento
+          explica: "o PID alvo. Aceita vários, separados por espaço"
+
+  demonstracao:
+    - comando: "ps -eo user,stat,comm --sort=comm | grep -E 'gravador|coletor'"
+      saida: |-2
+        aluno    S    coletor-cdr
+        aluno    S    gravador-vm
+      nota: "Os dois serviços do lab, ambos do aluno e ambos dormindo (`S`). Projeto só as colunas que interessam: PID e uso de CPU mudam a cada foto e não ajudam aqui."
+    - comando: "pgrep -c gravador-vm"
+      saida: |-2
+        1
+      nota: "Um processo casa com esse nome. Uso o `-c` aqui só porque o PID muda cada vez que o lab sobe e esta demonstração precisa sair sempre igual — **no seu terminal, `pgrep gravador-vm` devolve o número**, que é o que o `kill` precisa. Conferir que casou UM antes de matar é bom hábito: casando dois, você estava prestes a derrubar o serviço certo e o errado juntos."
+    - comando: "kill $(pgrep gravador-vm)"
+      saida: ""
+      nota: "O pedido educado. Repare que ele não reclama de nada — o sinal foi entregue com sucesso. Entregue não quer dizer atendido."
+    - comando: "ps -eo user,stat,comm --sort=comm | grep -E 'gravador|coletor'"
+      saida: |-2
+        aluno    S    coletor-cdr
+        aluno    S    gravador-vm
+      nota: "E o gravador continua ali, em `S`, como se nada tivesse acontecido. Ele recebeu o TERM e escolheu ignorá-lo — é um pedido, e este programa tem defeito."
+    - comando: "kill -9 $(pgrep gravador-vm)"
+      saida: ""
+      nota: "Agora a ordem. O KILL não é entregue ao processo: o kernel o remove, sem chance de ignorar."
+    - comando: "ps -eo user,stat,comm --sort=comm | grep -E 'gravador|coletor'"
+      saida: |-2
+        aluno    S    coletor-cdr
+        aluno    Z    gravador-vm
+      nota: "O `S` virou **`Z`**. O gravador morreu; o que sobrou é o recibo esperando alguém recolher. Não insista em matá-lo — não há mais processo ali."
+    - comando: "ps -eo stat=,comm= | awk '$1 !~ /^Z/ && $2 == \"gravador-vm\"' | wc -l"
+      saida: |-2
+        0
+      nota: "A forma de perguntar \"ele ainda está VIVO?\" sem se deixar enganar pelo zumbi: descarte o estado `Z` antes de contar. Zero — acabou mesmo."
+    - comando: "nice -n 10 /usr/local/bin/reprocessa & sleep 1; ps -o ni=,comm= -C reprocessa"
+      saida: |-2
+         10 reprocessa
+      nota: "O reprocessamento sobe com prioridade 10: ele cede a vez para o que for mais urgente. Baixar a própria prioridade não pede privilégio nenhum."
+    - comando: "ps -eo user,stat,comm --sort=comm | grep -E 'gravador|coletor|reprocessa'"
+      saida: |-2
+        aluno    S    coletor-cdr
+        aluno    Z    gravador-vm
+        aluno    SN   reprocessa
+      nota: "O estado final: o gravador em `Z`, o coletor intacto em `S` e o reprocessa novo rodando. Encerrar o serviço errado é tão fácil quanto encerrar o certo — repare que o coletor nunca foi tocado."
+
+  pratica_guiada:
+    - instrucao: "Liste os dois serviços do lab, com dono e estado."
+      modelo: "ps -eo user,stat,comm --sort=comm | grep -E ____"
+      resposta: "ps -eo user,stat,comm --sort=comm | grep -E 'gravador|coletor'"
+    - instrucao: "Descubra o PID do gravador pelo nome."
+      modelo: "____ gravador-vm"
+      resposta: "pgrep gravador-vm"
+    - instrucao: "Peça a ele que termine, sem forçar."
+      modelo: "kill $(____ gravador-vm)"
+      resposta: "kill $(pgrep gravador-vm)"
+    - instrucao: "Ele ignorou o pedido. Obrigue."
+      modelo: "kill ____ $(pgrep gravador-vm)"
+      resposta: "kill -9 $(pgrep gravador-vm)"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Um processo aparece como `Z` no `ps` e não responde a `kill -9`. O que está acontecendo?"
+      resposta: |
+        Ele já está morto. `Z` é zumbi: a entrada que o kernel mantém até o pai
+        ler o código de saída. Sinal não tem a quem ser entregue — não existe
+        mais processo ali. Ele não consome CPU nem memória. Se incomodar, o
+        alvo é o **pai** (que não está recolhendo os filhos), nunca o zumbi.
+    - tipo: predicao
+      pergunta: "Você manda `kill` num processo que grava um arquivo de áudio e ele demora três segundos para sumir. Depois manda `kill -9` em outro igual, que some na hora. Qual dos dois arquivos tem mais chance de estar íntegro?"
+      resposta: |
+        O primeiro. O TERM foi **entregue ao programa**, que teve os três
+        segundos para fechar o arquivo e gravar o que faltava — é para isso que
+        a demora existe. O KILL não chega ao programa: o kernel o remove no
+        meio da escrita, e o arquivo fica como estava naquele instante. Por isso
+        a ordem é pedir, esperar, e só então obrigar.
+    - tipo: transferencia
+      pergunta: "Você precisa rodar um reprocessamento pesado num servidor em horário comercial, sem atrapalhar as chamadas. O que faz, e o que NÃO adiantaria tentar?"
+      resposta: |
+        Sobe com `nice -n 19` (ou algo alto): o reprocessamento cede a CPU
+        sempre que a telefonia precisar. O que **não** adiantaria é tentar
+        `nice -n -5` para "acelerar" — subir prioridade exige privilégio e seria
+        recusado, e mesmo funcionando seria o oposto do que se quer aqui.
+
+objetivo_md: |
+  O `gravador-vm` travou e ignora o pedido de encerramento. O `coletor-cdr`
+  está saudável e **não pode ser derrubado junto** — é o que separa resolver o
+  chamado de causar o próximo.
+
+  | sinal | o que faz | ignorável |
+  |---|---|---|
+  | `kill PID` | manda TERM: "por favor, termine" | **sim** |
+  | `kill -9 PID` | KILL: o kernel remove, sem avisar o processo | não |
+
+  Depois de matar, o `ps` vai mostrar o gravador como `Z`. Isso é esperado, e
+  não é falha sua — leia o modelo mental sobre zumbis antes de insistir.
+
+  ### Sua tarefa
+
+  1. Registre a evidência em `~/relatorios/travado.txt`: a linha do `ps` com
+     **dono, estado e nome** do processo travado. Um `ps` projetado, filtrado
+     pelo nome, redirecionado para o arquivo.
+  2. Encerre o `gravador-vm`. Tente primeiro o pedido educado; quando ele
+     ignorar, use a ordem.
+  3. **Não encoste no `coletor-cdr`.** Ele tem de continuar rodando no fim.
+  4. Suba o `/usr/local/bin/reprocessa` em segundo plano com **prioridade 10**,
+     para ele não competir com a telefonia. Ele tem de ficar rodando.
+
+  > O item 4 pede o processo *em execução* no fim da tarefa — suba em segundo
+  > plano, com `&`, para o terminal continuar seu.
+
+verificar:
+  - descricao: "a evidência do processo travado foi registrada"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/travado.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/travado.txt","dica_diagnostica":"projete as colunas com ps -eo user,stat,comm, filtre pelo nome e redirecione para o arquivo"}'
+        exit 1
+      fi
+      if ! grep -q 'gravador-vm' "$ARQ"; then
+        echo "conteudo: $(head -3 "$ARQ")"
+        echo 'DEVLAB_JSON:{"mensagem":"o travado.txt nao menciona o gravador-vm","dica_diagnostica":"filtre a saida do ps pelo nome do processo travado"}'
+        exit 1
+      fi
+      if ! grep -q 'aluno' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"falta a coluna de dono na evidencia","dica_diagnostica":"inclua user entre as colunas do -o: ps -eo user,stat,comm"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o gravador-vm não está mais vivo"
+    script: |
+      #!/bin/bash
+      # Descarta o estado Z: o zumbi que sobra é o recibo do processo já morto,
+      # e contá-lo reprovaria justamente quem acertou. Ver a decisão 70b.
+      VIVO=$(ps -eo stat=,comm= | awk '$1 !~ /^Z/ && $2 == "gravador-vm"' | grep -c .)
+      if [ "$VIVO" != "0" ]; then
+        echo "ainda vivo: $VIVO processo(s)"
+        ps -eo pid,user,stat,comm | grep gravador-vm
+        echo 'DEVLAB_JSON:{"mensagem":"o gravador-vm continua rodando","dica_diagnostica":"ele IGNORA o TERM: o kill sem opcao nao basta. Use kill -9 (ou -KILL) no PID que o pgrep devolve."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o coletor-cdr continua rodando"
+    script: |
+      #!/bin/bash
+      VIVO=$(ps -eo stat=,comm= | awk '$1 !~ /^Z/ && $2 == "coletor-cdr"' | grep -c .)
+      if [ "$VIVO" = "0" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o coletor-cdr foi derrubado junto","dica_diagnostica":"o alvo era so o gravador-vm. Um padrao amplo demais (ou um pkill solto) leva os dois. Use Resetar lab e mire pelo PID exato."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o reprocessa está rodando com prioridade 10"
+    script: |
+      #!/bin/bash
+      LINHA=$(ps -eo stat=,ni=,comm= | awk '$1 !~ /^Z/ && $3 == "reprocessa" {print $2}' | head -1)
+      if [ -z "$LINHA" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"o reprocessa nao esta rodando","dica_diagnostica":"suba em segundo plano: nice -n 10 /usr/local/bin/reprocessa & — sem o & o terminal fica preso nele"}'
+        exit 1
+      fi
+      if [ "$LINHA" != "10" ]; then
+        echo "prioridade atual: $LINHA (esperado 10)"
+        echo 'DEVLAB_JSON:{"mensagem":"o reprocessa esta rodando com a prioridade errada","dica_diagnostica":"nice -n 10 define a niceness em 10. Sem o nice ele nasce em 0."}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Comece olhando os dois serviços juntos: `ps -eo user,stat,comm --sort=comm | grep -E 'gravador|coletor'`. Repare na coluna de estado antes e depois de cada tentativa de encerrar — é ela que conta a história, e é ela que vai te mostrar o `Z` no fim."
+  - "São quatro passos: gravar a evidência com um `ps` filtrado, `kill` no PID que o `pgrep` devolve, `kill -9` no mesmo PID quando ele ignorar, e subir o reprocessa com `nice -n 10` seguido de `&`."
+  - "ps -eo user,stat,comm | grep gravador-vm > ~/relatorios/travado.txt; kill $(pgrep gravador-vm); kill -9 $(pgrep gravador-vm); nice -n 10 /usr/local/bin/reprocessa &"
+
+erros_comuns:
+  - match: "Operation not permitted"
+    digita: "kill 1"
+    mensagem: "bash: kill: (1) - Operation not permitted"
+    causa: "o processo é de outro usuário (aqui, do root); você só manda sinal para os seus"
+    conserto: "confira o dono na coluna `user` do `ps` antes de mirar"
+    categoria: permissao
+  - match: "No such process"
+    digita: "kill 14"
+    mensagem: "bash: kill: (14) - No such process"
+    causa: "o PID não existe mais — provavelmente o processo já terminou entre o `ps` e o `kill`"
+    conserto: "descubra o PID na hora do uso: `kill $(pgrep nome)`"
+    categoria: conceitual
+  - match: "pattern that searches for process name longer than 15"
+    digita: "pgrep gravador-voicemail"
+    mensagem: "pgrep: pattern that searches for process name longer than 15 characters will result in zero matches"
+    causa: "o `comm` do kernel guarda no máximo 15 caracteres, e o `pgrep` compara contra ele"
+    conserto: "encurte o padrão, ou use `-f` para casar contra a linha de comando inteira"
+    categoria: conceitual
+  - match: "cannot set niceness|Permission denied"
+    digita: "nice -n -10 /usr/local/bin/reprocessa"
+    mensagem: "nice: cannot set niceness: Permission denied"
+    causa: "baixar a prioridade qualquer um pode; SUBIR (valor negativo) exige privilégio"
+    conserto: "use um valor positivo, que é o que faz sentido para tarefa de fundo"
+    categoria: permissao
+
+cards_revisao:
+  - term-e-pedido-kill-e-ordem
+  - zumbi-e-registro-nao-processo
+  - nice-abaixa-prioridade-sem-privilegio
+
+solucao_referencia: |
+  ps -eo user,stat,comm | grep gravador-vm > /home/aluno/relatorios/travado.txt
+  kill $(pgrep gravador-vm)
+  sleep 1
+  kill -9 $(pgrep gravador-vm)
+  sleep 1
+  nice -n 10 /usr/local/bin/reprocessa &
+  sleep 1

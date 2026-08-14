@@ -9,5 +9,10 @@ fase: 0
 situacao: disponivel
 capacidades:
   operador: "Sei navegar e executar comandos individuais para inspecionar e alterar o estado."
-  construtor: "Sei compor fluxos de vários passos e diagnosticar falhas comuns."
+  # Redigida para o que o nível entrega DE FATO. Ficam de fora, por decisão
+  # registrada em docs/DESIGN-LINUX.md: `sudo` e `su` (a decisão 66 mostra que
+  # o `no-new-privileges` do lab os impede), `apt` e as ferramentas de
+  # transferência em rede (o lab roda sem rede). Prometer elevação de
+  # privilégio aqui seria o mesmo erro que a trilha G cometeu com NAT.
+  construtor: "Sei compor fluxos de vários passos com pipes e redirecionamento, tratar permissão e dono, filtrar e transformar texto, e diagnosticar processo e uso de disco."
   engenheiro: "Sei projetar, diagnosticar sob ambiguidade e otimizar."

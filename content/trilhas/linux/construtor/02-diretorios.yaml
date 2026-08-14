@@ -1,0 +1,351 @@
+id: linux-con-02-diretorios
+trilha: linux
+nivel: construtor
+ordem: 2
+titulo: "Permissão em diretório: r é a lista, x é a passagem"
+capacidade: "Sei diagnosticar um diretório em que os nomes aparecem e nada abre — e o contrário — e sei com que permissão um arquivo nasce."
+xp: 40
+prereqs: [linux-con-01-permissoes]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno
+    # Os arquivos nascem ANTES da restrição: com 0300 no diretório eu já não
+    # conseguiria criar nada dentro dele pelo nome.
+    mkdir -p "$BASE/plantao" "$BASE/arquivo-morto"
+    cat > "$BASE/plantao/escala.txt" <<'TXT'
+    28/07  Ana Ribeiro     08h-17h
+    29/07  Bruno Lima      08h-17h
+    30/07  Carla Souza     12h-21h
+    TXT
+    cat > "$BASE/arquivo-morto/chamado-4471.txt" <<'TXT'
+    Chamado 4471 - encerrado
+    Ramal 1003 estava com a senha demo. Trocada em 28/07.
+    Conferir se o backup de configs pegou a versao nova.
+    TXT
+    chown -R aluno:aluno "$BASE/plantao" "$BASE/arquivo-morto"
+    # 0600: r sem x — os nomes aparecem e nada abre.
+    chmod 0600 "$BASE/plantao"
+    # 0300: x sem r — não lista, mas abre pelo nome conhecido.
+    chmod 0300 "$BASE/arquivo-morto"
+
+ensina:
+  conceitos:
+    - id: r-em-diretorio-e-a-lista-de-nomes
+      titulo: "Em diretório, r autoriza LER A LISTA DE NOMES — e só isso"
+    - id: x-em-diretorio-e-atravessar
+      titulo: "Em diretório, x autoriza ATRAVESSAR: alcançar o que está dentro"
+    - id: umask-subtrai-na-criacao
+      titulo: "O umask não muda arquivo nenhum: ele tira bits do que ainda vai nascer"
+  comandos:
+    - umask
+
+ensino:
+  gancho: |
+    Dois chamados na mesma manhã, e os dois soam impossíveis.
+
+    O primeiro: "a pasta do plantão está lá, eu vejo o `escala.txt` quando
+    listo, mas quando tento abrir dá permissão negada. O arquivo está corrompido?"
+
+    O segundo é o inverso: "não consigo listar a pasta `arquivo-morto`, dá erro.
+    Mas o chamado 4471 diz que tem um `chamado-4471.txt` lá dentro, e se eu
+    digito o nome inteiro o arquivo **abre normalmente**. Como assim?"
+
+    Nenhum dos dois arquivos está corrompido, e ninguém está louco. Os dois
+    diretórios estão com meia permissão — um com a metade que lista, outro com
+    a metade que alcança.
+
+  objetivos:
+    - verbo: diagnosticar
+      texto: "diagnosticar um diretório em que os nomes aparecem e o conteúdo não abre"
+    - verbo: explicar
+      texto: "explicar por que um arquivo pode ser lido dentro de um diretório que não se lista"
+    - verbo: comparar
+      texto: "comparar o que r e x significam em arquivo e o que significam em diretório"
+    - verbo: prever
+      texto: "prever com que permissão um arquivo vai nascer, dado o umask"
+
+  modelo_mental: |
+    Os bits são os mesmos três de sempre. O que muda é que **um diretório não é
+    um arquivo: é uma tabela** que liga nomes a arquivos. E os bits falam sobre
+    a tabela, não sobre o que ela aponta.
+
+    | bit | em arquivo | em **diretório** |
+    |---|---|---|
+    | `r` | ler o conteúdo | ler **a lista de nomes** |
+    | `w` | alterar o conteúdo | criar, apagar e renomear entradas |
+    | `x` | executar | **atravessar**: alcançar o que está dentro |
+
+    Daí os dois chamados, que são só as duas metades soltas:
+
+    - **`r` sem `x`** — você lê a tabela e não atravessa. Os nomes aparecem;
+      nenhum deles leva a lugar nenhum. O `ls -l` fica esquisito de um jeito
+      revelador: ele consegue o nome pela tabela, e não consegue nem perguntar
+      o tamanho do arquivo.
+    - **`x` sem `r`** — você atravessa e não lê a tabela. Não dá para descobrir
+      o que existe ali, mas quem já sabe o nome passa direto. É assim que um
+      diretório fica, ao mesmo tempo, "invisível" e perfeitamente funcional.
+
+    A consequência prática, e é ela que resolve chamado: **para abrir
+    `/a/b/c.txt` você precisa de `x` em `/`, em `/a` e em `/a/b`** — e não
+    precisa de `r` em nenhum deles. `r` só entra quando você quer *descobrir*
+    que o `c.txt` existe.
+
+    ### De que permissão um arquivo nasce
+
+    Ninguém escolhe a permissão na hora de criar. O sistema parte de um valor
+    fixo — **666 para arquivo, 777 para diretório** — e o `umask` **subtrai**
+    dele. É uma máscara do que NÃO passa:
+
+    | umask | arquivo nasce | diretório nasce |
+    |---|---|---|
+    | `022` (padrão) | 666 − 022 = **644** | 777 − 022 = **755** |
+    | `077` | 666 − 077 = **600** | 777 − 077 = **700** |
+
+    Repare que arquivo nunca nasce executável, nem com `umask 000`: o 666 já
+    entra sem o bit `x`. Ter de dar `chmod +x` em todo script novo não é
+    esquecimento do sistema, é essa regra.
+
+    E o `umask` **não muda nada do que já existe** — ele vale para o próximo
+    arquivo. Quem conserta o que já está no disco é o `chmod`.
+
+  anatomia:
+    - linha: "chmod 700 plantao"
+      partes:
+        - trecho: "chmod"
+          papel: comando
+          explica: "o mesmo de sempre; diretório não tem comando próprio"
+        - trecho: "7"
+          papel: argumento
+          explica: "dono: 4+2+1 — lista (r), altera entradas (w) e atravessa (x)"
+        - trecho: "0"
+          papel: argumento
+          explica: "grupo: nada. Nem lista, nem atravessa"
+        - trecho: "plantao"
+          papel: argumento
+          explica: "o diretório. Sem `-R`, muda só ele — o que está dentro fica como está"
+    - linha: "umask 077"
+      partes:
+        - trecho: "umask"
+          papel: comando
+          explica: "embutido do shell: vale desta linha em diante, nesta sessão"
+        - trecho: "077"
+          papel: argumento
+          explica: "a máscara do que NÃO passa: zero fecha nada para o dono, 77 tira tudo de grupo e outros"
+
+  demonstracao:
+    - comando: "stat -c '%A %a %n' plantao arquivo-morto"
+      saida: |-2
+        drw------- 600 plantao
+        d-wx------ 300 arquivo-morto
+      nota: "O `d` na frente diz que é diretório. Um está `rw-` (lista, não atravessa), o outro `-wx` (atravessa, não lista). Cada um tem metade do que precisaria."
+    - comando: "ls plantao"
+      saida: |-2
+        escala.txt
+      nota: "O nome aparece — e é isso que faz o chamado parecer maluco. `r` está lá, então a lista de nomes é legível."
+    - comando: "ls -l plantao"
+      saida: |-2
+        ls: cannot access 'plantao/escala.txt': Permission denied
+        total 0
+        -????????? ? ? ? ?            ? escala.txt
+      nota: "Aqui a metade que falta fica visível: o `ls` tem o NOME, que veio da tabela, e não consegue nem perguntar o tamanho ou a data. Sem `x` ele não alcança o arquivo para dar um stat. Uma linha de interrogações é a assinatura de r sem x."
+    - comando: "cat plantao/escala.txt"
+      saida: |-2
+        cat: plantao/escala.txt: Permission denied
+      nota: "E abrir, não abre. O arquivo está intacto: quem recusa é o diretório no caminho, não ele."
+    - comando: "ls arquivo-morto"
+      saida: |-2
+        ls: cannot open directory 'arquivo-morto': Permission denied
+      nota: "O caso oposto, e repare que a mensagem é outra: `cannot open directory`. Sem `r` não há lista para ler."
+    - comando: "cat arquivo-morto/chamado-4471.txt"
+      saida: |-2
+        Chamado 4471 - encerrado
+        Ramal 1003 estava com a senha demo. Trocada em 28/07.
+        Conferir se o backup de configs pegou a versao nova.
+      nota: "E no entanto o arquivo abre inteiro. Com `x` você atravessa; o que faltava era só o direito de descobrir que ele existia. Quem sabe o nome, passa."
+    - comando: "umask"
+      saida: |-2
+        0022
+      nota: "O valor herdado da sessão. 0022 é o padrão de quase toda distribuição."
+    - comando: "mkdir novos-a && touch novos-a/relatorio.txt && stat -c '%a %n' novos-a novos-a/relatorio.txt"
+      saida: |-2
+        755 novos-a
+        644 novos-a/relatorio.txt
+      nota: "755 e 644: é o 777 e o 666 menos a máscara 022. Ninguém digitou permissão nenhuma — nasceram assim."
+    - comando: "umask 077 && mkdir novos-b && touch novos-b/relatorio.txt && stat -c '%a %n' novos-b novos-b/relatorio.txt"
+      saida: |-2
+        700 novos-b
+        600 novos-b/relatorio.txt
+      nota: "Mesma sequência, máscara nova: 700 e 600. E o `novos-a` continua 755 — o umask não voltou atrás para consertar o que já tinha nascido."
+
+  pratica_guiada:
+    - instrucao: "Leia a permissão dos dois diretórios do chamado."
+      modelo: "stat -c '%A %a %n' ____ ____"
+      resposta: "stat -c '%A %a %n' plantao arquivo-morto"
+    - instrucao: "O arquivo do chamado 4471 você já sabe o nome. Leia-o SEM mexer na permissão do diretório."
+      modelo: "cat ____/chamado-4471.txt"
+      resposta: "cat arquivo-morto/chamado-4471.txt"
+    - instrucao: "Devolva ao diretório do plantão as três permissões do dono, e nada para o resto."
+      modelo: "chmod ____ plantao"
+      resposta: "chmod 700 plantao"
+    - instrucao: "Feche a máscara para que o próximo arquivo nasça sem nada para grupo e outros."
+      modelo: "umask ____"
+      resposta: "umask 077"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Um diretório está `d--x------` e você é o dono. Existe lá dentro um `notas.txt`. O que acontece com `ls` e o que acontece com `cat notas.txt`?"
+      resposta: |
+        O `ls` falha com `cannot open directory`: sem `r` não há lista de nomes
+        a ler. O `cat notas.txt` **funciona**: `x` autoriza atravessar, e você
+        forneceu o nome que o `ls` não pôde te dar.
+    - tipo: diagnostico
+      pergunta: "`ls -l relatorios/` devolve uma linha `-????????? ? ? ? ? ? balanco.csv`. O que está errado, e onde?"
+      resposta: |
+        Falta `x` no diretório `relatorios/`. O nome veio da tabela, que é o que
+        o `r` autoriza; as interrogações são o `ls` dizendo que não conseguiu
+        dar `stat` no arquivo para descobrir tamanho, dono e data. O defeito é
+        do diretório, não do `balanco.csv` — conserte com `chmod` no diretório.
+    - tipo: transferencia
+      pergunta: "Você quer que uma pasta de configuração seja usável por um serviço que já sabe o caminho exato dos arquivos, mas que ninguém consiga descobrir o que existe lá dentro. Que permissão você dá, e por que ela funciona?"
+      resposta: |
+        `d--x------` (100) para o dono do serviço: só `x`. O serviço abre cada
+        arquivo pelo caminho completo, porque atravessar é tudo de que ele
+        precisa; e como falta `r`, `ls` não devolve a lista para ninguém. É
+        exatamente o segundo chamado da lição, usado de propósito.
+
+objetivo_md: |
+  Os dois diretórios do lab estão com meia permissão, cada um com uma metade
+  diferente. Em diretório, os bits querem dizer outra coisa:
+
+  | bit | em diretório | o sintoma quando falta |
+  |---|---|---|
+  | `r` | ler a lista de nomes | `ls: cannot open directory` |
+  | `w` | criar, apagar, renomear entradas | `Permission denied` ao criar |
+  | `x` | atravessar até o conteúdo | nomes aparecem, nada abre; `ls -l` só interrogações |
+
+  E o que nasce depois obedece à máscara: **arquivo parte de 666, diretório de
+  777**, e o `umask` subtrai.
+
+  ### Sua tarefa
+
+  1. **Antes de consertar nada**, recupere o conteúdo do chamado encerrado:
+     copie `arquivo-morto/chamado-4471.txt` para `~/recuperado.txt`. Você não
+     consegue listar o diretório — mas sabe o nome, e nesta lição isso basta.
+  2. Devolva a `plantao/` e a `arquivo-morto/` a permissão cheia **do dono**, e
+     nada para grupo e outros. É o `700` nos dois.
+  3. Ajuste a máscara desta sessão para que o próximo arquivo nasça fechado, e
+     então crie `~/novos/` com um `relatorio.txt` vazio dentro. Os dois têm de
+     **nascer** já fechados: `700` no diretório e `600` no arquivo — sem um
+     `chmod` depois para consertar.
+
+  > O passo 1 é o que prova que você entendeu o segundo chamado. Se tentar
+  > listar primeiro, o `ls` recusa; passe direto ao nome do arquivo.
+
+verificar:
+  - descricao: "o conteúdo do chamado 4471 foi recuperado em ~/recuperado.txt"
+    script: |
+      #!/bin/bash
+      ALVO=/home/aluno/recuperado.txt
+      if [ ! -f "$ALVO" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/recuperado.txt","dica_diagnostica":"o ls do diretorio recusa, mas cat com o nome completo passa: o x autoriza atravessar"}'
+        exit 1
+      fi
+      if ! grep -q 'Chamado 4471' "$ALVO"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o recuperado.txt existe mas nao tem o conteudo do chamado","dica_diagnostica":"copie o arquivo de dentro do arquivo-morto/, nao crie um arquivo novo"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "plantao/ e arquivo-morto/ estão 700"
+    script: |
+      #!/bin/bash
+      FALTOU=""
+      for d in plantao arquivo-morto; do
+        MODO=$(stat -c %a "/home/aluno/$d")
+        [ "$MODO" = "700" ] || FALTOU="$FALTOU $d=$MODO"
+      done
+      if [ -n "$FALTOU" ]; then
+        echo "modo atual:$FALTOU"
+        echo 'DEVLAB_JSON:{"mensagem":"algum dos dois diretorios ainda nao esta 700","dica_diagnostica":"700 = dono com r+w+x (lista, altera e atravessa) e zero para grupo e outros"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "~/novos/ nasceu 700 e o relatorio.txt nasceu 600"
+    script: |
+      #!/bin/bash
+      DIR=/home/aluno/novos
+      ARQ=$DIR/relatorio.txt
+      if [ ! -d "$DIR" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a pasta ~/novos nao existe","dica_diagnostica":"ajuste o umask ANTES de criar: o umask so vale para o que nasce depois dele"}'
+        exit 1
+      fi
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"falta o ~/novos/relatorio.txt","dica_diagnostica":"crie o arquivo vazio dentro da pasta nova"}'
+        exit 1
+      fi
+      MD=$(stat -c %a "$DIR"); MA=$(stat -c %a "$ARQ")
+      if [ "$MD" != "700" ] || [ "$MA" != "600" ]; then
+        echo "diretorio=$MD arquivo=$MA (esperado 700 e 600)"
+        echo 'DEVLAB_JSON:{"mensagem":"a pasta ou o arquivo nasceram abertos demais","dica_diagnostica":"777-077=700 e 666-077=600. Rode umask 077 antes de criar; se ja criou, apague e refaca com a mascara certa."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "o escala.txt continua onde estava e intacto"
+    script: |
+      #!/bin/bash
+      # O conserto é de permissão. Mover ou recriar o arquivo para "resolver"
+      # o acesso passaria nos checks acima sem ter entendido o problema.
+      grep -q 'Ana Ribeiro' /home/aluno/plantao/escala.txt || {
+        echo 'DEVLAB_JSON:{"mensagem":"o plantao/escala.txt sumiu ou mudou","dica_diagnostica":"o arquivo nunca esteve com defeito: quem recusava era o diretorio. Use Resetar lab e conserte so com chmod."}'
+        exit 1
+      }
+      exit 0
+
+dicas:
+  - "O segundo diretório é o que trava a maioria: você não consegue `ls`, e é justamente por isso que a tarefa te deu o nome do arquivo pronto. Tente `cat arquivo-morto/chamado-4471.txt` e veja o que acontece antes de mexer em qualquer permissão."
+  - "São quatro passos: copiar o arquivo pelo nome, `chmod 700` nos dois diretórios, `umask 077`, e só então criar a pasta e o arquivo novos."
+  - "cp arquivo-morto/chamado-4471.txt ~/recuperado.txt && chmod 700 plantao arquivo-morto && umask 077 && mkdir ~/novos && touch ~/novos/relatorio.txt"
+
+erros_comuns:
+  - match: "cannot open directory"
+    digita: "ls arquivo-morto"
+    mensagem: "ls: cannot open directory 'arquivo-morto': Permission denied"
+    causa: "falta o bit r no diretório: não há autorização para ler a lista de nomes"
+    conserto: "se você já sabe o nome do arquivo, use-o direto; para poder listar, acrescente r ao diretório"
+    categoria: permissao
+  - match: "\\?\\?\\?\\?\\?\\?\\?\\?\\?"
+    digita: "ls -l plantao"
+    mensagem: "-????????? ? ? ? ? ? escala.txt"
+    causa: "o diretório tem r e não tem x: o nome veio da tabela, mas sem atravessar não dá para dar stat no arquivo"
+    conserto: "acrescente o bit x ao diretório e liste de novo"
+    categoria: permissao
+  - match: "cd: .*Permission denied"
+    digita: "cd plantao"
+    mensagem: "bash: cd: plantao: Permission denied"
+    causa: "entrar num diretório é atravessá-lo, e isso é o bit x — que está faltando"
+    conserto: "acrescente x ao diretório; r sozinho lista os nomes e não deixa entrar"
+    categoria: permissao
+  - match: "Operation not permitted"
+    digita: "umask 077 configs/ramais.txt"
+    mensagem: "bash: umask: 077 configs/ramais.txt: invalid file mode"
+    causa: "o umask não recebe arquivo: ele é uma máscara da sessão, aplicada ao que ainda vai nascer"
+    conserto: "para mudar arquivo existente use `chmod`; o `umask` só afeta criação futura"
+    categoria: ferramenta_errada
+
+cards_revisao:
+  - r-em-diretorio-e-a-lista-de-nomes
+  - x-em-diretorio-e-atravessar
+  - umask-subtrai-na-criacao
+
+solucao_referencia: |
+  cd /home/aluno
+  cp arquivo-morto/chamado-4471.txt /home/aluno/recuperado.txt
+  chmod 700 plantao arquivo-morto
+  umask 077
+  mkdir /home/aluno/novos
+  touch /home/aluno/novos/relatorio.txt

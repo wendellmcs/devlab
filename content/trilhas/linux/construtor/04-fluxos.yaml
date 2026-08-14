@@ -1,0 +1,397 @@
+id: linux-con-04-fluxos
+trilha: linux
+nivel: construtor
+ordem: 4
+titulo: "Dois fluxos de saída, e o cano que liga um comando ao outro"
+capacidade: "Sei separar o que um comando informa do que ele reclama, juntar os dois quando preciso, e encadear comandos com pipe."
+xp: 40
+prereqs: [linux-con-03-dono]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno
+    mkdir -p "$BASE/relatorios"
+    # A rotina de conferência do plantão. Ela separa o que é informação do que
+    # é problema — informação vai para a saída padrão, problema vai para a de
+    # erro. É o que um programa bem-comportado faz, e é o que a lição explora.
+    cat > "$BASE/scripts/conferir-ramais.sh" <<'SH'
+    #!/bin/bash
+    # Confere os ramais do configs/ramais.txt contra a política do plantão.
+    echo "ramal 1001 ok"
+    echo "ramal 1002 ok"
+    echo "ramal 1003 SEM SENHA PROPRIA" >&2
+    echo "ramal 1004 ok"
+    echo "ramal 1005 ok"
+    echo "ramal 9911 GATEWAY SEM RESPOSTA" >&2
+    SH
+    chmod 0755 "$BASE/scripts/conferir-ramais.sh"
+    chown aluno:aluno "$BASE/scripts/conferir-ramais.sh" "$BASE/relatorios"
+
+ensina:
+  conceitos:
+    - id: sao-dois-fluxos-de-saida
+      titulo: "Todo comando tem DUAS saídas: a informação (1) e a reclamação (2)"
+    - id: ordem-do-redirecionamento-importa
+      titulo: "`2>&1` copia o destino que o 1 tem NAQUELE momento — por isso vem depois"
+    - id: pipe-liga-saida-a-entrada
+      titulo: "O pipe liga a saída de um comando à entrada do próximo, sem passar por disco"
+  # `tee` fica DE PROPÓSITO sem dono, como o `python3`. Ele é ensinado aqui,
+  # mas reivindicá-lo quebraria o grafo: `pbx-eng-04-esl-cdr` e
+  # `pbx-eng-06-capstone` já o usam em `solucao_referencia`, que é varrida, e a
+  # trilha F não declara prereq de Linux por decisão do PRD §7 — quem entra
+  # direto no PBX não pode ser obrigado a fazer o Construtor de Linux antes.
+  # Ver a decisão 71 em docs/DESIGN-LINUX.md.
+  comandos: []
+
+ensino:
+  gancho: |
+    A rotina de conferência do plantão roda e cospe seis linhas na tela. Quatro
+    dizem que está tudo bem, duas apontam problema. Você quer mandar **só as
+    duas** para o chamado, e guardar as seis para o histórico.
+
+    A primeira tentativa é a que todo mundo faz:
+
+    ```
+    ./scripts/conferir-ramais.sh > problemas.txt
+    ```
+
+    E o arquivo sai com as quatro linhas de "ok" — justamente as que você não
+    queria. As duas que interessam continuaram aparecendo na tela, como se o
+    redirecionamento não tivesse valido para elas.
+
+    Não valeu mesmo. Elas não estavam na saída que você redirecionou.
+
+  objetivos:
+    - verbo: explicar
+      texto: "explicar por que uma mensagem de erro escapa de um redirecionamento comum"
+    - verbo: executar
+      texto: "separar, descartar ou juntar a saída padrão e a saída de erro"
+    - verbo: prever
+      texto: "prever o efeito de `> arq 2>&1` e o de `2>&1 > arq`, que não são a mesma coisa"
+    - verbo: construir
+      texto: "encadear comandos com pipe, e gravar no meio do caminho com `tee`"
+
+  modelo_mental: |
+    Todo processo nasce com três canais abertos, e cada um tem um número:
+
+    | nº | nome | serve para |
+    |---|---|---|
+    | 0 | entrada padrão (`stdin`) | de onde ele lê |
+    | 1 | **saída padrão** (`stdout`) | o **resultado**: o que você pediu |
+    | 2 | **saída de erro** (`stderr`) | a **reclamação**: o que deu errado |
+
+    Os dois de saída chegam à sua tela juntos, e é por isso que parecem um só.
+    São dois, e a separação existe por um motivo prático: assim dá para mandar
+    o resultado para um arquivo e continuar **vendo** os erros.
+
+    O `>` sozinho quer dizer `1>`. Ele mexe no canal 1 e não encosta no 2 — é
+    exatamente o que aconteceu no gancho.
+
+    | escrita | efeito |
+    |---|---|
+    | `cmd > arq` | resultado no arquivo, erro na tela |
+    | `cmd 2> arq` | resultado na tela, erro no arquivo |
+    | `cmd > arq 2>&1` | **os dois** no arquivo |
+    | `cmd 2> /dev/null` | resultado na tela, erro **descartado** |
+
+    O `/dev/null` é um arquivo especial que aceita tudo e não guarda nada. É o
+    destino de quem quer silêncio, não de quem quer resolver.
+
+    ### Por que `2>&1` vem depois, e não antes
+
+    Leia `2>&1` como **"faça o canal 2 apontar para onde o canal 1 aponta
+    AGORA"**. É uma cópia do destino, tirada no instante em que a linha é lida,
+    da esquerda para a direita. Não é um vínculo permanente.
+
+    - `cmd > arq 2>&1` — primeiro o 1 vai para o arquivo; depois o 2 copia
+      "arquivo". **Os dois no arquivo.**
+    - `cmd 2>&1 > arq` — primeiro o 2 copia o destino atual do 1, que ainda é a
+      **tela**; só depois o 1 vai para o arquivo. Resultado: erro na tela,
+      resultado no arquivo. É o inverso do que quase todo mundo espera ao
+      escrever isso.
+
+    ### O pipe
+
+    O `|` liga a **saída padrão** do comando da esquerda à **entrada padrão** do
+    da direita. Nada toca o disco, e o canal 2 **não entra no cano** — erro
+    continua indo para a tela, o que é ótimo para depurar um encadeamento
+    comprido.
+
+    O `tee` é a derivação em T de um encanamento: ele **grava num arquivo e
+    deixa a água seguir** pelo cano. Serve para guardar o meio de uma sequência
+    sem interrompê-la.
+
+  anatomia:
+    - linha: "./scripts/conferir-ramais.sh > relatorios/completo.txt 2>&1"
+      partes:
+        - trecho: ">"
+          papel: operador
+          explica: "atalho de `1>`: manda a saída padrão para o arquivo, sobrescrevendo"
+        - trecho: "relatorios/completo.txt"
+          papel: argumento
+          explica: "o destino do canal 1"
+        - trecho: "2>&1"
+          papel: operador
+          explica: "faz o canal 2 apontar para onde o 1 aponta agora — o arquivo. Tem de vir DEPOIS"
+    - linha: "./scripts/conferir-ramais.sh 2>/dev/null | tee relatorios/ok.txt | wc -l"
+      partes:
+        - trecho: "2>/dev/null"
+          papel: operador
+          explica: "descarta a reclamação; só o resultado segue adiante"
+        - trecho: "|"
+          papel: operador
+          explica: "liga a saída padrão da esquerda à entrada padrão da direita"
+        - trecho: "tee"
+          papel: comando
+          explica: "grava o que passa por ele no arquivo E devolve para o cano"
+        - trecho: "wc"
+          papel: comando
+          explica: "ponta final do cano: recebe pela entrada padrão o que o tee deixou passar"
+
+  demonstracao:
+    - comando: "./scripts/conferir-ramais.sh"
+      saida: |-2
+        ramal 1001 ok
+        ramal 1002 ok
+        ramal 1003 SEM SENHA PROPRIA
+        ramal 1004 ok
+        ramal 1005 ok
+        ramal 9911 GATEWAY SEM RESPOSTA
+      nota: "As seis linhas, misturadas na tela. Olhando assim, não dá para saber quais vieram por qual canal — e é essa mistura que engana."
+    - comando: "./scripts/conferir-ramais.sh 2>/dev/null"
+      saida: |-2
+        ramal 1001 ok
+        ramal 1002 ok
+        ramal 1004 ok
+        ramal 1005 ok
+      nota: "Mandando o canal 2 para o lixo, sobra o canal 1: só as quatro linhas de \"ok\". Estas são o RESULTADO."
+    - comando: "./scripts/conferir-ramais.sh 1>/dev/null"
+      saida: |-2
+        ramal 1003 SEM SENHA PROPRIA
+        ramal 9911 GATEWAY SEM RESPOSTA
+      nota: "O inverso: descartando o canal 1, sobram as duas de problema. Eram estas que escapavam do `>` no gancho."
+    - comando: "./scripts/conferir-ramais.sh > relatorios/so-resultado.txt; cat relatorios/so-resultado.txt"
+      saida: |-2
+        ramal 1003 SEM SENHA PROPRIA
+        ramal 9911 GATEWAY SEM RESPOSTA
+        ramal 1001 ok
+        ramal 1002 ok
+        ramal 1004 ok
+        ramal 1005 ok
+      nota: "Leia esta saída em duas partes: as **duas primeiras** linhas apareceram na TELA enquanto o script rodava (canal 2, que o `>` não pegou); as **quatro últimas** são o `cat` mostrando o que foi para o arquivo. É o problema do gancho, visto por inteiro."
+    - comando: "./scripts/conferir-ramais.sh > relatorios/tudo.txt 2>&1; cat relatorios/tudo.txt"
+      saida: |-2
+        ramal 1001 ok
+        ramal 1002 ok
+        ramal 1003 SEM SENHA PROPRIA
+        ramal 1004 ok
+        ramal 1005 ok
+        ramal 9911 GATEWAY SEM RESPOSTA
+      nota: "Com o `2>&1` DEPOIS do `>`, o arquivo levou as seis. Nada apareceu na tela enquanto rodava — não sobrou canal apontando para ela —, então tudo o que você lê aqui veio do `cat`."
+    - comando: "./scripts/conferir-ramais.sh 2>&1 > relatorios/invertido.txt; cat relatorios/invertido.txt"
+      saida: |-2
+        ramal 1003 SEM SENHA PROPRIA
+        ramal 9911 GATEWAY SEM RESPOSTA
+        ramal 1001 ok
+        ramal 1002 ok
+        ramal 1004 ok
+        ramal 1005 ok
+      nota: "A ordem trocada, e agora compare com o passo 4: **a saída é idêntica** à do `>` sozinho. Duas na tela, quatro no arquivo. Escrever `2>&1` antes do `>` não junta nada — o 2 copiou o destino do 1 quando ele ainda era a tela, e o `>` mudou só o 1 depois. É um `2>&1` que não faz absolutamente nada, e é o erro de digitação mais caro desta lição, porque ele não avisa."
+    - comando: "./scripts/conferir-ramais.sh 2>/dev/null | wc -l"
+      saida: |-2
+        4
+      nota: "O pipe: a saída do script virou entrada do `wc`, sem tocar o disco. Quatro linhas de resultado."
+    - comando: "./scripts/conferir-ramais.sh 2>/dev/null | tee relatorios/ok.txt | wc -l"
+      saida: |-2
+        4
+      nota: "Mesmo encadeamento, com uma derivação no meio. O `wc` continua recebendo tudo e imprimindo 4 — e o `relatorios/ok.txt` ficou gravado no caminho."
+    - comando: "cat relatorios/ok.txt"
+      saida: |-2
+        ramal 1001 ok
+        ramal 1002 ok
+        ramal 1004 ok
+        ramal 1005 ok
+      nota: "A prova de que o `tee` gravou sem tirar nada do cano. É o que ele faz: duplica, não desvia."
+
+  pratica_guiada:
+    - instrucao: "Rode a conferência descartando as reclamações, para ver só o resultado."
+      modelo: "./scripts/conferir-ramais.sh 2>____"
+      resposta: "./scripts/conferir-ramais.sh 2>/dev/null"
+    - instrucao: "Agora guarde APENAS as reclamações num arquivo."
+      modelo: "./scripts/conferir-ramais.sh ____ relatorios/problemas.txt"
+      resposta: "./scripts/conferir-ramais.sh 2> relatorios/problemas.txt"
+    - instrucao: "Guarde os dois canais no mesmo arquivo, na ordem em que saíram."
+      modelo: "./scripts/conferir-ramais.sh > relatorios/completo.txt ____"
+      resposta: "./scripts/conferir-ramais.sh > relatorios/completo.txt 2>&1"
+    - instrucao: "Conte as linhas de resultado sem gravar nada em disco."
+      modelo: "./scripts/conferir-ramais.sh 2>/dev/null ____ wc -l"
+      resposta: "./scripts/conferir-ramais.sh 2>/dev/null | wc -l"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "Você roda `./conferir.sh 2>&1 > saida.txt` e o terminal mostra as linhas de erro. Elas estão no `saida.txt`?"
+      resposta: |
+        Não. Quando o `2>&1` foi lido, o canal 1 ainda apontava para a tela —
+        então o 2 copiou "tela". Só depois o `> saida.txt` mudou o 1. O arquivo
+        ficou com o resultado, e o erro foi para a tela. Para os dois no
+        arquivo, o `2>&1` tem de vir **depois** do `>`.
+    - tipo: diagnostico
+      pergunta: "Um colega reclama: 'mandei a saída do comando para um arquivo e o erro continua sujando minha tela'. O que aconteceu e como resolver?"
+      resposta: |
+        Ele redirecionou só o canal 1, que é o que o `>` sozinho faz. A
+        mensagem estava no canal 2, que continuou na tela. Se ele quer os dois
+        no arquivo: `cmd > arq 2>&1`. Se quer só silêncio para o erro:
+        `cmd 2> /dev/null` — mas aí ele deixa de ver o problema, o que raramente
+        é o que se quer num diagnóstico.
+    - tipo: transferencia
+      pergunta: "Você precisa ver na tela o andamento de um comando demorado E guardar tudo num arquivo para anexar ao chamado, inclusive os erros. Como monta?"
+      resposta: |
+        `cmd 2>&1 | tee arquivo.log`. O `2>&1` junta a reclamação ao resultado
+        **antes** do pipe (o canal 2 não entra no cano sozinho); o `tee` grava
+        no arquivo e devolve para a tela. Um `> arquivo.log` simples te deixaria
+        sem acompanhar, e um `2> /dev/null` jogaria fora justamente o que o
+        chamado precisa.
+
+objetivo_md: |
+  O `scripts/conferir-ramais.sh` emite pelos **dois** canais: as linhas de "ok"
+  pela saída padrão, as de problema pela saída de erro. É por isso que um `>`
+  comum leva as erradas.
+
+  | escrita | resultado (1) | reclamação (2) |
+  |---|---|---|
+  | `cmd > arq` | arquivo | tela |
+  | `cmd 2> arq` | tela | arquivo |
+  | `cmd > arq 2>&1` | arquivo | arquivo |
+  | `cmd 2>&1 > arq` | arquivo | **tela** |
+  | `cmd 2>/dev/null` | tela | descartada |
+
+  ### Sua tarefa
+
+  Grave três relatórios em `~/relatorios/`, todos a partir do mesmo script:
+
+  1. `problemas.txt` — **somente** as duas linhas de problema. Nenhuma linha de
+     "ok" pode entrar.
+  2. `completo.txt` — as **seis** linhas, resultado e problema juntos, na ordem
+     em que saíram.
+  3. `ok.txt` **e** `quantos.txt` no mesmo comando: encadeie o script com o
+     `wc -l`, gravando as linhas de "ok" em `ok.txt` no meio do caminho e o
+     número final em `quantos.txt`. O `quantos.txt` tem de conter só o número.
+
+  > O passo 3 é o que o `tee` existe para resolver: gravar um ponto
+  > intermediário do encadeamento sem quebrá-lo. Descartar as reclamações antes
+  > do pipe é parte do serviço.
+
+verificar:
+  - descricao: "problemas.txt tem as duas linhas de problema e nenhuma de ok"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/problemas.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/problemas.txt","dica_diagnostica":"as linhas de problema saem pelo canal 2; redirecione o canal 2, nao o 1"}'
+        exit 1
+      fi
+      if grep -q ' ok$' "$ARQ"; then
+        echo "conteudo indevido: $(grep -c ' ok$' "$ARQ") linha(s) de ok"
+        echo 'DEVLAB_JSON:{"mensagem":"entraram linhas de ok no problemas.txt","dica_diagnostica":"o > sozinho pega o canal 1, que e justamente o das linhas de ok. Use 2> para pegar so a reclamacao."}'
+        exit 1
+      fi
+      N=$(grep -c 'SEM SENHA PROPRIA\|GATEWAY SEM RESPOSTA' "$ARQ")
+      if [ "$N" != "2" ]; then
+        echo "linhas de problema encontradas: $N (esperado 2)"
+        echo 'DEVLAB_JSON:{"mensagem":"o problemas.txt nao tem as duas linhas de problema","dica_diagnostica":"rode o script com 2> apontando para o arquivo"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "completo.txt tem as seis linhas, na ordem"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/completo.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/completo.txt","dica_diagnostica":"para juntar os dois canais num arquivo: > arquivo 2>&1"}'
+        exit 1
+      fi
+      N=$(grep -c . "$ARQ")
+      if [ "$N" != "6" ]; then
+        echo "linhas: $N (esperado 6)"
+        echo 'DEVLAB_JSON:{"mensagem":"o completo.txt nao tem as seis linhas","dica_diagnostica":"se vieram so 4, faltou o 2>&1; se vieram 2, voce redirecionou so o canal 2. E o 2>&1 tem de vir DEPOIS do >."}'
+        exit 1
+      fi
+      # A ordem importa: é ela que prova que os dois canais foram para o MESMO
+      # arquivo na mesma execução, e não dois arquivos concatenados depois.
+      if [ "$(head -1 "$ARQ")" != "ramal 1001 ok" ] || [ "$(tail -1 "$ARQ")" != "ramal 9911 GATEWAY SEM RESPOSTA" ]; then
+        echo "primeira: $(head -1 "$ARQ") | ultima: $(tail -1 "$ARQ")"
+        echo 'DEVLAB_JSON:{"mensagem":"as seis linhas estao fora da ordem em que o script as emitiu","dica_diagnostica":"junte os dois canais na MESMA execucao com > arquivo 2>&1, em vez de gravar dois arquivos e emendar"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "ok.txt tem as quatro linhas de ok, e só elas"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/ok.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/ok.txt","dica_diagnostica":"o tee grava no meio do cano: script | tee arquivo | wc -l"}'
+        exit 1
+      fi
+      N=$(grep -c ' ok$' "$ARQ"); T=$(grep -c . "$ARQ")
+      if [ "$N" != "4" ] || [ "$T" != "4" ]; then
+        echo "linhas de ok: $N | total: $T (esperado 4 e 4)"
+        echo 'DEVLAB_JSON:{"mensagem":"o ok.txt nao tem exatamente as quatro linhas de ok","dica_diagnostica":"descarte o canal 2 ANTES do pipe, com 2>/dev/null; o canal 2 nao entra no cano sozinho, mas se voce juntou com 2>&1 ele entra"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "quantos.txt tem o número de linhas de ok"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/quantos.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/quantos.txt","dica_diagnostica":"a ponta final do cano e o wc -l; mande a saida dele para o arquivo"}'
+        exit 1
+      fi
+      V=$(tr -d ' \n' < "$ARQ")
+      if [ "$V" != "4" ]; then
+        echo "conteudo: '$V' (esperado 4)"
+        echo 'DEVLAB_JSON:{"mensagem":"o quantos.txt nao contem 4","dica_diagnostica":"se deu 6, as reclamacoes entraram no cano; se deu 0, o wc leu de um lugar vazio. wc -l sem nome de arquivo le da entrada padrao."}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Rode `./scripts/conferir-ramais.sh 2>/dev/null` e depois `./scripts/conferir-ramais.sh 1>/dev/null`. Comparando as duas saídas você vê exatamente qual linha sai por qual canal — e aí fica claro qual número redirecionar em cada item da tarefa."
+  - "São três comandos. O primeiro usa `2>`, o segundo usa `>` seguido de `2>&1`, e o terceiro é um encadeamento com dois `|`: o script, o `tee` e o `wc -l`, com a saída final indo para o arquivo."
+  - "./scripts/conferir-ramais.sh 2> ~/relatorios/problemas.txt; ./scripts/conferir-ramais.sh > ~/relatorios/completo.txt 2>&1; ./scripts/conferir-ramais.sh 2>/dev/null | tee ~/relatorios/ok.txt | wc -l > ~/relatorios/quantos.txt"
+
+erros_comuns:
+  - match: "ambiguous redirect"
+    digita: "./scripts/conferir-ramais.sh 2> $DESTINO"
+    mensagem: "bash: $DESTINO: ambiguous redirect"
+    causa: "a variável do destino está vazia ou tem espaço, e o shell não sabe para qual arquivo apontar"
+    conserto: "ponha o destino entre aspas: `2> \"$DESTINO\"`, e confira se ela está preenchida"
+    categoria: sintaxe
+  - match: "No such file or directory"
+    digita: "./scripts/conferir-ramais.sh > relatorios/nova-pasta/saida.txt"
+    mensagem: "bash: relatorios/nova-pasta/saida.txt: No such file or directory"
+    causa: "o redirecionamento cria o ARQUIVO, nunca o diretório que o contém"
+    conserto: "crie o diretório antes com `mkdir -p`"
+    categoria: conceitual
+  - match: "command not found"
+    digita: "./scripts/conferir-ramais.sh | grep ok | tee"
+    mensagem: "bash: tee: command not found"
+    causa: "num sistema mínimo o `tee` pode não estar instalado; e sem argumento ele só copia para a tela, sem gravar"
+    conserto: "confirme com `which tee` e dê a ele o arquivo de destino: `tee arquivo.txt`"
+    categoria: ferramenta_errada
+
+cards_revisao:
+  - sao-dois-fluxos-de-saida
+  - ordem-do-redirecionamento-importa
+  - pipe-liga-saida-a-entrada
+
+solucao_referencia: |
+  cd /home/aluno
+  ./scripts/conferir-ramais.sh 2> /home/aluno/relatorios/problemas.txt
+  ./scripts/conferir-ramais.sh > /home/aluno/relatorios/completo.txt 2>&1
+  ./scripts/conferir-ramais.sh 2>/dev/null | tee /home/aluno/relatorios/ok.txt | wc -l > /home/aluno/relatorios/quantos.txt

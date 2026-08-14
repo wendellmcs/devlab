@@ -1,0 +1,437 @@
+id: linux-con-06-transformar
+trilha: linux
+nivel: construtor
+ordem: 6
+titulo: "Transformar: substituir texto, somar campos, trocar caracteres"
+capacidade: "Sei reescrever um arquivo com `sed`, calcular a partir de campos com `awk`, e converter caractere a caractere com `tr`."
+xp: 40
+prereqs: [linux-con-05-filtrar]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno
+    mkdir -p "$BASE/relatorios"
+    # O mesmo log da lição anterior. Reaproveitar o material é de propósito:
+    # aqui o aluno deixa de CONTAR linhas e passa a TRANSFORMAR o conteúdo
+    # delas, sobre um arquivo cujos números ele já conhece.
+    cat > "$BASE/logs/julho.log" <<'LOG'
+    2026-07-28 08:12:03 ramal=1001 destino=1002 status=ATENDIDA duracao=42
+    2026-07-28 08:15:47 ramal=1003 destino=9911 status=OCUPADO duracao=0
+    2026-07-28 08:19:02 ramal=1001 destino=9911 status=ATENDIDA duracao=210
+    2026-07-28 08:31:15 ramal=1002 destino=1005 status=ATENDIDA duracao=317
+    2026-07-28 08:44:51 ramal=1004 destino=9911 status=FALHA duracao=0
+    2026-07-28 09:02:11 ramal=1002 destino=1005 status=ATENDIDA duracao=88
+    2026-07-28 09:14:33 ramal=1001 destino=1004 status=NAO_ATENDIDA duracao=0
+    2026-07-28 09:31:58 ramal=1005 destino=1001 status=ATENDIDA duracao=125
+    2026-07-28 09:47:20 ramal=1004 destino=9911 status=FALHA duracao=0
+    2026-07-28 10:03:44 ramal=1001 destino=1002 status=ATENDIDA duracao=61
+    2026-07-28 10:22:09 ramal=1003 destino=1001 status=ATENDIDA duracao=19
+    2026-07-28 10:44:20 ramal=1005 destino=1001 status=ATENDIDA duracao=88
+    2026-07-28 11:07:35 ramal=1004 destino=9911 status=FALHA duracao=0
+    2026-07-28 11:19:58 ramal=1002 destino=1003 status=OCUPADO duracao=0
+    2026-07-28 11:38:12 ramal=1001 destino=1005 status=ATENDIDA duracao=154
+    2026-07-28 12:01:07 ramal=9911 destino=1001 status=ATENDIDA duracao=33
+    2026-07-28 12:44:39 ramal=1002 destino=1004 status=NAO_ATENDIDA duracao=0
+    2026-07-28 13:22:09 ramal=1001 destino=1003 status=ATENDIDA duracao=155
+    2026-07-28 13:51:44 ramal=1005 destino=9911 status=FALHA duracao=0
+    2026-07-28 14:10:26 ramal=1003 destino=1002 status=ATENDIDA duracao=77
+    2026-07-28 14:50:41 ramal=1001 destino=1002 status=ATENDIDA duracao=21
+    2026-07-28 15:12:55 ramal=1004 destino=1001 status=ATENDIDA duracao=96
+    2026-07-28 15:45:10 ramal=9911 destino=1005 status=FALHA duracao=0
+    2026-07-28 16:30:18 ramal=1002 destino=9911 status=ATENDIDA duracao=248
+    LOG
+    chown aluno:aluno "$BASE/logs/julho.log" "$BASE/relatorios"
+
+ensina:
+  conceitos:
+    - id: sed-nao-altera-o-arquivo-por-padrao
+      titulo: "O sed lê e IMPRIME o resultado; sem `-i` o arquivo original fica intacto"
+    - id: awk-quebra-a-linha-em-campos
+      titulo: "O awk parte cada linha em campos numerados e sabe fazer conta com eles"
+    - id: tr-opera-caractere-a-caractere
+      titulo: "O tr troca caractere por caractere — ele não enxerga palavra nem linha"
+  # Sem dono, e por decisão: `sed`, `awk` e `tr` já são usados em bloco visível
+  # por 9, 3 e 1 lições das trilhas F e G, que não declaram prereq de Linux
+  # (PRD §7). Ver a decisão 71 em docs/DESIGN-LINUX.md.
+  comandos: []
+
+ensino:
+  gancho: |
+    Três pedidos que a lição anterior não resolve, porque nenhum deles é
+    contar:
+
+    - **"O ramal 1003 foi renumerado para 1013. Refaça o log de julho."** Não é
+      filtrar linha: é reescrever texto dentro dela.
+    - **"Quanto tempo de conversa deu o dia?"** Não é contar linhas: é **somar**
+      um campo numérico.
+    - **"Me manda os ramais numa linha só, separados por vírgula, para eu colar
+      na planilha."** Não é nem filtrar nem somar: é trocar um caractere por
+      outro.
+
+    Filtrar e contar chegaram ao limite. Agora é transformar.
+
+  objetivos:
+    - verbo: executar
+      texto: "substituir texto num arquivo com `sed`, gerando um arquivo novo"
+    - verbo: construir
+      texto: "somar e comparar campos numéricos de um log com `awk`"
+    - verbo: comparar
+      texto: "escolher entre `sed`, `awk` e `tr` conforme a transformação pedida"
+    - verbo: prever
+      texto: "prever o efeito de uma substituição com e sem o modificador `g`"
+
+  modelo_mental: |
+    Três ferramentas, três granularidades. Escolher errado é o que faz o comando
+    ficar ilegível.
+
+    | ferramenta | enxerga | serve para |
+    |---|---|---|
+    | `tr` | **um caractere** | trocar, apagar ou espremer caracteres |
+    | `sed` | **uma linha** de texto | substituir trechos, apagar linhas |
+    | `awk` | uma linha **partida em campos** | calcular, comparar, formatar |
+
+    ### `sed` — o substituidor
+
+    A forma que resolve quase tudo é `s/procura/troca/`:
+
+    ```
+    sed 's/1003/1013/' logs/julho.log
+    ```
+
+    Duas coisas surpreendem quem começa:
+
+    1. **Ele não altera o arquivo.** Lê, transforma e **imprime na saída
+       padrão** — o original fica intacto. Para guardar, redirecione para outro
+       arquivo. A opção `-i` altera no lugar, e é a que apaga o seu trabalho se
+       o padrão estiver errado; num servidor, gere o novo arquivo e confira
+       antes.
+    2. **Sem o `g` ele troca só a PRIMEIRA ocorrência de cada linha.** O `g` de
+       *global* quer dizer "todas as desta linha", não "todas as do arquivo" —
+       o `sed` já percorre o arquivo inteiro de qualquer jeito.
+
+    `s/x/y/g` é o hábito seguro: se houver uma ocorrência só, o `g` não faz
+    diferença; se houver duas, ele é a diferença entre certo e errado.
+
+    ### `awk` — o que sabe contar
+
+    O `awk` parte cada linha em campos e os numera: `$1`, `$2`, … e `$0` é a
+    linha inteira. O separador padrão é espaço, e `-F` troca por outro — é o
+    mesmo papel do `-d` do `cut`.
+
+    O programa tem a forma `padrão { ação }`, e cada metade é opcional:
+
+    | escrita | faz |
+    |---|---|
+    | `'{print $3}'` | ação sem padrão: vale para **toda** linha |
+    | `'$2 > 100'` | padrão sem ação: imprime a linha inteira quando for verdade |
+    | `'$2 > 100 {print $1}'` | as duas: filtra e escolhe o que sai |
+    | `'{s += $2} END {print s}'` | `END` roda **uma vez, no fim** — é onde o total sai |
+
+    O `END` é o que separa o `awk` de tudo o que veio antes nesta trilha: ele
+    guarda estado entre as linhas. `grep` e `cut` esquecem cada linha assim que
+    a entregam; o `awk` acumula.
+
+    ### `tr` — o mais simples, e o mais fácil de usar errado
+
+    `tr 'a' 'b'` troca o caractere `a` pelo `b`. Ele **não** entende palavra:
+    `tr 'abc' 'xyz'` não troca a palavra "abc" por "xyz" — troca todo `a` por
+    `x`, todo `b` por `y` e todo `c` por `z`, cada um por sua conta.
+
+    Ele também só lê da entrada padrão: não aceita nome de arquivo. Ou vem de
+    um pipe, ou de um `<`.
+
+    Duas opções que aparecem sempre: `-d` apaga os caracteres listados, e `-s`
+    espreme repetições consecutivas numa só.
+
+  anatomia:
+    - linha: "sed 's/1003/1013/g' logs/julho.log > logs/renumerado.log"
+      partes:
+        - trecho: "sed"
+          papel: comando
+          explica: "transforma linha a linha e imprime o resultado"
+        - trecho: "s"
+          papel: operador
+          explica: "o comando de substituição; a barra logo depois é só o separador escolhido"
+        - trecho: "1003"
+          papel: argumento
+          explica: "o que procurar — aceita expressão regular"
+        - trecho: "1013"
+          papel: argumento
+          explica: "o que pôr no lugar"
+        - trecho: "g"
+          papel: operador
+          explica: "todas as ocorrências DA LINHA, não só a primeira"
+    - linha: "awk -F'duracao=' '{soma += $2} END {print soma}' logs/julho.log"
+      partes:
+        - trecho: "-F'duracao='"
+          papel: opcao
+          explica: "o separador de campos; aqui um texto inteiro, o que faz `$2` ser o número da duração"
+        - trecho: "{soma += $2}"
+          papel: argumento
+          explica: "ação sem padrão: roda para toda linha, acumulando na variável"
+        - trecho: "END"
+          papel: operador
+          explica: "o bloco que roda uma única vez, depois da última linha"
+        - trecho: "{print soma}"
+          papel: argumento
+          explica: "a ação do END: imprimir o acumulado"
+
+  demonstracao:
+    - comando: "sed 's/1003/1013/' logs/julho.log | head -3"
+      saida: |-2
+        2026-07-28 08:12:03 ramal=1001 destino=1002 status=ATENDIDA duracao=42
+        2026-07-28 08:15:47 ramal=1013 destino=9911 status=OCUPADO duracao=0
+        2026-07-28 08:19:02 ramal=1001 destino=9911 status=ATENDIDA duracao=210
+      nota: "A substituição acontece e o resultado sai na TELA. Confira depois: o `logs/julho.log` continua com 1003 — o `sed` não escreveu no arquivo."
+    - comando: "grep -c '1003' logs/julho.log"
+      saida: |-2
+        5
+      nota: "A prova disso: o original segue com as cinco ocorrências. Sem redirecionar, o trabalho do `sed` se perde ao fim do comando."
+    - comando: "sed 's/=/: /' logs/julho.log | head -2"
+      saida: |-2
+        2026-07-28 08:12:03 ramal: 1001 destino=1002 status=ATENDIDA duracao=42
+        2026-07-28 08:15:47 ramal: 1003 destino=9911 status=OCUPADO duracao=0
+      nota: "Aqui o `g` faz falta e dá para ver: só o PRIMEIRO `=` de cada linha virou `: `. Os outros três continuam lá."
+    - comando: "sed 's/=/: /g' logs/julho.log | head -2"
+      saida: |-2
+        2026-07-28 08:12:03 ramal: 1001 destino: 1002 status: ATENDIDA duracao: 42
+        2026-07-28 08:15:47 ramal: 1003 destino: 9911 status: OCUPADO duracao: 0
+      nota: "Com o `g`, todos os quatro da linha. É esta a diferença — e note que sem `g` não houve erro nenhum, só um resultado incompleto."
+    - comando: "awk '{print $3, $6}' logs/julho.log | head -3"
+      saida: |-2
+        ramal=1001 duracao=42
+        ramal=1003 duracao=0
+        ramal=1001 duracao=210
+      nota: "Campos por número, separados por espaço: `$3` é o ramal, `$6` é a duração. A vírgula no `print` vira um espaço na saída."
+    - comando: "awk -F'duracao=' '{soma += $2} END {print soma}' logs/julho.log"
+      saida: |-2
+        1734
+      nota: "O total do dia em segundos. O `-F` fez `$2` ser só o número; o `END` imprimiu depois da última linha. Nenhuma outra ferramenta desta trilha sabe acumular assim."
+    - comando: "awk -F'duracao=' '$2 > 100' logs/julho.log"
+      saida: |-2
+        2026-07-28 08:19:02 ramal=1001 destino=9911 status=ATENDIDA duracao=210
+        2026-07-28 08:31:15 ramal=1002 destino=1005 status=ATENDIDA duracao=317
+        2026-07-28 09:31:58 ramal=1005 destino=1001 status=ATENDIDA duracao=125
+        2026-07-28 11:38:12 ramal=1001 destino=1005 status=ATENDIDA duracao=154
+        2026-07-28 13:22:09 ramal=1001 destino=1003 status=ATENDIDA duracao=155
+        2026-07-28 16:30:18 ramal=1002 destino=9911 status=ATENDIDA duracao=248
+      nota: "Padrão sem ação: quando a comparação é verdadeira, o awk imprime a linha inteira sozinho. Seis chamadas passaram de cem segundos."
+    - comando: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort -u | tr '\\n' ','"
+      saida: |-2
+        1001,1002,1003,1004,1005,9911,
+      nota: "O `tr` trocando a quebra de linha por vírgula: seis linhas viraram uma. Repare na vírgula sobrando no fim — o `tr` troca cada caractere que encontra, e a última linha também terminava com uma quebra."
+    - comando: "echo 'Ramal    1001     PCMA' | tr -s ' '"
+      saida: |-2
+        Ramal 1001 PCMA
+      nota: "O `-s` espreme repetições do caractere numa só. É como se normaliza espaçamento de arquivo de configuração antes de recortar com `cut`."
+
+  pratica_guiada:
+    - instrucao: "Veja como ficaria a renumeração, sem gravar nada ainda."
+      modelo: "sed 's/1003/____/g' logs/julho.log | head -3"
+      resposta: "sed 's/1003/1013/g' logs/julho.log | head -3"
+    - instrucao: "Some as durações do dia inteiro."
+      modelo: "awk -F'duracao=' '{soma += $2} ____ {print soma}' logs/julho.log"
+      resposta: "awk -F'duracao=' '{soma += $2} END {print soma}' logs/julho.log"
+    - instrucao: "Mostre só as chamadas que passaram de 100 segundos."
+      modelo: "awk -F'duracao=' '____' logs/julho.log"
+      resposta: "awk -F'duracao=' '$2 > 100' logs/julho.log"
+    - instrucao: "Junte a lista de ramais numa linha só, separada por vírgula."
+      modelo: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort -u | tr ____ ','"
+      resposta: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort -u | tr '\\n' ','"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você roda `sed 's/OCUPADO/BUSY/' log.txt`, a tela mostra a troca feita, e no dia seguinte o arquivo está como antes. O que aconteceu?"
+      resposta: |
+        Nada se perdeu e nada falhou: o `sed` **nunca** escreveu no arquivo. Ele
+        imprimiu o resultado na saída padrão, que foi para a tela e acabou ali.
+        Para guardar, `sed '…' log.txt > novo.txt`; para alterar no lugar,
+        `sed -i '…' log.txt` — e o `-i` só depois de conferir o resultado sem
+        ele.
+    - tipo: predicao
+      pergunta: "A linha é `ramal=1001 destino=1001`. O que `sed 's/1001/2001/'` devolve? E com `g` no fim?"
+      resposta: |
+        Sem `g`: `ramal=2001 destino=1001` — só a primeira ocorrência **da
+        linha**. Com `g`: `ramal=2001 destino=2001`. É por isso que `g` é o
+        hábito seguro numa renumeração: numa linha em que o ramal aparece duas
+        vezes, esquecê-lo troca metade e não avisa.
+    - tipo: transferencia
+      pergunta: "Você precisa da média de duração das chamadas atendidas, não da soma. Como monta a partir do que a lição mostrou?"
+      resposta: |
+        Filtre e acumule os dois números que a média precisa:
+        `grep 'status=ATENDIDA' log | awk -F'duracao=' '{s += $2; n++} END {print s/n}'`.
+        O `n++` conta as linhas que chegaram ao `awk`, e o `END` divide. Contar
+        no `END` com `NR` também funciona, mas `NR` contaria as linhas lidas
+        pelo `awk` — que aqui já vêm filtradas, então dá no mesmo; se o filtro
+        estivesse dentro do `awk`, não daria.
+
+objetivo_md: |
+  Três transformações que contar não resolve. Escolha a ferramenta pela
+  granularidade:
+
+  | ferramenta | enxerga | forma típica |
+  |---|---|---|
+  | `tr` | caractere | `tr 'a' 'b'` — só lê da entrada padrão |
+  | `sed` | linha | `sed 's/procura/troca/g'` — imprime, não grava |
+  | `awk` | campos da linha | `awk -F'sep' 'padrão {ação} END {ação}'` |
+
+  ### Sua tarefa
+
+  Grave em `~/relatorios/` (menos o item 1, que vai para `~/logs/`):
+
+  1. `~/logs/renumerado.log` — o log inteiro com **todas** as ocorrências de
+     `1003` trocadas por `1013`, inclusive quando o 1003 é destino. O
+     `logs/julho.log` original tem de continuar intacto.
+  2. `duracao-total.txt` — a **soma** de todos os campos `duracao=`, só o
+     número, numa linha.
+  3. `longas.txt` — as linhas **inteiras** das chamadas com duração **maior que
+     100** segundos.
+  4. `ramais-linha.txt` — os ramais que originaram chamada, ordenados, sem
+     repetição, **numa única linha separada por vírgula**.
+
+  > No item 1, o `g` não é opcional por sorte: use-o por hábito. E lembre que o
+  > `sed` imprime em vez de gravar — sem redirecionar, o item 1 não existe.
+
+verificar:
+  - descricao: "renumerado.log tem 1013 no lugar de 1003, e o original está intacto"
+    script: |
+      #!/bin/bash
+      NOVO=/home/aluno/logs/renumerado.log
+      ORIG=/home/aluno/logs/julho.log
+      if [ ! -f "$NOVO" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/logs/renumerado.log","dica_diagnostica":"o sed imprime o resultado; redirecione com > para criar o arquivo novo"}'
+        exit 1
+      fi
+      if [ "$(grep -c . "$NOVO")" != "24" ]; then
+        echo "linhas: $(grep -c . "$NOVO") (esperado 24)"
+        echo 'DEVLAB_JSON:{"mensagem":"o renumerado.log nao tem as 24 linhas do log original","dica_diagnostica":"o sed transforma todas as linhas e imprime todas; se vieram menos, algum filtro entrou no caminho"}'
+        exit 1
+      fi
+      if grep -q '1003' "$NOVO"; then
+        echo "ainda com 1003: $(grep -c '1003' "$NOVO") linha(s)"
+        echo 'DEVLAB_JSON:{"mensagem":"sobrou 1003 no renumerado.log","dica_diagnostica":"provavelmente faltou o g no fim da substituicao, ou o padrao pegou so o campo ramal="}'
+        exit 1
+      fi
+      if [ "$(grep -c '1013' "$NOVO")" != "5" ]; then
+        echo "ocorrencias de 1013: $(grep -c '1013' "$NOVO") (esperado 5)"
+        echo 'DEVLAB_JSON:{"mensagem":"o numero de 1013 no renumerado.log nao confere","dica_diagnostica":"eram 5 linhas com 1003 no log original, contando origem e destino"}'
+        exit 1
+      fi
+      if ! grep -q '1003' "$ORIG"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o log ORIGINAL foi alterado","dica_diagnostica":"voce usou sed -i, que grava no lugar. A tarefa pedia um arquivo NOVO: use > em vez de -i. Resete o lab e refaca."}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "duracao-total.txt tem a soma correta"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/duracao-total.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/duracao-total.txt","dica_diagnostica":"o awk acumula numa variavel e imprime no bloco END"}'
+        exit 1
+      fi
+      V=$(tr -d ' \n' < "$ARQ")
+      if [ "$V" != "1734" ]; then
+        echo "conteudo: '$V' (esperado 1734)"
+        if [ "$V" = "24" ]; then
+          echo 'DEVLAB_JSON:{"mensagem":"o arquivo tem 24, que e o numero de LINHAS, nao a soma","dica_diagnostica":"voce contou em vez de somar: acumule o campo com soma += $2 e imprima no END"}'
+        else
+          echo 'DEVLAB_JSON:{"mensagem":"a soma das duracoes nao confere","dica_diagnostica":"com -F duracao= o campo $2 vira so o numero. Sem o -F, $2 seria a hora da chamada."}'
+        fi
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "longas.txt tem as seis chamadas acima de 100 segundos"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/longas.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/longas.txt","dica_diagnostica":"no awk, um padrao sem acao imprime a linha inteira quando ele e verdadeiro"}'
+        exit 1
+      fi
+      N=$(grep -c . "$ARQ")
+      if [ "$N" != "6" ]; then
+        echo "linhas: $N (esperado 6)"
+        echo 'DEVLAB_JSON:{"mensagem":"o longas.txt nao tem as seis chamadas","dica_diagnostica":"a comparacao e MAIOR que 100, sem incluir o 100. Se vieram 24, o padrao nao filtrou nada."}'
+        exit 1
+      fi
+      # Nenhuma abaixo do corte pode ter entrado.
+      if awk -F'duracao=' '$2 <= 100' "$ARQ" | grep -q .; then
+        echo "entrou chamada de 100s ou menos:"; awk -F'duracao=' '$2 <= 100' "$ARQ" | head -3
+        echo 'DEVLAB_JSON:{"mensagem":"entraram chamadas com duracao menor ou igual a 100","dica_diagnostica":"confira o operador: > e maior que, >= incluiria o proprio 100"}'
+        exit 1
+      fi
+      if ! grep -q 'duracao=317' "$ARQ" || ! grep -q 'duracao=125' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"falta alguma das chamadas longas","dica_diagnostica":"as seis vao de 125 a 317 segundos; a linha tem de sair inteira"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "ramais-linha.txt tem os seis ramais numa linha só, separados por vírgula"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/ramais-linha.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/ramais-linha.txt","dica_diagnostica":"o tr troca a quebra de linha por virgula: tr '\\n' ','"}'
+        exit 1
+      fi
+      # Uma linha só: aceito com ou sem a vírgula sobrando no fim, porque as
+      # duas formas saem de uma solução correta.
+      NORM=$(tr -d ' \n' < "$ARQ" | sed 's/,$//')
+      if [ "$NORM" != "1001,1002,1003,1004,1005,9911" ]; then
+        echo "conteudo normalizado: '$NORM'"
+        if [ "$(grep -c . "$ARQ")" -gt 1 ]; then
+          echo 'DEVLAB_JSON:{"mensagem":"o arquivo tem mais de uma linha","dica_diagnostica":"faltou o tr trocando a quebra de linha pela virgula; o sort -u sozinho entrega uma linha por ramal"}'
+        else
+          echo 'DEVLAB_JSON:{"mensagem":"a lista de ramais nao confere","dica_diagnostica":"sao os seis ramais de ORIGEM, ordenados e sem repeticao: 1001 a 1005 e 9911"}'
+        fi
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Faça cada item primeiro SEM redirecionar, olhando a saída na tela. O `sed` e o `awk` imprimem por padrão — é assim que você confere a transformação antes de gravá-la, e é o hábito que evita destruir um log com um `-i` apressado."
+  - "O item 1 é `sed` com `s/…/…/g` redirecionado para o arquivo novo. Os itens 2 e 3 são `awk -F'duracao='` — um com `END`, o outro só com a comparação. O item 4 é o encadeamento de ramais da lição anterior com um `tr` no fim."
+  - "sed 's/1003/1013/g' ~/logs/julho.log > ~/logs/renumerado.log; awk -F'duracao=' '{soma += $2} END {print soma}' ~/logs/julho.log > ~/relatorios/duracao-total.txt; awk -F'duracao=' '$2 > 100' ~/logs/julho.log > ~/relatorios/longas.txt; cut -d' ' -f3 ~/logs/julho.log | cut -d= -f2 | sort -u | tr '\\n' ',' > ~/relatorios/ramais-linha.txt"
+
+erros_comuns:
+  - match: "unterminated `s' command"
+    digita: "sed 's/1003/1013' logs/julho.log"
+    mensagem: "sed: -e expression #1, char 10: unterminated `s' command"
+    causa: "faltou a barra final: a substituição tem três, delimitando procura e troca"
+    conserto: "feche o comando: `s/1003/1013/`"
+    categoria: sintaxe
+  - match: "awk: cmd. line:.*syntax error"
+    digita: "awk -F'duracao=' '{soma += $2} END print soma' logs/julho.log"
+    mensagem: "awk: cmd. line:1: syntax error at or near print"
+    causa: "o bloco do END também precisa de chaves; `END` sozinho não aceita a ação solta"
+    conserto: "envolva a ação: `END {print soma}`"
+    categoria: sintaxe
+  - match: "tr: extra operand"
+    digita: "tr '\\n' ',' relatorios/ramais.txt"
+    mensagem: "tr: extra operand 'relatorios/ramais.txt'"
+    causa: "o `tr` não aceita nome de arquivo: ele só lê da entrada padrão"
+    conserto: "alimente por pipe, ou com `<`: `tr '\\n' ',' < relatorios/ramais.txt`"
+    categoria: ferramenta_errada
+  - match: "sed: no input files"
+    digita: "sed -i 's/1003/1013/g'"
+    mensagem: "sed: no input files"
+    causa: "o `-i` altera arquivos no lugar e por isso exige que você diga quais; sem nome, não há o que alterar"
+    conserto: "informe o arquivo — e confira o resultado sem `-i` antes de gravar por cima"
+    categoria: flag_errada
+
+cards_revisao:
+  - sed-nao-altera-o-arquivo-por-padrao
+  - awk-quebra-a-linha-em-campos
+  - tr-opera-caractere-a-caractere
+
+solucao_referencia: |
+  cd /home/aluno
+  sed 's/1003/1013/g' logs/julho.log > logs/renumerado.log
+  awk -F'duracao=' '{soma += $2} END {print soma}' logs/julho.log > relatorios/duracao-total.txt
+  awk -F'duracao=' '$2 > 100' logs/julho.log > relatorios/longas.txt
+  cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort -u | tr '\n' ',' > relatorios/ramais-linha.txt

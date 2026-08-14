@@ -69,6 +69,27 @@ const Lab = z.object({
   setup: z.string().optional(),
   /** Injeção de falha, para labs quebra/conserta. Roda depois do setup. */
   break: z.string().optional(),
+  /**
+   * Obriga `valida-conteudo.py` a exercitar esta lição DENTRO do container.
+   *
+   * O validador tem dois motores, e escolhe pela imagem: `devlab/linux-base`
+   * roda numa árvore falsa no host, que é o que mantém `npm run valida`
+   * utilizável sem Docker. Essa árvore é uma ficção que só se sustenta
+   * enquanto o estado medido pela lição são arquivos sob `/home/aluno`.
+   *
+   * Passando disso ela não falha — ela MENTE, que é pior. A lição que lê
+   * `/etc/passwd` recebe o do host (medido: 27 linhas, sem o usuário `aluno`);
+   * a que roda `ps` vê os 60 processos da máquina de quem estuda em vez dos 6
+   * do lab; e a que mede dono não mede nada, porque `adapta()` apaga toda linha
+   * de `chown` — o script roda, o check aprova, e o veredito é sobre outro
+   * sistema. Nenhum desses casos produz erro.
+   *
+   * Quem declara `true` paga ~0,3 s de container e recebe um veredito real. O
+   * validador ainda tem uma guarda que reprova o build quando a lição usa uma
+   * dessas construções sem declarar isto — esquecer é o modo de falha provável,
+   * e ele é silencioso.
+   */
+  exige_container: z.boolean().default(false),
 })
 
 const Check = z

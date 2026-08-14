@@ -1,0 +1,408 @@
+id: linux-con-08-buscar
+trilha: linux
+nivel: construtor
+ordem: 8
+titulo: "Buscar na árvore: por nome, por tipo, por tamanho — e agir sobre o achado"
+capacidade: "Sei varrer uma árvore de diretórios combinando critérios, e encadear um comando sobre cada arquivo encontrado."
+xp: 40
+prereqs: [linux-con-07-processos]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno/arquivo
+    mkdir -p "$BASE/2026-05" "$BASE/2026-06" "$BASE/2026-07/sip" /home/aluno/relatorios
+    # Tamanhos EXATOS, escritos com head -c: a lição cobra corte por tamanho, e
+    # um arquivo de tamanho aproximado tornaria a resposta indeterminada.
+    escreve() { head -c "$2" /dev/zero | tr '\0' "$3" > "$1"; }
+    escreve "$BASE/2026-05/chamadas.log"  2000 a
+    escreve "$BASE/2026-05/sistema.log"  15000 b
+    escreve "$BASE/2026-05/notas.txt"      500 c
+    escreve "$BASE/2026-06/chamadas.log" 30000 d
+    escreve "$BASE/2026-06/sistema.log"    800 e
+    escreve "$BASE/2026-06/leia-me.txt"   1200 f
+    escreve "$BASE/2026-07/chamadas.log" 45000 g
+    escreve "$BASE/2026-07/sistema.log"    300 h
+    escreve "$BASE/2026-07/sip/trace.log" 20000 i
+    escreve "$BASE/2026-07/sip/README"     100 j
+    chown -R aluno:aluno "$BASE" /home/aluno/relatorios
+
+ensina:
+  conceitos:
+    - id: find-desce-a-arvore-inteira
+      titulo: "O find percorre a árvore inteira; o glob do shell só olha um nível"
+    - id: criterios-do-find-se-somam
+      titulo: "Critérios escritos em sequência se somam: todos têm de ser verdade"
+    - id: size-sem-sufixo-conta-blocos
+      titulo: "`-size +10` são BLOCOS de 512 bytes, não 10 bytes nem 10 kB"
+  # `find` já é usado em bloco visível por três lições da trilha F, que não
+  # declara prereq de Linux. Só o `xargs` fica com dono aqui. Ver a decisão 71.
+  comandos:
+    - xargs
+
+ensino:
+  gancho: |
+    O disco do servidor de gravações encheu. O chamado diz: "acha os logs
+    grandes e me manda a lista".
+
+    Você entra em `arquivo/` e roda o de sempre:
+
+    ```
+    ls *.log
+    ```
+
+    E recebe `No such file or directory`. Mas os logs estão lá — você acabou de
+    ver a pasta cheia deles.
+
+    Estão lá **um nível abaixo**, em `2026-05/`, `2026-06/`, `2026-07/`, e um
+    deles ainda mais fundo, em `2026-07/sip/`. O `*` do shell não desce: ele
+    expande no diretório em que você está e mais nada.
+
+    Descer é trabalho de outra ferramenta.
+
+  objetivos:
+    - verbo: executar
+      texto: "varrer uma árvore inteira procurando arquivos por nome"
+    - verbo: construir
+      texto: "combinar critérios de nome, tipo e tamanho numa busca só"
+    - verbo: explicar
+      texto: "explicar por que `-size +10` não quer dizer 10 bytes"
+    - verbo: adaptar
+      texto: "encadear um comando sobre cada arquivo encontrado, com `-exec` ou `xargs`"
+
+  modelo_mental: |
+    O `find` **caminha** pela árvore. Ele começa no diretório que você indicar,
+    entra em cada subdiretório, e testa **cada arquivo** contra os critérios.
+
+    ```
+    find <onde> <critérios> <ação>
+    ```
+
+    A diferença para o glob é essa: `*.log` é expandido pelo **shell**, num
+    nível só, antes de o comando rodar. O `find` recebe o caminho e desce ele
+    mesmo — por isso o padrão vai **entre aspas**, para o shell não tentar
+    expandi-lo antes.
+
+    | critério | casa |
+    |---|---|
+    | `-name '*.log'` | nome batendo com o padrão (respeita maiúsculas) |
+    | `-iname '*.LOG'` | idem, ignorando maiúsculas |
+    | `-type f` / `-type d` | arquivo comum / diretório |
+    | `-size +10k` | **maior** que 10 kB (`-` seria menor, sem sinal é exato) |
+    | `-mtime -7` | modificado nos últimos 7 dias |
+
+    **Critérios escritos em sequência se somam**: `find . -name '*.log' -size +10k`
+    devolve o que é `.log` **e** maior que 10 kB. Não existe vírgula nem `and`
+    — a justaposição já quer dizer isso.
+
+    ### A pegadinha do `-size`
+
+    O número do `-size` tem uma unidade, e **quando você não escreve nenhuma, a
+    unidade é bloco de 512 bytes** — não byte, não kilobyte.
+
+    | escrita | quer dizer |
+    |---|---|
+    | `-size +10` | mais de 10 **blocos** = mais de 5120 bytes |
+    | `-size +10c` | mais de 10 **bytes** (`c` de *characters*) |
+    | `-size +10k` | mais de 10 **kB** |
+    | `-size +10M` | mais de 10 MB |
+
+    Medido nesta árvore: `-size +1` devolve **6** arquivos e `-size +1k`
+    devolve **5**. Nenhum dos dois dá erro; um dos dois responde outra
+    pergunta.
+
+    ### Agir sobre o que achou
+
+    Achar é metade. Duas formas de rodar um comando sobre cada resultado:
+
+    ```
+    find arquivo -name '*.log' -exec stat -c '%s %n' {} \;
+    find arquivo -name '*.log' | xargs wc -c
+    ```
+
+    - **`-exec`** é do próprio `find`. O `{}` é substituído pelo caminho
+      achado, e o `\;` marca o fim do comando (a barra existe para o shell não
+      comer o ponto-e-vírgula). Com `+` no lugar do `\;`, ele junta vários
+      caminhos numa chamada só, o que é bem mais rápido.
+    - **`xargs`** monta a linha de comando a partir do que chega pela entrada
+      padrão. É a resposta para "por que `find … | wc -c` não funciona": o `wc`
+      receberia a **lista de nomes** como texto, e contaria os bytes da lista,
+      não dos arquivos. O `xargs` transforma essa lista em **argumentos**.
+
+    Essa distinção vale para muita coisa: um comando que espera *argumento* não
+    lê da entrada padrão, e é o `xargs` que faz a ponte entre os dois mundos.
+
+  anatomia:
+    - linha: "find arquivo -type f -name '*.log' -size +10k"
+      partes:
+        - trecho: "find"
+          papel: comando
+          explica: "percorre a árvore a partir do caminho dado"
+        - trecho: "arquivo"
+          papel: argumento
+          explica: "onde começar a descer; sem isto, o find nem sabe por onde andar"
+        - trecho: "-type f"
+          papel: opcao
+          explica: "só arquivo comum — descarta diretório, link e o resto"
+        - trecho: "-name '*.log'"
+          papel: opcao
+          explica: "o padrão de nome, ENTRE ASPAS para o shell não expandi-lo antes"
+        - trecho: "-size +10k"
+          papel: opcao
+          explica: "maior que 10 kB. Os três critérios juntos: todos têm de valer"
+    - linha: "find arquivo -name '*.log' | xargs wc -c"
+      partes:
+        - trecho: "|"
+          papel: operador
+          explica: "a lista de caminhos sai pela saída padrão do find"
+        - trecho: "xargs"
+          papel: comando
+          explica: "lê essa lista e a transforma em ARGUMENTOS do comando seguinte"
+        - trecho: "wc -c"
+          papel: comando
+          explica: "recebe os caminhos como argumento; sem o xargs ele contaria os bytes da lista"
+
+  demonstracao:
+    - comando: "ls arquivo"
+      saida: |-2
+        2026-05
+        2026-06
+        2026-07
+      nota: "O ponto de partida do chamado: `ls` mostra três pastas e nenhum log. Por isso o `ls *.log` falhou — não há nenhum `.log` NESTE nível."
+    - comando: "find arquivo -name '*.log' | sort"
+      saida: |-2
+        arquivo/2026-05/chamadas.log
+        arquivo/2026-05/sistema.log
+        arquivo/2026-06/chamadas.log
+        arquivo/2026-06/sistema.log
+        arquivo/2026-07/chamadas.log
+        arquivo/2026-07/sip/trace.log
+        arquivo/2026-07/sistema.log
+      nota: "Sete, espalhados por quatro diretórios — inclusive um dois níveis abaixo, em `2026-07/sip/`. O `find` desceu sozinho. Ordeno a saída porque a ordem natural é a de leitura do diretório, que não é estável."
+    - comando: "find arquivo -type d | sort"
+      saida: |-2
+        arquivo
+        arquivo/2026-05
+        arquivo/2026-06
+        arquivo/2026-07
+        arquivo/2026-07/sip
+      nota: "O mesmo percurso pedindo só diretório. É assim que se enxerga o formato da árvore antes de decidir onde procurar."
+    - comando: "find arquivo -name '*.log' -size +10k | sort"
+      saida: |-2
+        arquivo/2026-05/sistema.log
+        arquivo/2026-06/chamadas.log
+        arquivo/2026-07/chamadas.log
+        arquivo/2026-07/sip/trace.log
+      nota: "Dois critérios somados: é `.log` E passa de 10 kB. Quatro dos sete — estes são os que interessam ao chamado do disco cheio."
+    - comando: "find arquivo -name '*.log' -size +1 | wc -l"
+      saida: |-2
+        6
+      nota: "A pegadinha, primeira metade: `+1` são seis arquivos, porque sem sufixo a unidade é BLOCO de 512 bytes — ou seja, \"maior que 512 bytes\"."
+    - comando: "find arquivo -name '*.log' -size +1k | wc -l"
+      saida: |-2
+        5
+      nota: "Segunda metade: com o `k`, cinco. O critério mudou e nenhum dos dois comandos reclamou de nada. É o tipo de diferença que vira relatório errado."
+    - comando: "find arquivo -name '*.log' -size +10k -exec stat -c '%s %n' {} \\; | sort -n"
+      saida: |-2
+        15000 arquivo/2026-05/sistema.log
+        20000 arquivo/2026-07/sip/trace.log
+        30000 arquivo/2026-06/chamadas.log
+        45000 arquivo/2026-07/chamadas.log
+      nota: "O `-exec` rodando `stat` uma vez por achado: o `{}` virou o caminho de cada um. Agora a lista tem o tamanho junto, que é o que o chamado precisa."
+    - comando: "find arquivo -name '*.log' | sort | xargs wc -c | tail -1"
+      saida: |-2
+        113100 total
+      nota: "O `xargs` entregando os sete caminhos como ARGUMENTOS do `wc`. Sem ele, o `wc` leria a lista de nomes pela entrada padrão e contaria os bytes do texto da lista."
+    - comando: "find arquivo -name '*.log' | wc -c"
+      saida: |-2
+        201
+      nota: "E aqui está esse erro, para você reconhecê-lo: 201 bytes. Não é o tamanho de log nenhum — é quanto ocupa a LISTA DE NOMES que o find imprimiu. Um número plausível e completamente errado."
+
+  pratica_guiada:
+    - instrucao: "Ache todos os arquivos com extensão .log na árvore, em ordem."
+      modelo: "find arquivo -name ____ | sort"
+      resposta: "find arquivo -name '*.log' | sort"
+    - instrucao: "Restrinja aos maiores que 10 kB."
+      modelo: "find arquivo -name '*.log' ____ | sort"
+      resposta: "find arquivo -name '*.log' -size +10k | sort"
+    - instrucao: "Mostre o tamanho de cada um dos grandes, rodando `stat` sobre cada achado."
+      modelo: "find arquivo -name '*.log' -size +10k -exec stat -c '%s %n' ____ \\;"
+      resposta: "find arquivo -name '*.log' -size +10k -exec stat -c '%s %n' {} \\;"
+    - instrucao: "Some os bytes de todos os .log, passando os caminhos como argumento."
+      modelo: "find arquivo -name '*.log' | sort | ____ wc -c | tail -1"
+      resposta: "find arquivo -name '*.log' | sort | xargs wc -c | tail -1"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "`find /var/log -name *.log` devolve um erro estranho, ou resultados de menos, dependendo de onde você está. Por quê?"
+      resposta: |
+        O padrão está **sem aspas**, então quem o expandiu foi o shell, no
+        diretório atual, antes de o `find` rodar. Se havia um `.log` ali, o
+        `find` recebeu aquele nome literal no lugar do padrão; se havia vários,
+        recebeu argumentos demais e reclamou. Ponha entre aspas: o padrão tem
+        de chegar ao `find` como padrão.
+    - tipo: predicao
+      pergunta: "Você quer arquivos maiores que 100 bytes e escreve `-size +100`. O que vai receber?"
+      resposta: |
+        Arquivos maiores que **51200 bytes** (100 blocos de 512), não maiores
+        que 100 bytes. Para bytes o sufixo é `c`: `-size +100c`. Nenhuma das
+        duas formas dá erro — é por isso que a confusão passa despercebida.
+    - tipo: transferencia
+      pergunta: "Você precisa apagar todos os `.tmp` de uma árvore com dezenas de milhares de arquivos. Qual a diferença prática entre `-exec rm {} \\;` e `-exec rm {} +`?"
+      resposta: |
+        Com `\;` o `find` chama o `rm` **uma vez por arquivo** — dezenas de
+        milhares de processos. Com `+` ele acumula os caminhos e chama o `rm`
+        poucas vezes, com muitos argumentos de cada vez; é ordens de grandeza
+        mais rápido. O `xargs` faz por padrão o mesmo agrupamento do `+`. E,
+        antes de apagar qualquer coisa: rode primeiro sem a ação, só para ver
+        a lista.
+
+objetivo_md: |
+  O disco encheu e os logs estão espalhados por `~/arquivo/`, em subpastas por
+  mês — uma delas com mais um nível dentro.
+
+  | critério | casa |
+  |---|---|
+  | `-name '*.log'` | pelo nome (entre **aspas**, sempre) |
+  | `-type f` / `-type d` | arquivo comum / diretório |
+  | `-size +10k` | maior que 10 kB — **sem sufixo seriam blocos de 512 bytes** |
+
+  E para agir sobre o que achou: `-exec cmd {} \;` roda o comando em cada
+  achado, ou `| xargs cmd` transforma a lista em argumentos.
+
+  ### Sua tarefa
+
+  Grave em `~/relatorios/`:
+
+  1. `achados.txt` — o caminho de **todos** os `.log` sob `~/arquivo/`, um por
+     linha, **em ordem alfabética**. São sete.
+  2. `grandes.txt` — só os `.log` **maiores que 10 kB**, também em ordem. São
+     quatro.
+  3. `total-bytes.txt` — a **soma dos bytes** de todos os sete `.log`, só o
+     número.
+
+  > No item 3, cuidado com a armadilha: `find … | wc -c` devolve um número, e
+  > ele é o tamanho da *lista de nomes*. Você precisa que os caminhos cheguem
+  > como **argumento** de quem conta.
+
+verificar:
+  - descricao: "achados.txt lista os sete .log em ordem"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/achados.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/achados.txt","dica_diagnostica":"o find desce a arvore; o ls nao. Comece por find ~/arquivo -name \"*.log\""}'
+        exit 1
+      fi
+      N=$(grep -c . "$ARQ")
+      if [ "$N" != "7" ]; then
+        echo "linhas: $N (esperado 7)"
+        if [ "$N" = "0" ]; then
+          echo 'DEVLAB_JSON:{"mensagem":"o achados.txt esta vazio","dica_diagnostica":"o padrao precisa de aspas: sem elas o shell o expande antes e o find procura outra coisa"}'
+        else
+          echo 'DEVLAB_JSON:{"mensagem":"o achados.txt nao tem os sete .log","dica_diagnostica":"um deles esta dois niveis abaixo, em 2026-07/sip/. O find desce sozinho se voce nao limitar a profundidade."}'
+        fi
+        exit 1
+      fi
+      if [ "$(grep -c '\.log$' "$ARQ")" != "7" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"entrou arquivo que nao e .log","dica_diagnostica":"restrinja pelo nome: -name \"*.log\""}'
+        exit 1
+      fi
+      if [ "$(sort "$ARQ")" != "$(cat "$ARQ")" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a lista nao esta em ordem alfabetica","dica_diagnostica":"a ordem do find e a de leitura do diretorio, que nao e estavel: passe por sort"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "grandes.txt tem só os quatro acima de 10 kB"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/grandes.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/grandes.txt","dica_diagnostica":"acrescente o criterio de tamanho a mesma busca: -size +10k"}'
+        exit 1
+      fi
+      N=$(grep -c . "$ARQ")
+      if [ "$N" != "4" ]; then
+        echo "linhas: $N (esperado 4)"
+        if [ "$N" = "6" ] || [ "$N" = "5" ]; then
+          echo 'DEVLAB_JSON:{"mensagem":"o corte de tamanho pegou arquivos demais","dica_diagnostica":"sem sufixo o -size conta BLOCOS de 512 bytes. Para 10 kB o sufixo e k: -size +10k"}'
+        else
+          echo 'DEVLAB_JSON:{"mensagem":"o grandes.txt nao tem os quatro .log acima de 10 kB","dica_diagnostica":"os quatro sao de 15000, 20000, 30000 e 45000 bytes"}'
+        fi
+        exit 1
+      fi
+      # Nenhum pequeno pode ter entrado.
+      while read -r caminho; do
+        [ -f "$caminho" ] || caminho="/home/aluno/$caminho"
+        T=$(stat -c %s "$caminho" 2>/dev/null || echo 0)
+        if [ "$T" -le 10240 ]; then
+          echo "entrou arquivo de $T bytes: $caminho"
+          echo 'DEVLAB_JSON:{"mensagem":"entrou arquivo menor que 10 kB","dica_diagnostica":"confira o sufixo do -size: k e kilobyte, sem sufixo sao blocos de 512 bytes"}'
+          exit 1
+        fi
+      done < "$ARQ"
+      exit 0
+
+  - descricao: "total-bytes.txt tem a soma dos bytes dos sete .log"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/total-bytes.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/total-bytes.txt","dica_diagnostica":"passe os caminhos como argumento de quem conta, com xargs ou com -exec ... +"}'
+        exit 1
+      fi
+      V=$(tr -cd '0-9' < "$ARQ")
+      if [ "$V" = "201" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"201 e o tamanho da LISTA DE NOMES, nao dos arquivos","dica_diagnostica":"find ... | wc -c conta o texto que o find imprimiu. Use xargs para os caminhos virarem argumento do wc."}'
+        exit 1
+      fi
+      if [ "$V" != "113100" ]; then
+        echo "conteudo: '$V' (esperado 113100)"
+        echo 'DEVLAB_JSON:{"mensagem":"a soma de bytes nao confere","dica_diagnostica":"sao os SETE .log somados. Se o numero veio com a palavra total junto, isole so o numero."}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Rode o `find` sozinho primeiro, sem redirecionar e sem `-exec`, e confira a lista com os olhos. Só quando ela estiver certa acrescente a ação — é a regra que evita rodar um comando destrutivo sobre a lista errada."
+  - "Os itens 1 e 2 são o mesmo `find` com um critério a mais, passando por `sort`. O item 3 precisa que os caminhos cheguem como argumento: `find … | xargs wc -c`, e depois isole o número da linha `total`."
+  - "find ~/arquivo -name '*.log' | sort > ~/relatorios/achados.txt; find ~/arquivo -name '*.log' -size +10k | sort > ~/relatorios/grandes.txt; find ~/arquivo -name '*.log' | xargs wc -c | tail -1 | awk '{print $1}' > ~/relatorios/total-bytes.txt"
+
+erros_comuns:
+  - match: "paths must precede expression"
+    digita: "find -name '*.log' arquivo"
+    mensagem: "find: paths must precede expression: 'arquivo'"
+    causa: "a ordem é fixa: primeiro onde procurar, depois os critérios"
+    conserto: "`find arquivo -name '*.log'`"
+    categoria: sintaxe
+  - match: "missing argument to .-exec."
+    digita: "find arquivo -name '*.log' -exec stat -c '%s %n' {}"
+    mensagem: "find: missing argument to `-exec'"
+    causa: "faltou o terminador do `-exec`: ele precisa de `\\;` ou de `+` no fim"
+    conserto: "feche com `\\;` (um por arquivo) ou com `+` (vários de uma vez)"
+    categoria: sintaxe
+  - match: "No such file or directory"
+    digita: "ls *.log"
+    mensagem: "ls: cannot access '*.log': No such file or directory"
+    causa: "o glob do shell só olha o diretório atual, e os arquivos estão em subpastas"
+    conserto: "quem desce na árvore é o `find`, não o `*`"
+    categoria: ferramenta_errada
+  - match: "Permission denied"
+    digita: "find / -name '*.log'"
+    mensagem: "find: '/root': Permission denied"
+    causa: "a varredura entrou em diretórios que a sua conta não atravessa"
+    conserto: "comece de um ponto que seja seu, ou descarte as reclamações com `2>/dev/null`"
+    categoria: permissao
+
+cards_revisao:
+  - find-desce-a-arvore-inteira
+  - criterios-do-find-se-somam
+  - size-sem-sufixo-conta-blocos
+
+solucao_referencia: |
+  cd /home/aluno
+  find arquivo -name '*.log' | sort > relatorios/achados.txt
+  find arquivo -name '*.log' -size +10k | sort > relatorios/grandes.txt
+  find arquivo -name '*.log' | xargs wc -c | tail -1 | awk '{print $1}' > relatorios/total-bytes.txt

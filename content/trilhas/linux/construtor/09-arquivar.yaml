@@ -1,0 +1,379 @@
+id: linux-con-09-arquivar
+trilha: linux
+nivel: construtor
+ordem: 9
+titulo: "Empacotar e restaurar: o que o tar junta e o que o gzip aperta"
+capacidade: "Sei empacotar um diretório com caminhos limpos, conferir o conteúdo antes de extrair, e restaurar um arquivo só."
+xp: 40
+prereqs: [linux-con-08-buscar]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno
+    mkdir -p "$BASE/entrada" "$BASE/backup" "$BASE/relatorios" "$BASE/restaurado"
+    cat > "$BASE/entrada/chamadas.log" <<'TXT'
+    2026-07-28 08:12:03 ramal=1001 destino=1002 status=ATENDIDA
+    2026-07-28 08:15:47 ramal=1003 destino=9911 status=OCUPADO
+    TXT
+    cat > "$BASE/entrada/sistema.log" <<'TXT'
+    2026-07-28 07:00:01 INFO servico de telefonia iniciado
+    2026-07-28 11:07:35 ERROR gateway saida-1 sem resposta
+    TXT
+    cat > "$BASE/entrada/sip.log" <<'TXT'
+    INVITE sip:1002@10.10.0.20 SIP/2.0
+    SIP/2.0 200 OK
+    TXT
+    cat > "$BASE/entrada/alarmes.log" <<'TXT'
+    2026-07-28 15:45:10 CRITICO particao /var com 98% de uso
+    TXT
+    chown -R aluno:aluno "$BASE/entrada" "$BASE/backup" "$BASE/relatorios" "$BASE/restaurado"
+
+ensina:
+  conceitos:
+    - id: tar-junta-gzip-comprime
+      titulo: "São dois trabalhos: o tar junta muitos arquivos em um, o gzip aperta um arquivo"
+    - id: listar-antes-de-extrair
+      titulo: "`-t` lista sem extrair: é como se descobre onde o pacote vai despejar"
+    - id: c-maiusculo-define-a-raiz-do-pacote
+      titulo: "`-C` troca o diretório de trabalho do tar, e é o que deixa o caminho limpo"
+  comandos:
+    - tar
+    - gzip
+
+ensino:
+  gancho: |
+    O `backup.sh` da primeira lição gera um `.tar.gz` todo dia. Hoje o
+    coordenador pediu de volta **um** arquivo: o `sip.log` de julho.
+
+    A tentação é extrair o pacote inteiro numa pasta e catar o que interessa.
+    Só que o pacote foi feito com caminho absoluto por quem veio antes de você,
+    e extrair sem olhar despeja os arquivos **por cima** dos que estão em
+    produção.
+
+    Antes de extrair qualquer coisa, existe uma pergunta barata: **o que tem
+    aqui dentro, e com que caminho?**
+
+  objetivos:
+    - verbo: explicar
+      texto: "explicar a diferença entre juntar arquivos e comprimir"
+    - verbo: identificar
+      texto: "listar o conteúdo de um pacote sem extraí-lo"
+    - verbo: executar
+      texto: "empacotar um diretório com caminhos relativos, usando `-C`"
+    - verbo: adaptar
+      texto: "restaurar um único arquivo de dentro de um pacote, para um destino escolhido"
+
+  modelo_mental: |
+    São **dois** trabalhos, e é por isso que a extensão tem dois pedaços.
+
+    | ferramenta | faz | resultado |
+    |---|---|---|
+    | `tar` | **junta** N arquivos num só, preservando nome, permissão e dono | `.tar` |
+    | `gzip` | **aperta** UM arquivo | `.gz` |
+
+    O `gzip` não sabe juntar: ele comprime um arquivo de cada vez. Por isso a
+    ordem é sempre juntar primeiro e apertar depois, e por isso o nome fica
+    `.tar.gz`, lido da direita para a esquerda. Medido no lab: os quatro logs
+    viram um `.tar` de **10240** bytes, que o `gzip` reduz a **459**.
+
+    Hoje o `tar` faz os dois de uma vez, com a opção `z` — mas as duas etapas
+    continuam existindo.
+
+    ### As letras
+
+    | letra | quer dizer |
+    |---|---|
+    | `c` | *create* — cria o pacote |
+    | `t` | *list* — **lista** o conteúdo, sem extrair nada |
+    | `x` | *extract* — extrai |
+    | `f` | *file* — o próximo argumento é o nome do pacote |
+    | `z` | passa pelo gzip no caminho |
+    | `-C dir` | **entra em `dir`** antes de trabalhar |
+
+    O `c`, o `t` e o `x` são mutuamente exclusivos: um pacote está sendo
+    criado, listado ou extraído. O `f` é obrigatório na prática, e vem sempre
+    por último entre as letras, porque é ele que "consome" o nome do arquivo.
+
+    ### O `-C` e por que o caminho importa
+
+    O `tar` guarda o caminho **exatamente como você o escreveu**, e o repete na
+    extração. Isso decide onde os arquivos vão cair depois:
+
+    | como você criou | o que fica dentro | onde cai ao extrair |
+    |---|---|---|
+    | `tar -czf p.tgz entrada` | `entrada/chamadas.log` | numa pasta `entrada/` |
+    | `tar -czf p.tgz -C entrada .` | `./chamadas.log` | **solto**, no destino |
+    | `tar -czf p.tgz /home/aluno/entrada` | `home/aluno/entrada/…` | recriando a árvore |
+
+    Na terceira linha o `tar` ainda avisa: `Removing leading '/' from member
+    names`. Ele tira a barra de propósito — um pacote com caminho absoluto
+    sobrescreveria `/etc` na extração, e essa proteção existe justamente por
+    isso.
+
+    **`-C` é a forma de escolher a raiz do pacote**: ele entra no diretório
+    antes de empacotar, e o `.` que vem depois quer dizer "tudo daqui". O mesmo
+    `-C` na extração escolhe **onde** despejar.
+
+    ### Listar antes de extrair
+
+    `tar -tzf pacote.tar.gz` é barato e responde a pergunta que evita o
+    estrago. Faça sempre antes de um `x`, principalmente em pacote que você não
+    gerou.
+
+  anatomia:
+    - linha: "tar -czf backup/logs.tar.gz -C entrada ."
+      partes:
+        - trecho: "-c"
+          papel: opcao
+          explica: "criar o pacote"
+        - trecho: "-z"
+          papel: opcao
+          explica: "comprimir com gzip no caminho — é o que faz o `.gz` do nome"
+        - trecho: "-f backup/logs.tar.gz"
+          papel: opcao
+          explica: "o nome do pacote a criar; o `f` sempre vem antes do nome"
+        - trecho: "-C entrada"
+          papel: opcao
+          explica: "entra em `entrada/` antes de empacotar: é o que tira o prefixo do caminho guardado"
+        - trecho: "."
+          papel: argumento
+          explica: "o que empacotar, já de dentro do -C: tudo do diretório atual"
+    - linha: "tar -xzf backup/logs.tar.gz -C restaurado ./sip.log"
+      partes:
+        - trecho: "-x"
+          papel: opcao
+          explica: "extrair"
+        - trecho: "-C restaurado"
+          papel: opcao
+          explica: "onde despejar; sem isto, cai no diretório atual"
+        - trecho: "./sip.log"
+          papel: argumento
+          explica: "extrai SÓ este membro. O nome tem de bater com o que o `-t` mostrou, `./` inclusive"
+
+  demonstracao:
+    - comando: "tar -cf backup/so-junta.tar -C entrada . && stat -c '%s %n' backup/so-junta.tar"
+      saida: |-2
+        10240 backup/so-junta.tar
+      nota: "Só juntando, sem comprimir: os quatro logs viram um arquivo de 10240 bytes. O `tar` alinha em blocos, então ele chega a ser MAIOR que a soma das partes."
+    - comando: "gzip -kf backup/so-junta.tar && stat -c '%s %n' backup/so-junta.tar.gz"
+      saida: |-2
+        459 backup/so-junta.tar.gz
+      nota: "Agora o segundo trabalho, separado: o `gzip` aperta aquele único arquivo para 459 bytes. Junta e comprime são coisas diferentes, e é por isso que a extensão tem dois pedaços."
+    - comando: "tar -czf backup/logs.tar.gz -C entrada . && tar -tzf backup/logs.tar.gz | sort"
+      saida: |-2
+        ./
+        ./alarmes.log
+        ./chamadas.log
+        ./sip.log
+        ./sistema.log
+      nota: "As duas etapas de uma vez com o `z`, e o `-t` mostrando o resultado. Repare no caminho: `./chamadas.log`, sem prefixo nenhum — foi o `-C` que fez isso."
+    - comando: "tar -czf backup/com-prefixo.tar.gz entrada && tar -tzf backup/com-prefixo.tar.gz | sort"
+      saida: |-2
+        entrada/
+        entrada/alarmes.log
+        entrada/chamadas.log
+        entrada/sip.log
+        entrada/sistema.log
+      nota: "O mesmo conteúdo, empacotado sem o `-C`: agora todo membro carrega `entrada/` na frente. Extrair este pacote cria uma pasta `entrada/` no destino — o que às vezes é o que se quer, e às vezes é uma surpresa."
+    - comando: "tar -czf backup/absoluto.tar.gz /home/aluno/entrada"
+      saida: |-2
+        tar: Removing leading `/' from member names
+      nota: "Com caminho absoluto o `tar` avisa e tira a barra da frente. É proteção: sem ela, extrair este pacote em qualquer lugar escreveria direto em `/home/aluno/entrada`, ignorando onde você está."
+    - comando: "tar -tzf backup/absoluto.tar.gz | sort | head -3"
+      saida: |-2
+        home/aluno/entrada/
+        home/aluno/entrada/alarmes.log
+        home/aluno/entrada/chamadas.log
+      nota: "E aqui está o que sobrou guardado: a árvore inteira sem a barra inicial. É exatamente o tipo de pacote que se deve listar antes de extrair."
+    - comando: "tar -xzf backup/logs.tar.gz -C restaurado ./sip.log && ls restaurado"
+      saida: |-2
+        sip.log
+      nota: "A restauração cirúrgica: um membro só, para um destino escolhido. Os outros três continuam dentro do pacote e o `restaurado/` recebeu só o que foi pedido."
+    - comando: "cat restaurado/sip.log"
+      saida: |-2
+        INVITE sip:1002@10.10.0.20 SIP/2.0
+        SIP/2.0 200 OK
+      nota: "E o conteúdo chegou íntegro. O `tar` preserva também permissão e dono — é por isso que ele continua sendo a ferramenta de backup, e não um zip qualquer."
+
+  pratica_guiada:
+    - instrucao: "Empacote o conteúdo de `entrada/` com caminho limpo, comprimindo no caminho."
+      modelo: "tar -czf backup/logs.tar.gz ____ entrada ."
+      resposta: "tar -czf backup/logs.tar.gz -C entrada ."
+    - instrucao: "Confira o que ficou dentro, sem extrair."
+      modelo: "tar ____ backup/logs.tar.gz | sort"
+      resposta: "tar -tzf backup/logs.tar.gz | sort"
+    - instrucao: "Extraia apenas o `sip.log`, para dentro de `restaurado/`."
+      modelo: "tar -xzf backup/logs.tar.gz -C restaurado ____"
+      resposta: "tar -xzf backup/logs.tar.gz -C restaurado ./sip.log"
+    - instrucao: "Confirme que só ele foi restaurado."
+      modelo: "ls ____"
+      resposta: "ls restaurado"
+
+  compreensao:
+    - tipo: predicao
+      pergunta: "`tar -tzf pacote.tar.gz` mostra `home/aluno/logs/erro.log`. Você roda `tar -xzf pacote.tar.gz` dentro de `/tmp`. Onde o arquivo vai parar?"
+      resposta: |
+        Em `/tmp/home/aluno/logs/erro.log`. O caminho guardado é **relativo** —
+        a barra inicial foi removida quando o pacote foi criado —, então ele é
+        recriado a partir de onde você está. É por isso que o `-t` antes do `-x`
+        importa: o pacote diz para onde vai despejar.
+    - tipo: diagnostico
+      pergunta: "Você extraiu um pacote e os arquivos não apareceram onde esperava — vieram dentro de uma pasta a mais. O que aconteceu na hora de CRIAR?"
+      resposta: |
+        Quem criou empacotou o diretório pelo nome (`tar -czf p.tgz entrada`)
+        em vez de entrar nele (`-C entrada .`). O prefixo `entrada/` ficou
+        gravado em cada membro e é recriado na extração. Conserta-se na criação,
+        não na extração — ou, na hora do aperto, extraindo e movendo.
+    - tipo: transferencia
+      pergunta: "Um pacote de 3 GB tem um arquivo de configuração de 2 kB que você precisa. O disco tem 1 GB livre. Como faz?"
+      resposta: |
+        Liste primeiro com `-t` para descobrir o nome exato do membro, e extraia
+        **só ele**, nomeando-o no fim do comando `-x`. O `tar` lê o pacote em
+        fluxo e grava apenas o que foi pedido, então os 2 kB cabem. Extrair
+        tudo para depois catar é o que não cabe.
+
+objetivo_md: |
+  São dois trabalhos: o `tar` **junta**, o `gzip` **aperta**. Daí `.tar.gz`.
+
+  | letra | faz |
+  |---|---|
+  | `c` | cria |
+  | `t` | **lista**, sem extrair |
+  | `x` | extrai |
+  | `f` | o próximo argumento é o nome do pacote |
+  | `z` | passa pelo gzip |
+  | `-C dir` | entra em `dir` antes de trabalhar |
+
+  O `tar` guarda o caminho como você o escreveu, e o recria na extração — é o
+  `-C` que decide se o pacote vai ter `entrada/chamadas.log` ou `./chamadas.log`
+  dentro.
+
+  ### Sua tarefa
+
+  1. Empacote o conteúdo de `~/entrada/` em `~/backup/logs.tar.gz`, com
+     **caminho limpo**: os membros têm de ser `./chamadas.log` e companhia, sem
+     nenhum prefixo `entrada/`.
+  2. Grave a listagem do pacote, **ordenada**, em `~/relatorios/conteudo.txt` —
+     sem extrair nada para isso.
+  3. Restaure **somente** o `sip.log` para dentro de `~/restaurado/`. Os outros
+     três não podem aparecer lá.
+
+  > O item 3 é a razão de ser do item 2: para pedir um membro pelo nome, você
+  > precisa do nome exato que o pacote guardou — com o `./` na frente, se for o
+  > caso.
+
+verificar:
+  - descricao: "o pacote existe e tem os quatro logs com caminho limpo"
+    script: |
+      #!/bin/bash
+      P=/home/aluno/backup/logs.tar.gz
+      if [ ! -f "$P" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/backup/logs.tar.gz","dica_diagnostica":"tar -czf destino.tar.gz -C origem . — o f vem antes do nome do pacote"}'
+        exit 1
+      fi
+      if ! tar -tzf "$P" >/dev/null 2>&1; then
+        echo 'DEVLAB_JSON:{"mensagem":"o arquivo nao e um pacote tar.gz valido","dica_diagnostica":"faltou o z na criacao? Sem ele o pacote nao esta comprimido e o -tzf recusa."}'
+        exit 1
+      fi
+      LISTA=$(tar -tzf "$P")
+      if echo "$LISTA" | grep -q 'entrada/'; then
+        echo "membros: $(echo "$LISTA" | tr '\n' ' ')"
+        echo 'DEVLAB_JSON:{"mensagem":"os membros carregam o prefixo entrada/","dica_diagnostica":"empacote de DENTRO do diretorio: -C entrada . em vez de passar entrada como argumento"}'
+        exit 1
+      fi
+      for n in chamadas sistema sip alarmes; do
+        if ! echo "$LISTA" | grep -q "$n\.log$"; then
+          echo "membros: $(echo "$LISTA" | tr '\n' ' ')"
+          echo "DEVLAB_JSON:{\"mensagem\":\"falta o $n.log dentro do pacote\",\"dica_diagnostica\":\"o . depois do -C e o que diz 'tudo deste diretorio'\"}"
+          exit 1
+        fi
+      done
+      exit 0
+
+  - descricao: "conteudo.txt tem a listagem ordenada do pacote"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/conteudo.txt
+      P=/home/aluno/backup/logs.tar.gz
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/conteudo.txt","dica_diagnostica":"tar -tzf pacote | sort > arquivo — o t lista sem extrair"}'
+        exit 1
+      fi
+      ESPERADO=$(tar -tzf "$P" | sort)
+      OBTIDO=$(sort "$ARQ" | grep -v '^$')
+      if [ "$(cat "$ARQ" | grep -v '^$')" != "$(cat "$ARQ" | grep -v '^$' | sort)" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"a listagem nao esta ordenada","dica_diagnostica":"a ordem do tar e a de gravacao no pacote: passe por sort antes de gravar"}'
+        exit 1
+      fi
+      if [ "$OBTIDO" != "$ESPERADO" ]; then
+        echo "obtido : $(echo "$OBTIDO" | tr '\n' ' ')"
+        echo "esperado: $(echo "$ESPERADO" | tr '\n' ' ')"
+        echo 'DEVLAB_JSON:{"mensagem":"a listagem nao corresponde ao conteudo do pacote","dica_diagnostica":"liste o pacote que voce criou, com tar -tzf, sem extrair"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "só o sip.log foi restaurado em ~/restaurado/"
+    script: |
+      #!/bin/bash
+      DIR=/home/aluno/restaurado
+      if [ ! -f "$DIR/sip.log" ]; then
+        echo "conteudo de restaurado/: $(ls -A "$DIR" 2>/dev/null | tr '\n' ' ')"
+        echo 'DEVLAB_JSON:{"mensagem":"o sip.log nao foi restaurado","dica_diagnostica":"nomeie o membro no fim do comando de extracao, com o mesmo nome que o -t mostrou (./sip.log)"}'
+        exit 1
+      fi
+      if ! grep -q 'INVITE' "$DIR/sip.log"; then
+        echo 'DEVLAB_JSON:{"mensagem":"o sip.log restaurado esta com outro conteudo","dica_diagnostica":"extraia do pacote em vez de criar um arquivo novo"}'
+        exit 1
+      fi
+      SOBRA=$(ls -A "$DIR" | grep -v '^sip\.log$' || true)
+      if [ -n "$SOBRA" ]; then
+        echo "sobrando: $(echo "$SOBRA" | tr '\n' ' ')"
+        echo 'DEVLAB_JSON:{"mensagem":"vieram outros arquivos junto","dica_diagnostica":"sem nomear o membro, o tar extrai o pacote INTEIRO. Limpe a pasta e extraia so o membro pedido."}'
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Faça o item 2 antes de tentar o item 3, mesmo que a ordem da tarefa não obrigasse: é a listagem que te dá o nome exato do membro, e é esse nome — com `./` na frente — que o comando de extração precisa receber."
+  - "São três comandos: `tar -czf … -C entrada .`, depois `tar -tzf … | sort >` para o relatório, e por fim `tar -xzf … -C restaurado ./sip.log`."
+  - "tar -czf ~/backup/logs.tar.gz -C ~/entrada . && tar -tzf ~/backup/logs.tar.gz | sort > ~/relatorios/conteudo.txt && tar -xzf ~/backup/logs.tar.gz -C ~/restaurado ./sip.log"
+
+erros_comuns:
+  - match: "Cannot open: No such file or directory"
+    digita: "tar -czf backup/logs.tar.gz -C entrada"
+    mensagem: "tar: Cowardly refusing to create an empty archive"
+    causa: "o `-C` só troca de diretório; faltou dizer O QUE empacotar depois dele"
+    conserto: "acrescente o `.` no fim: `-C entrada .`"
+    categoria: sintaxe
+  - match: "You must specify one of the .-Acdtrux."
+    digita: "tar -zf backup/logs.tar.gz entrada"
+    mensagem: "tar: You must specify one of the '-Acdtrux', '--delete' or '--test-label' options"
+    causa: "faltou dizer a operação: criar, listar ou extrair"
+    conserto: "acrescente `c`, `t` ou `x` conforme o caso"
+    categoria: flag_errada
+  - match: "not in gzip format"
+    digita: "tar -tzf backup/so-junta.tar"
+    mensagem: "gzip: stdin: not in gzip format"
+    causa: "o `z` manda passar pelo gzip, e este pacote não está comprimido"
+    conserto: "tire o `z` para um `.tar` puro; o `z` é só para `.tar.gz`"
+    categoria: flag_errada
+  - match: "Removing leading"
+    digita: "tar -czf backup/p.tar.gz /home/aluno/entrada"
+    mensagem: "tar: Removing leading `/' from member names"
+    causa: "o pacote foi criado com caminho absoluto, e o tar tira a barra para a extração não escrever fora do destino"
+    conserto: "é aviso, não erro — mas prefira `-C /home/aluno/entrada .`, que deixa o caminho limpo"
+    categoria: conceitual
+
+cards_revisao:
+  - tar-junta-gzip-comprime
+  - listar-antes-de-extrair
+  - c-maiusculo-define-a-raiz-do-pacote
+
+solucao_referencia: |
+  cd /home/aluno
+  tar -czf backup/logs.tar.gz -C entrada .
+  tar -tzf backup/logs.tar.gz | sort > relatorios/conteudo.txt
+  tar -xzf backup/logs.tar.gz -C restaurado ./sip.log

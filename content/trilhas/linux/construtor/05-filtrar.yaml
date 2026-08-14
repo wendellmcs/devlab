@@ -1,0 +1,415 @@
+id: linux-con-05-filtrar
+trilha: linux
+nivel: construtor
+ordem: 5
+titulo: "Filtrar e contar: achar a linha, recortar o campo, somar o resultado"
+capacidade: "Sei extrair de um log as linhas que interessam, isolar um campo e contar quantas vezes cada valor aparece."
+xp: 40
+prereqs: [linux-con-04-fluxos]
+
+lab:
+  setup: |
+    #!/bin/bash
+    set -euo pipefail
+    BASE=/home/aluno
+    mkdir -p "$BASE/relatorios"
+    # 24 chamadas de um dia. Os números foram escolhidos para as contagens
+    # serem conferíveis de cabeça: 1001 origina 7, existem 5 FALHA e 6 ramais
+    # distintos. E há 1001 aparecendo como DESTINO, que é a armadilha do grep
+    # solto.
+    cat > "$BASE/logs/julho.log" <<'LOG'
+    2026-07-28 08:12:03 ramal=1001 destino=1002 status=ATENDIDA duracao=42
+    2026-07-28 08:15:47 ramal=1003 destino=9911 status=OCUPADO duracao=0
+    2026-07-28 08:19:02 ramal=1001 destino=9911 status=ATENDIDA duracao=210
+    2026-07-28 08:31:15 ramal=1002 destino=1005 status=ATENDIDA duracao=317
+    2026-07-28 08:44:51 ramal=1004 destino=9911 status=FALHA duracao=0
+    2026-07-28 09:02:11 ramal=1002 destino=1005 status=ATENDIDA duracao=88
+    2026-07-28 09:14:33 ramal=1001 destino=1004 status=NAO_ATENDIDA duracao=0
+    2026-07-28 09:31:58 ramal=1005 destino=1001 status=ATENDIDA duracao=125
+    2026-07-28 09:47:20 ramal=1004 destino=9911 status=FALHA duracao=0
+    2026-07-28 10:03:44 ramal=1001 destino=1002 status=ATENDIDA duracao=61
+    2026-07-28 10:22:09 ramal=1003 destino=1001 status=ATENDIDA duracao=19
+    2026-07-28 10:44:20 ramal=1005 destino=1001 status=ATENDIDA duracao=88
+    2026-07-28 11:07:35 ramal=1004 destino=9911 status=FALHA duracao=0
+    2026-07-28 11:19:58 ramal=1002 destino=1003 status=OCUPADO duracao=0
+    2026-07-28 11:38:12 ramal=1001 destino=1005 status=ATENDIDA duracao=154
+    2026-07-28 12:01:07 ramal=9911 destino=1001 status=ATENDIDA duracao=33
+    2026-07-28 12:44:39 ramal=1002 destino=1004 status=NAO_ATENDIDA duracao=0
+    2026-07-28 13:22:09 ramal=1001 destino=1003 status=ATENDIDA duracao=155
+    2026-07-28 13:51:44 ramal=1005 destino=9911 status=FALHA duracao=0
+    2026-07-28 14:10:26 ramal=1003 destino=1002 status=ATENDIDA duracao=77
+    2026-07-28 14:50:41 ramal=1001 destino=1002 status=ATENDIDA duracao=21
+    2026-07-28 15:12:55 ramal=1004 destino=1001 status=ATENDIDA duracao=96
+    2026-07-28 15:45:10 ramal=9911 destino=1005 status=FALHA duracao=0
+    2026-07-28 16:30:18 ramal=1002 destino=9911 status=ATENDIDA duracao=248
+    LOG
+    chown aluno:aluno "$BASE/logs/julho.log" "$BASE/relatorios"
+
+ensina:
+  conceitos:
+    - id: grep-devolve-a-linha-inteira
+      titulo: "O grep filtra LINHAS: ele casa em qualquer ponto e devolve a linha toda"
+    - id: cut-recorta-por-delimitador
+      titulo: "O cut recorta campo por delimitador — e o delimitador pode ser trocado"
+    - id: uniq-so-junta-vizinhos
+      titulo: "O uniq só junta linhas ADJACENTES: sem sort antes, ele não conta nada"
+  # Sem dono, e por decisão: `grep`, `sort`, `uniq` e `cut` já são usados em
+  # bloco visível por 22, 14, 4 e 4 lições das trilhas F e G, que não declaram
+  # prereq de Linux (PRD §7). Ver a decisão 71 em docs/DESIGN-LINUX.md.
+  comandos: []
+
+ensino:
+  gancho: |
+    O coordenador quer três números até o fim do dia: quantas chamadas
+    falharam, quais ramais originaram chamada, e quantas cada um originou.
+
+    O log tem 24 linhas — dava para contar no olho. Amanhã ele vai querer o
+    mesmo de um arquivo com 40 mil, e aí não dá.
+
+    E tem uma armadilha logo na primeira tentativa. Procurar `1001` no log
+    devolve **12** linhas; mas o ramal 1001 só originou **7** chamadas. As
+    outras 5 são chamadas que ele *recebeu* — o texto `1001` também está no
+    campo `destino=`.
+
+  objetivos:
+    - verbo: executar
+      texto: "extrair de um log só as linhas que casam com um padrão"
+    - verbo: construir
+      texto: "encadear filtro, recorte e contagem num único comando"
+    - verbo: explicar
+      texto: "explicar por que `uniq` sem `sort` antes devolve uma contagem errada"
+    - verbo: escolher
+      texto: "escolher um padrão específico o bastante para não contar o que não é"
+
+  modelo_mental: |
+    Três ferramentas, três perguntas diferentes. Elas se encaixam em fila, e a
+    ordem não é negociável.
+
+    | pergunta | ferramenta |
+    |---|---|
+    | **quais linhas** me interessam? | `grep` |
+    | **qual pedaço** de cada linha? | `cut` |
+    | **quantas vezes** cada valor aparece? | `sort` + `uniq -c` |
+
+    ### O `grep` filtra linhas, não palavras
+
+    Ele testa cada linha contra o padrão e, casando **em qualquer ponto**,
+    devolve a **linha inteira**. É por isso que procurar `1001` traz também as
+    chamadas em que o 1001 é o destino: o texto está lá, e ao `grep` tanto faz
+    em qual campo.
+
+    A correção é tornar o padrão mais específico — `ramal=1001` em vez de
+    `1001`. Padrão frouxo não dá erro; dá **número errado**, que é pior.
+
+    Algumas opções que mudam o que ele devolve:
+
+    | opção | efeito |
+    |---|---|
+    | `-c` | em vez das linhas, **quantas** casaram |
+    | `-v` | inverte: devolve as que **não** casaram |
+    | `-i` | ignora maiúscula e minúscula |
+    | `-n` | prefixa o número da linha |
+    | `-E` | liga a sintaxe estendida (`{}`, `+`, `|`) |
+
+    E o padrão aceita expressão regular, da qual três peças resolvem quase tudo
+    em log:
+
+    | peça | casa |
+    |---|---|
+    | `^` | **início** da linha |
+    | `$` | **fim** da linha |
+    | `[0-9]` | um dígito |
+
+    Assim `^2026-07-28 08` são as linhas que *começam* naquela hora — e o `^`
+    é o que impede que um `08` no meio da duração seja confundido com a hora.
+
+    ### O `cut` recorta por delimitador
+
+    `cut -d' ' -f3` quer dizer "corte nos espaços, me dê o terceiro pedaço".
+    Como o campo do log é `ramal=1001`, um segundo recorte com outro
+    delimitador termina o serviço: `cut -d= -f2` devolve `1001`.
+
+    Recortar duas vezes com delimitadores diferentes é idiomático, e é mais
+    legível do que uma expressão regular esperta.
+
+    ### O `uniq` só enxerga o vizinho
+
+    Aqui está o erro que mais dá resultado errado sem avisar: **`uniq` compara
+    cada linha só com a anterior.** Ele não conhece o arquivo, não guarda o que
+    já viu, e não é uma função de "valores distintos".
+
+    Num log em ordem cronológica os ramais aparecem embaralhados, então
+    praticamente nenhuma linha é igual à sua vizinha — e o `uniq -c` devolve 24
+    grupos de 1. Nenhum erro, nenhum aviso, número inteiramente errado.
+
+    **`sort` primeiro.** Ordenar junta os iguais, e aí o vizinho passa a ser
+    quem o `uniq` precisa comparar. `sort | uniq -c` é uma dupla fixa: quando
+    ver uma, procure a outra.
+
+  anatomia:
+    - linha: "grep -c 'status=FALHA' logs/julho.log"
+      partes:
+        - trecho: "grep"
+          papel: comando
+          explica: "filtra linhas que casam com o padrão"
+        - trecho: "-c"
+          papel: opcao
+          explica: "não imprime as linhas: imprime quantas casaram"
+        - trecho: "'status=FALHA'"
+          papel: argumento
+          explica: "o padrão, entre aspas para o shell não tentar expandir nada"
+        - trecho: "logs/julho.log"
+          papel: argumento
+          explica: "onde procurar. Sem arquivo, o grep lê da entrada padrão — que é como ele entra num pipe"
+    - linha: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort | uniq -c"
+      partes:
+        - trecho: "-d' '"
+          papel: opcao
+          explica: "o delimitador do primeiro corte: o espaço"
+        - trecho: "-f3"
+          papel: opcao
+          explica: "qual campo devolver, contando a partir de 1"
+        - trecho: "-d="
+          papel: opcao
+          explica: "o segundo corte usa outro delimitador, sobre o pedaço que sobrou"
+        - trecho: "sort"
+          papel: comando
+          explica: "põe os iguais lado a lado — sem isto o uniq não tem o que juntar"
+        - trecho: "uniq"
+          papel: comando
+          explica: "junta vizinhos idênticos; com `-c`, prefixa quantos eram"
+
+  demonstracao:
+    - comando: "grep -c '1001' logs/julho.log"
+      saida: |-2
+        12
+      nota: "Doze. É o número errado, e ele não parece errado — é justamente esse o perigo do padrão frouxo."
+    - comando: "grep -c 'ramal=1001' logs/julho.log"
+      saida: |-2
+        7
+      nota: "Sete. A diferença são as cinco chamadas em que o 1001 aparece como `destino=`. O `grep` casa em qualquer ponto da linha; quem delimita o campo é você."
+    - comando: "grep 'status=FALHA' logs/julho.log"
+      saida: |-2
+        2026-07-28 08:44:51 ramal=1004 destino=9911 status=FALHA duracao=0
+        2026-07-28 09:47:20 ramal=1004 destino=9911 status=FALHA duracao=0
+        2026-07-28 11:07:35 ramal=1004 destino=9911 status=FALHA duracao=0
+        2026-07-28 13:51:44 ramal=1005 destino=9911 status=FALHA duracao=0
+        2026-07-28 15:45:10 ramal=9911 destino=1005 status=FALHA duracao=0
+      nota: "Sem o `-c` ele devolve a LINHA INTEIRA de cada uma que casou — não só o pedaço que bateu com o padrão."
+    - comando: "grep -c '^2026-07-28 08' logs/julho.log"
+      saida: |-2
+        5
+      nota: "A âncora `^` prende o padrão ao início da linha: são as cinco chamadas das 8h. Sem ela, um `08` na duração entraria na conta."
+    - comando: "grep -vc 'status=ATENDIDA' logs/julho.log"
+      saida: |-2
+        9
+      nota: "O `-v` inverte o filtro: nove chamadas que NÃO foram atendidas, somando falha, ocupado e não atendida."
+    - comando: "cut -d' ' -f3 logs/julho.log | head -4"
+      saida: |-2
+        ramal=1001
+        ramal=1003
+        ramal=1001
+        ramal=1002
+      nota: "Primeiro corte, no espaço: sobra o terceiro campo inteiro, ainda com o rótulo colado."
+    - comando: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | head -4"
+      saida: |-2
+        1001
+        1003
+        1001
+        1002
+      nota: "Segundo corte, agora no `=`: sobra só o número. Dois cortes simples em vez de uma expressão regular esperta."
+    - comando: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | uniq -c | head -6"
+      saida: |-2
+              1 1001
+              1 1003
+              1 1001
+              1 1002
+              1 1004
+              1 1002
+      nota: "A armadilha, ao vivo: SEM ordenar antes, o `uniq -c` devolve grupos de 1. Ele comparou cada linha só com a anterior, e no log elas estão em ordem de horário."
+    - comando: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort | uniq -c"
+      saida: |-2
+              7 1001
+              5 1002
+              3 1003
+              4 1004
+              3 1005
+              2 9911
+      nota: "Com o `sort` na frente, os iguais ficaram vizinhos e a contagem sai certa. Seis ramais, e o 1001 com as sete que já tínhamos confirmado pelo grep."
+
+  pratica_guiada:
+    - instrucao: "Conte quantas chamadas falharam, sem imprimir as linhas."
+      modelo: "grep ____ 'status=FALHA' logs/julho.log"
+      resposta: "grep -c 'status=FALHA' logs/julho.log"
+    - instrucao: "Isole o campo do ramal de origem, só o número, das quatro primeiras linhas."
+      modelo: "cut -d' ' -f3 logs/julho.log | cut ____ | head -4"
+      resposta: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | head -4"
+    - instrucao: "Monte a lista de ramais distintos que originaram chamada, em ordem."
+      modelo: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | ____ | uniq"
+      resposta: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort | uniq"
+    - instrucao: "Agora conte quantas cada um originou."
+      modelo: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort | uniq ____"
+      resposta: "cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort | uniq -c"
+
+  compreensao:
+    - tipo: diagnostico
+      pergunta: "Você roda `cut -d' ' -f3 log | cut -d= -f2 | uniq -c` e recebe 24 linhas, todas começando com 1. O arquivo tem 24 linhas. O que aconteceu?"
+      resposta: |
+        Faltou o `sort`. O `uniq` só junta linhas **adjacentes** e iguais; como
+        o log está em ordem de horário, quase nenhuma linha é igual à vizinha,
+        então cada uma virou seu próprio grupo de 1. Ordenando antes, os iguais
+        ficam lado a lado e a contagem fecha.
+    - tipo: predicao
+      pergunta: "O log tem uma chamada do ramal 1002 para o destino 1002. Quantas linhas `grep -c 'ramal=1002'` conta nela? E `grep -c '1002'`?"
+      resposta: |
+        `ramal=1002` conta essa linha **uma** vez: o `grep` conta LINHAS que
+        casam, não ocorrências dentro da linha. `1002` também conta uma — mesma
+        razão. A diferença entre os dois padrões aparece nas *outras* linhas, em
+        que o 1002 é só destino: essas o primeiro padrão descarta e o segundo
+        inclui.
+    - tipo: transferencia
+      pergunta: "Você precisa saber qual mensagem de erro mais se repete num log de serviço, em que a mensagem é o quarto campo separado por espaço. Como monta?"
+      resposta: |
+        `cut -d' ' -f4 arquivo | sort | uniq -c | sort -rn | head -1`. O `cut`
+        isola a mensagem, `sort | uniq -c` conta cada uma, e o segundo `sort`
+        — agora numérico e invertido — traz a mais frequente para cima. É o
+        mesmo encadeamento da lição com uma ordenação a mais no fim.
+
+objetivo_md: |
+  O `logs/julho.log` tem 24 chamadas de um dia. Três ferramentas, em fila:
+
+  | pergunta | ferramenta |
+  |---|---|
+  | quais **linhas**? | `grep` (`-c` conta, `-v` inverte, `^` ancora no início) |
+  | qual **campo**? | `cut -d<delimitador> -f<número>` |
+  | **quantas vezes** cada valor? | `sort` **e depois** `uniq -c` |
+
+  Cuidado com duas coisas: o `grep` casa em qualquer ponto da linha (procurar
+  `1001` acha também as chamadas *para* o 1001), e o `uniq` só junta linhas
+  vizinhas — sem `sort` antes, a contagem sai errada e sem aviso.
+
+  ### Sua tarefa
+
+  Grave três arquivos em `~/relatorios/`:
+
+  1. `falhas.txt` — as linhas **inteiras** das chamadas com `status=FALHA`. São
+     cinco.
+  2. `ramais.txt` — a lista dos ramais que **originaram** chamada, um por
+     linha, **ordenada e sem repetição**. São seis, e só o número deve aparecer
+     (`1001`, não `ramal=1001`).
+  3. `por-ramal.txt` — quantas chamadas cada ramal originou, no formato que o
+     `uniq -c` produz: a contagem e o ramal na mesma linha.
+
+  > Confira o item 3 contra o item 1: a soma das contagens tem de dar 24, e o
+  > 1001 tem de aparecer com 7 — não com 12.
+
+verificar:
+  - descricao: "falhas.txt tem as cinco linhas inteiras de FALHA"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/falhas.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/falhas.txt","dica_diagnostica":"filtre o log com grep e redirecione a saida para o arquivo"}'
+        exit 1
+      fi
+      N=$(grep -c . "$ARQ")
+      F=$(grep -c 'status=FALHA' "$ARQ")
+      if [ "$N" != "5" ] || [ "$F" != "5" ]; then
+        echo "linhas: $N | com status=FALHA: $F (esperado 5 e 5)"
+        echo 'DEVLAB_JSON:{"mensagem":"o falhas.txt nao tem exatamente as cinco linhas de FALHA","dica_diagnostica":"se veio mais, o padrao pegou outras linhas; se veio menos, confira se usou -c por engano (que grava so o numero)"}'
+        exit 1
+      fi
+      # A linha tem de ser a INTEIRA, não um recorte.
+      if ! grep -q '^2026-07-28 .* ramal=.* destino=.* status=FALHA duracao=0$' "$ARQ"; then
+        echo 'DEVLAB_JSON:{"mensagem":"as linhas do falhas.txt nao estao inteiras","dica_diagnostica":"o grep devolve a linha toda; nao passe por cut neste item"}'
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "ramais.txt tem os seis ramais, ordenados, sem repetição e só o número"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/ramais.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/ramais.txt","dica_diagnostica":"recorte o campo do ramal, ordene e tire as repeticoes"}'
+        exit 1
+      fi
+      ESPERADO=$(printf '1001\n1002\n1003\n1004\n1005\n9911\n')
+      OBTIDO=$(grep -c . "$ARQ" >/dev/null; tr -d ' \r' < "$ARQ" | grep -v '^$')
+      if [ "$OBTIDO" != "$ESPERADO" ]; then
+        echo "obtido:"; echo "$OBTIDO" | head -10
+        if echo "$OBTIDO" | grep -q 'ramal='; then
+          echo 'DEVLAB_JSON:{"mensagem":"o ramais.txt ainda traz o rotulo ramal=","dica_diagnostica":"falta o segundo corte: cut -d= -f2 sobre o resultado do primeiro"}'
+        else
+          echo 'DEVLAB_JSON:{"mensagem":"o ramais.txt nao e a lista ordenada e sem repeticao dos seis ramais","dica_diagnostica":"a ordem e o sort; a ausencia de repeticao e o uniq (ou sort -u). Sao 6 linhas: 1001 a 1005 e 9911."}'
+        fi
+        exit 1
+      fi
+      exit 0
+
+  - descricao: "por-ramal.txt traz a contagem certa de cada ramal"
+    script: |
+      #!/bin/bash
+      ARQ=/home/aluno/relatorios/por-ramal.txt
+      if [ ! -f "$ARQ" ]; then
+        echo 'DEVLAB_JSON:{"mensagem":"nao existe ~/relatorios/por-ramal.txt","dica_diagnostica":"e o mesmo encadeamento do item 2, trocando uniq por uniq -c"}'
+        exit 1
+      fi
+      # Normaliza espaços para aceitar tanto a saída do `uniq -c` (que alinha à
+      # direita) quanto qualquer outra forma correta de produzir o mesmo par.
+      NORM=$(tr -s ' ' ' ' < "$ARQ" | sed 's/^ //; s/ $//' | grep -v '^$' | sort -k2)
+      ESPERADO=$(printf '7 1001\n5 1002\n3 1003\n4 1004\n3 1005\n2 9911\n' | sort -k2)
+      if [ "$NORM" != "$ESPERADO" ]; then
+        echo "obtido (normalizado):"; echo "$NORM" | head -30
+        SOMA=$(echo "$NORM" | awk '{s+=$1} END {print s+0}')
+        echo "soma das contagens: $SOMA (esperado 24)"
+        if [ "$(echo "$NORM" | grep -c .)" -gt 10 ]; then
+          echo 'DEVLAB_JSON:{"mensagem":"vieram grupos demais: o uniq contou vizinhos, nao valores","dica_diagnostica":"faltou o sort ANTES do uniq -c. Sem ordenar, cada linha vira seu proprio grupo de 1."}'
+        else
+          echo 'DEVLAB_JSON:{"mensagem":"a contagem por ramal nao confere","dica_diagnostica":"o 1001 tem de dar 7. Se deu 12, o padrao pegou tambem as chamadas em que ele e destino."}'
+        fi
+        exit 1
+      fi
+      exit 0
+
+dicas:
+  - "Monte cada encadeamento por partes, olhando a saída antes de acrescentar o próximo pedaço: primeiro só o `cut -d' ' -f3`, depois `| cut -d= -f2`, depois `| sort`, e só então `| uniq -c`. É assim que se descobre em qual etapa a coisa saiu do trilho."
+  - "O item 1 é um `grep` redirecionado. Os itens 2 e 3 são o mesmo encadeamento de quatro peças, e a única diferença entre eles é o `-c` no `uniq`."
+  - "grep 'status=FALHA' ~/logs/julho.log > ~/relatorios/falhas.txt; cut -d' ' -f3 ~/logs/julho.log | cut -d= -f2 | sort | uniq > ~/relatorios/ramais.txt; cut -d' ' -f3 ~/logs/julho.log | cut -d= -f2 | sort | uniq -c > ~/relatorios/por-ramal.txt"
+
+erros_comuns:
+  - match: "uniq: extra operand"
+    digita: "cut -d' ' -f3 logs/julho.log | uniq -c sort"
+    mensagem: "uniq: extra operand 'sort'"
+    causa: "o `sort` foi escrito como argumento do `uniq` em vez de ser um estágio do encadeamento"
+    conserto: "separe os estágios com o pipe: `… | sort | uniq -c`"
+    categoria: sintaxe
+  - match: "cut: you must specify a list of (bytes|characters|fields)"
+    digita: "cut -d' ' logs/julho.log"
+    mensagem: "cut: you must specify a list of bytes, characters, or fields"
+    causa: "faltou dizer QUAL campo devolver; o `-d` só define onde cortar"
+    conserto: "acrescente o `-f` com o número do campo: `cut -d' ' -f3 …`"
+    categoria: flag_errada
+  - match: "grep: (unrecognized|invalid) option"
+    digita: "grep -count 'status=FALHA' logs/julho.log"
+    mensagem: "grep: unrecognized option '--count'"
+    causa: "a opção curta é `-c`; escrita com um traço só, `-count` vira uma sequência de letras avulsas"
+    conserto: "use `-c`, ou a forma longa com dois traços"
+    categoria: flag_errada
+  - match: "No such file or directory"
+    digita: "grep 'status=FALHA' julho.log"
+    mensagem: "grep: julho.log: No such file or directory"
+    causa: "o arquivo está em `logs/`, e o caminho relativo foi escrito como se ele estivesse no diretório atual"
+    conserto: "informe o caminho: `logs/julho.log`"
+    categoria: sintaxe
+
+cards_revisao:
+  - grep-devolve-a-linha-inteira
+  - cut-recorta-por-delimitador
+  - uniq-so-junta-vizinhos
+
+solucao_referencia: |
+  cd /home/aluno
+  grep 'status=FALHA' logs/julho.log > relatorios/falhas.txt
+  cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort | uniq > relatorios/ramais.txt
+  cut -d' ' -f3 logs/julho.log | cut -d= -f2 | sort | uniq -c > relatorios/por-ramal.txt

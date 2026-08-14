@@ -22,6 +22,11 @@ Ele tem dois motores, escolhidos pela imagem que a lição declara:
     capacidades que a lição declara. Uma lição de VoIP não tem árvore falsa
     possível: o estado que ela mede é uma chamada acontecendo, e emular isso no
     host seria testar a emulação.
+  - lição de `linux-base` que declara `lab.exige_container: true` também vai ao
+    container. A árvore falsa reproduz o `/home/aluno` da imagem e nada além;
+    quem mede dono, usuário, processo ou pacote está fora dela — e ali o motor
+    rápido não falha, ele responde sobre o HOST em silêncio. `valida_motor_de_
+    validacao` reprova o build de quem esquecer de declarar.
 
 Sem Docker, as lições do segundo grupo não são exercitadas — e isso é dito em
 alto e bom som no resumo, nunca confundido com "passou". Ver a decisão 12 em
@@ -437,6 +442,77 @@ def valida_grafo_de_conceitos(licoes) -> None:
         )
 
 
+# ── a ficção da árvore falsa, e onde ela arrebenta ─────────────────────────
+#
+# A árvore falsa reproduz o `/home/aluno` da imagem e mais nada. Enquanto a
+# lição só mede arquivo debaixo dela, o motor rápido e o container concordam.
+# Fora disso o motor rápido não FALHA — ele responde sobre o host, em silêncio,
+# e o autor lê um "✔" que não é sobre o lab.
+#
+# Cada marcador abaixo saiu de uma medição, não de suspeita. Ver
+# docs/DESIGN-LINUX.md, decisão 1.
+
+# `chown`/`chgrp` só denunciam quando estão no VEREDITO (check ou solução).
+# No `setup` eles são rotina inofensiva: o container cria como root e devolve
+# ao aluno, e na árvore falsa quem roda já é dono de tudo — por isso `adapta()`
+# pode apagá-los ali sem consequência. As três lições do Operador que os usam
+# no setup continuam, com razão, no motor rápido.
+MARCADORES_NO_VEREDITO = (
+    (r"\bchown\b", "chown", "adapta() apaga toda linha de chown: o check mede um dono que ninguém trocou"),
+    (r"\bchgrp\b", "chgrp", "idem chown — o grupo do arquivo na árvore falsa é o de quem rodou o validador"),
+)
+
+# Estes valem em qualquer bloco que o motor rápido execute.
+MARCADORES_EM_QUALQUER_BLOCO = (
+    (r"\buseradd\b|\busermod\b|\bgroupadd\b|\bgpasswd\b|\buserdel\b", "gestão de usuário",
+     "exige root; na árvore falsa devolve 'Permission denied' e derruba o setup"),
+    (r"/etc/(passwd|group|shadow)", "/etc/passwd",
+     "a árvore falsa não tem /etc: a leitura cai no do host (medido: 27 linhas, sem o usuário aluno)"),
+    (r"(^|[;&|(\s])ps\s+(aux|-e|-f|-o)|\bpgrep\b|\bpkill\b", "tabela de processos",
+     "sem namespace de PID a lição vê os processos da máquina de quem estuda (medido: 60 contra os 6 do lab)"),
+    (r"/proc/\d|/proc/\$", "/proc",
+     "o /proc do host descreve outra máquina"),
+    (r"\bdpkg\b|\bapt-get\b|(^|\s)apt\s", "gestor de pacotes",
+     "responde sobre os pacotes do host, não sobre os 118 da imagem"),
+)
+
+
+def valida_motor_de_validacao(licoes) -> None:
+    """
+    Reprova a lição que precisa de container e não declarou `exige_container`.
+
+    Existe porque esquecer é o modo de falha provável e o sintoma é um "✔"
+    verde: o motor rápido responde sobre o host sem nunca acusar nada. É a
+    mesma regra da decisão 12 do DESIGN-VOIP — "passou" e "mediu outra coisa"
+    não podem imprimir a mesma linha.
+    """
+    marcadas = 0
+    for arq, l in licoes:
+        lab = l.get("lab") or {}
+        if lab.get("imagem", IMAGEM_COM_ARVORE_FALSA) != IMAGEM_COM_ARVORE_FALSA:
+            continue  # imagem própria já vai ao container por outro caminho
+        if lab.get("exige_container"):
+            marcadas += 1
+            continue
+
+        lid = l.get("id", "?")
+        veredito = [l.get("solucao_referencia") or ""]
+        veredito += [c.get("script", "") for c in l.get("verificar") or []]
+        qualquer = veredito + [lab.get("setup") or "", lab.get("break") or ""]
+
+        for regex, nome, porque in MARCADORES_NO_VEREDITO:
+            if any(re.search(regex, corpo) for corpo in veredito):
+                erro(f"{lid}: usa '{nome}' no veredito sem declarar 'lab.exige_container: true' "
+                     f"— {porque}")
+        for regex, nome, porque in MARCADORES_EM_QUALQUER_BLOCO:
+            if any(re.search(regex, corpo) for corpo in qualquer):
+                erro(f"{lid}: usa '{nome}' sem declarar 'lab.exige_container: true' "
+                     f"— {porque}")
+
+    if marcadas:
+        ok(f"{marcadas} lição(ões) de linux-base declaram exige_container e vão ao container")
+
+
 def valida_sintaxe(licoes) -> int:
     total = 0
 
@@ -549,9 +625,17 @@ def exercita_no_container(l: dict, solucao: str) -> bool | None:
                       f"(rode: npm run imagens) — NÃO foi exercitada")
         return None
 
+    # O padrão TEM de ser o mesmo do schema (`/home/aluno`), e já foi `/root`.
+    # Com `/root` o validador exercitava a lição num diretório em que o usuário
+    # `aluno` não entra — `cd` para lá falha e todo caminho relativo devolve
+    # `Permission denied` ao tentar atravessar. As lições de PBX e VoIP não
+    # notaram porque todas declaram `workdir: /root` e rodam como root; quem
+    # pagou foi a primeira lição de `linux-base` a exigir container e usar
+    # caminho relativo. Divergir do schema aqui é o validador medir um ambiente
+    # que o aluno nunca vê.
     criado = docker([
         "run", "-d", "--rm", *argumentos_do_lab(lab),
-        "-w", lab.get("workdir", "/root"),
+        "-w", lab.get("workdir", "/home/aluno"),
         "--entrypoint", "sleep", imagem, "900",
     ], timeout=120)
     if criado.returncode != 0:
@@ -622,8 +706,11 @@ def valida_execucao(licoes) -> tuple[int, int]:
             avisos.append(f"{lid}: usa check por 'run' (dentro da imagem) — não foi exercitada")
             continue
 
-        # Lição de imagem própria não tem árvore falsa possível: vai ao container.
-        if (l.get("lab") or {}).get("imagem", IMAGEM_COM_ARVORE_FALSA) != IMAGEM_COM_ARVORE_FALSA:
+        # Vai ao container quando a imagem não tem árvore falsa equivalente, ou
+        # quando a lição declara que a árvore falsa mentiria sobre ela.
+        lab_da_licao = l.get("lab") or {}
+        if (lab_da_licao.get("imagem", IMAGEM_COM_ARVORE_FALSA) != IMAGEM_COM_ARVORE_FALSA
+                or lab_da_licao.get("exige_container")):
             resultado = exercita_no_container(l, solucao)
             if resultado is None:
                 sem_ambiente += 1
@@ -712,6 +799,12 @@ def main() -> int:
 
     secao("ensina antes de pedir")
     valida_grafo_de_conceitos(licoes)
+
+    secao("motor de validação declarado")
+    antes = len(falhas)
+    valida_motor_de_validacao(licoes)
+    if len(falhas) == antes:
+        ok("nenhuma lição de linux-base mede estado que a árvore falsa não tem")
 
     secao("sintaxe bash")
     total = valida_sintaxe(licoes)
